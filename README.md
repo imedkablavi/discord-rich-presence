@@ -92,7 +92,7 @@ We believe your status should enhance your social presence, not leak your person
 ### 🐧 Linux / macOS (Source)
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/discord-rich-presence.git
+    git clone https://github.com/imedkablavi/discord-rich-presence.git
     cd discord-rich-presence
     ```
 2.  Install dependencies:
