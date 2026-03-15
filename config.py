@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 
 DEFAULT_CONFIG = {
     'discord': {
-        'client_id': '1437867564762923028',  # Default App ID
+        'client_id': '',  # Requires User Configuration
         'buttons': []
     },
     'privacy': {

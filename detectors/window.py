@@ -75,11 +75,15 @@ class WindowDetector:
             props = result.stdout
             
             # Parse properties
+            pid = self._extract_pid(props)
+            cwd = self._get_cwd_from_pid(pid) if pid else None
+            
             window_info = {
                 'window_id': window_id,
                 'app_name': self._extract_wm_class(props),
                 'title': self._extract_wm_name(props),
-                'pid': self._extract_pid(props)
+                'pid': pid,
+                'cwd': cwd
             }
             
             return window_info
@@ -234,6 +238,17 @@ class WindowDetector:
                         return int(parts[1].strip())
                     except ValueError:
                         pass
+        return None
+    
+    @staticmethod
+    def _get_cwd_from_pid(pid: int) -> Optional[str]:
+        """Get current working directory for a given PID"""
+        try:
+            cwd_link = f'/proc/{pid}/cwd'
+            if os.path.islink(cwd_link):
+                return os.readlink(cwd_link)
+        except Exception:
+            pass
         return None
     
     @staticmethod
