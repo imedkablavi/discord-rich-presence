@@ -57,7 +57,7 @@ class ModernControlPanel(ctk.CTk):
         # App Logo / Title
         self.logo_label = ctk.CTkLabel(
             self.sidebar_frame, 
-            text="DRP Manager\nPro Edition", 
+            text="DRP Manager\nControl Panel", 
             font=ctk.CTkFont(size=24, weight="bold")
         )
         self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
@@ -208,10 +208,10 @@ class ModernControlPanel(ctk.CTk):
         id_frame = ctk.CTkFrame(self.settings_frame)
         id_frame.pack(fill="x", padx=30, pady=10)
         
-        ctk.CTkLabel(id_frame, text="Discord Client ID (Advanced):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(20, 5))
-        self.client_id_var = tk.StringVar(value=str(self.config.get('discord.client_id', '1437867564762923028')))
-        ctk.CTkEntry(id_frame, textvariable=self.client_id_var, width=350, state="disabled").pack(anchor="w", padx=20, pady=5)
-        ctk.CTkLabel(id_frame, text="Using official CYBREX@TECH Application ID. No changes needed.", text_color="gray").pack(anchor="w", padx=20, pady=(0, 20))
+        ctk.CTkLabel(id_frame, text="Discord Client ID:", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(20, 5))
+        self.client_id_var = tk.StringVar(value=str(self.config.get('discord.client_id', '')))
+        ctk.CTkEntry(id_frame, textvariable=self.client_id_var, width=350).pack(anchor="w", padx=20, pady=5)
+        ctk.CTkLabel(id_frame, text="You must provide your own Discord Developer Application ID.", text_color="gray").pack(anchor="w", padx=20, pady=(0, 20))
 
         # Buttons
         btn_frame = ctk.CTkFrame(self.settings_frame)
@@ -245,18 +245,18 @@ class ModernControlPanel(ctk.CTk):
         cred_frame = ctk.CTkFrame(self.about_frame)
         cred_frame.pack(fill="x", padx=30, pady=10)
         
-        ctk.CTkLabel(cred_frame, text="Developed by CYBREX@TECH", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(20, 5))
-        link = ctk.CTkLabel(cred_frame, text="SITE: imedkablavi.info", text_color="#3498db", cursor="hand2", font=ctk.CTkFont(size=14, underline=True))
+        ctk.CTkLabel(cred_frame, text="Open Source Project", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(20, 5))
+        link = ctk.CTkLabel(cred_frame, text="GitHub Repository", text_color="#3498db", cursor="hand2", font=ctk.CTkFont(size=14, underline=True))
         link.pack(pady=(0, 20))
-        link.bind("<Button-1>", lambda e: webbrowser.open("https://imedkablavi.info"))
+        link.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/"))
         
         # Legal Text
         legal_text = """
 TERMS OF USE
 ----------------
 This software is provided "as is", without warranty of any kind. 
-By using this software, you agree that the developer (CYBREX@TECH) 
-is not liable for any damages or account issues arising from its use.
+By using this software, you agree that the developers are not
+liable for any damages or account issues arising from its use.
 
 PRIVACY POLICY
 ----------------
@@ -269,7 +269,7 @@ PRIVACY POLICY
 
 LICENSE
 ----------------
-Copyright (c) 2024 CYBREX@TECH. All rights reserved.
+Copyright (c) 2024 Open Source Contributors. All rights reserved.
 MIT License (See LICENSE file for full details).
         """
         
@@ -338,7 +338,7 @@ MIT License (See LICENSE file for full details).
             try:
                 # Reset config logic here (simplified)
                 self.config.data = {
-                    'discord': {'client_id': '1437867564762923028', 'buttons': []},
+                    'discord': {'client_id': '', 'buttons': []},
                     'privacy': {'mode': 'balanced', 'hide_home_paths': True},
                     'system': {'auto_start': False, 'start_minimized': False},
                     'rules': {'enabled_detectors': {'gaming': True, 'coding': True, 'browser': True, 'media': True, 'terminal': True}}

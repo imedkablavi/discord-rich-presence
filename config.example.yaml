@@ -1,62 +1,62 @@
 # Discord Rich Presence Service Configuration
-# نسخ هذا الملف إلى ~/.config/discord-rich-presence/config.yaml
+# Copy this file to ~/.config/discord-rich-presence/config.yaml
 
-# إعدادات Discord
+# Discord Settings
 discord:
-  # معرف تطبيق Discord الخاص بك
-  # احصل عليه من: https://discord.com/developers/applications
-  client_id: "123456789"
+  # Your Discord Application ID
+  # Required. Get it from: https://discord.com/developers/applications
+  client_id: ""
   
-  # أزرار (حتى 2)
+  # Up to 2 buttons that will appear on your Discord profile.
+  # Note: Buttons will be disabled when privacy mode is set to 'strict'.
   buttons:
-    - label: "Website"
-      url: "https://imedkablavi.info"
+    - label: "My Website"
+      url: "https://example.com"
     - label: "GitHub"
-      url: "https://github.com/imedkablavi"
+      url: "https://github.com/example"
 
-# إعدادات الخصوصية
+# Privacy Settings
 privacy:
-  # وضع الخصوصية: off | balanced | strict
-  # off: عرض كل التفاصيل
-  # balanced: إخفاء المسارات الكاملة، عرض أسماء المشاريع والامتدادات فقط
-  # strict: عرض أوصاف عامة فقط
+  # Privacy mode: off | balanced | strict
+  # off: Display all context (filenames, full project names, URLs).
+  # balanced: Hide full system paths and sensitive tokens, show file explicitly.
+  # strict: Hide file names, directories, and URLs completely. Generalizations only.
   mode: balanced
   
-  # أنماط regex للبيانات الحساسة
+  # Custom regex patterns for redaction
   redactions:
     - regex: '(?i)(password|token|secret|key|api[_-]?key)\S*'
-    - regex: '([A-Fa-f0-9]{32,})'  # سلاسل hex طويلة
+    - regex: '([A-Fa-f0-9]{32,})'  # Long hex tokens
   
-  # إخفاء مسارات المنزل (/home/user)
+  # Hide your user directory (e.g. C:/Users/name -> ~)
   hide_home_paths: true
 
-# فترة التحديث بالثواني
-update_interval_secs: 7
+# How often presence is checked (in seconds)
+update_interval_secs: 5
 
-# أسماء الصور (يجب أن تطابق Art Assets في Discord)
+# Image Asset Mappings (Used via Discord Developer Portal)
+# These strings must match the keys you uploaded in your Discord App.
 images:
   browser: "browser"
   video: "video"
   terminal: "terminal"
   code: "code"
   app: "app"
-  # خرائط أيقونات التطبيقات (يجب رفع Art Assets بهذه الأسماء)
+  
+  # Application-specific icon mapping
   apps:
     explorer: "explorer"
     chrome: "chrome"
     edge: "edge"
     firefox: "firefox"
     brave: "brave"
-    opera: "opera"
-    vivaldi: "vivaldi"
     vscode: "vscode"
     code: "vscode"
     pycharm: "pycharm"
-    trae: "trae"
     powershell: "powershell"
     cmd: "cmd"
   
-  # أيقونات اللغات
+  # Language Extension Mappings
   langs:
     python: "py"
     javascript: "js"
@@ -68,31 +68,39 @@ images:
     rust: "rust"
     php: "php"
     ruby: "ruby"
-    swift: "swift"
-    kotlin: "kotlin"
-    dart: "dart"
     html: "html"
     css: "css"
     json: "json"
     yaml: "yaml"
     markdown: "md"
 
-# قواعد الكشف
+# Application Rules
 rules:
-  # نطاقات YouTube
+  # Specific recognizable browser patterns
   youtube_domains:
     - "YouTube"
     - "youtu.be"
   
-  # علامات التصفح الخاص
+  # Patterns indicating Private / Incognito browsing
   private_markers:
     - "Incognito"
     - "Private Browsing"
     - "InPrivate"
   
-  # تفعيل/تعطيل الكاشفات
+  # Explicitly enable or disable detectors
   enabled_detectors:
     media: true
     terminal: true
     coding: true
     browser: true
+
+# Manual Status Override
+override:
+  enabled: false
+  details: "Custom Status"
+  state: "Doing something cool"
+  large_image_key: "app"
+  large_text: "Custom Large Text"
+  small_image_key: ""
+  small_text: ""
+  use_start_timestamp: true
