@@ -15,7 +15,6 @@ class PrivacyRedactor:
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self.mode = config.get('privacy.mode', 'balanced')
         self.redaction_patterns = self._compile_redaction_patterns()
         self.hide_home_paths = config.get('privacy.hide_home_paths', True)
     

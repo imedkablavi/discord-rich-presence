@@ -7,6 +7,8 @@ from .browser import BrowserDetector
 from .terminal import TerminalDetector
 from .coding import CodingDetector
 from .media import MediaDetector
+from .gaming import GamingDetector
+from .git_helper import GitHelper
 
 __all__ = [
     'WindowDetector',
@@ -14,4 +16,6 @@ __all__ = [
     'TerminalDetector',
     'CodingDetector',
     'MediaDetector',
+    'GamingDetector',
+    'GitHelper',
 ]

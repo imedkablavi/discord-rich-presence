@@ -70,7 +70,6 @@ class GamingDetector:
         'eldenring': 'Elden Ring',
         'darksouls': 'Dark Souls',
         'sekiro': 'Sekiro',
-        'minecraft': 'Minecraft',
         'amongus': 'Among Us',
         'stardewvalley': 'Stardew Valley',
         'hollowknight': 'Hollow Knight',

@@ -147,8 +147,7 @@ class DiscordRichPresenceService:
                     if b.get('label') and b.get('url')
                 ]
             if override.get('use_start_timestamp'):
-                import time as _t
-                payload['start'] = int(_t.time())
+                payload['start'] = int(time.time())
             # Party info
             party_id = override.get('party_id') or None
             party_cur = override.get('party_current') or 0
