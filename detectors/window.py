@@ -240,11 +240,11 @@ class WindowDetector:
     def _command_exists(command: str) -> bool:
         """Check if a command exists in PATH"""
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ['which', command],
                 capture_output=True,
                 timeout=1
             )
-            return True
-        except:
+            return result.returncode == 0
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             return False

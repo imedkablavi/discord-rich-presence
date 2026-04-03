@@ -33,6 +33,13 @@ privacy:
 # فترة التحديث بالثواني
 update_interval_secs: 7
 
+# إعدادات النظام
+system:
+  # بدء التطبيق مصغرًا في علبة النظام
+  start_minimized: false
+  # تشغيل تلقائي مع بدء النظام (Windows: يستخدم السجل)
+  auto_start: false
+
 # أسماء الصور (يجب أن تطابق Art Assets في Discord)
 images:
   browser: "browser"
@@ -76,6 +83,30 @@ images:
     json: "json"
     yaml: "yaml"
     markdown: "md"
+  
+  # أيقونات مشغلات الوسائط
+  players:
+    spotify: "spotify"
+    vlc: "vlc"
+    chrome: "chrome"
+    edge: "edge"
+    firefox: "firefox"
+    mpv: "mpv"
+  
+  # أيقونات المواقع
+  sites:
+    youtube: "youtube"
+    netflix: "netflix"
+    hulu: "hulu"
+    prime video: "prime"
+  
+  # أيقونات الألعاب
+  games:
+    league of legends: "lol"
+    valorant: "valorant"
+    minecraft: "minecraft"
+    fortnite: "fortnite"
+    apex legends: "apex"
 
 # قواعد الكشف
 rules:
@@ -96,3 +127,35 @@ rules:
     terminal: true
     coding: true
     browser: true
+    # تعطيل كشف الألعاب افتراضياً (فعّله إذا كنت لاعباً)
+    gaming: false
+  
+  # قائمة السماح (فارغة = السماح للكل)
+  whitelist:
+    apps: []
+    sites: []
+    games: []
+  
+  # قائمة الحظر
+  blacklist:
+    apps: []
+    sites: []
+    games: []
+
+# تجاوز يدوي للحالة (Override)
+# فعّل هذا لتعيين حالة ثابتة وتجاهل الكشف التلقائي
+override:
+  enabled: false
+  details: "العمل على مشروع رائع"
+  state: "مشغول جداً"
+  use_start_timestamp: false
+  large_image_key: ""
+  large_text: ""
+  small_image_key: ""
+  small_text: ""
+  # أزرار مخصصة للتجاوز (حتى 2)
+  buttons: []
+  # معلومات الحفلة (Party)
+  party_id: ""
+  party_current: 0
+  party_max: 0

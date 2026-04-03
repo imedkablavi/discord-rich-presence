@@ -3,6 +3,7 @@ Discord Rich Presence payload builder
 """
 
 import time
+import urllib.parse
 from typing import Dict, Any, Optional, List
 from config import Config
 from privacy import PrivacyRedactor
@@ -239,12 +240,11 @@ class PresenceBuilder:
             # Generic URL support for other platforms
             elif payload.get('url'):
                 # Extract domain or platform name
-                import urllib.parse
                 try:
                     domain = urllib.parse.urlparse(payload['url']).netloc.replace('www.', '')
                     platform = domain.split('.')[0].title()
                     buttons.append({'label': f'Open {platform}', 'url': payload['url']})
-                except:
+                except (ValueError, AttributeError):
                     buttons.append({'label': 'Open Link', 'url': payload['url']})
                 
         if buttons:

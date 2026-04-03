@@ -5,7 +5,11 @@ import webbrowser
 import threading
 import sys
 import os
-import winreg
+try:
+    import winreg
+    _WINREG_AVAILABLE = True
+except ImportError:
+    _WINREG_AVAILABLE = False
 from PIL import Image
 
 # Import Config
@@ -367,6 +371,8 @@ MIT License (See LICENSE file for full details).
 
     def _update_autostart_registry(self, enable):
         """Update Windows Registry for Auto-Start"""
+        if not _WINREG_AVAILABLE:
+            return
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
             app_name = "DiscordRichPresence"
@@ -402,6 +408,8 @@ MIT License (See LICENSE file for full details).
 
     def _check_registry_autostart(self):
         """Check if registry key exists and sync UI"""
+        if not _WINREG_AVAILABLE:
+            return
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
             try:
