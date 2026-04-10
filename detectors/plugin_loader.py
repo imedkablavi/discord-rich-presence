@@ -40,7 +40,12 @@ class PluginDetectorManager:
             self.logger.info(f"Plugin directory not found: {plugins_dir}")
             return
 
-        enabled = {str(x).strip().lower() for x in (self.config.get('plugins.enabled', []) or []) if str(x).strip()}
+        enabled = {
+            item.lower()
+            for x in (self.config.get('plugins.enabled', []) or [])
+            for item in [str(x).strip()]
+            if item
+        }
 
         for path in sorted(plugins_dir.glob('*.py')):
             if path.name.startswith('_'):

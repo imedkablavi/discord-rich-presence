@@ -14,11 +14,13 @@ except Exception:
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+DEFAULT_DISCORD_CLIENT_ID = '1437867564762923028'
+
 
 DEFAULT_CONFIG = {
     'discord': {
         'client_id': '',  # Optional; service will fallback automatically
-        'fallback_client_ids': ['1437867564762923028'],
+        'fallback_client_ids': [DEFAULT_DISCORD_CLIENT_ID],
         'buttons': []
     },
     'privacy': {

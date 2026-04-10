@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any
 
 from pypresence import Presence, DiscordNotFound, InvalidID, InvalidPipe
 
-from config import Config
+from config import Config, DEFAULT_DISCORD_CLIENT_ID
 from presence import PresenceBuilder
 from tray_icon import run_with_tray
 from detectors.window import WindowDetector
@@ -61,7 +61,7 @@ class DiscordRichPresenceService:
             if str(x).strip()
         ]
         candidates = []
-        for cid in [user_client_id, *fallback_ids, '1437867564762923028']:
+        for cid in [user_client_id, *fallback_ids, DEFAULT_DISCORD_CLIENT_ID]:
             if cid and cid not in candidates:
                 candidates.append(cid)
 

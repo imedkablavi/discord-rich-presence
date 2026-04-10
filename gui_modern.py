@@ -14,7 +14,7 @@ from PIL import Image
 
 # Import Config
 try:
-    from config import Config
+    from config import Config, DEFAULT_DISCORD_CLIENT_ID
 except ImportError:
     import importlib.util
     _p = os.path.join(os.path.dirname(__file__), 'config.py')
@@ -22,10 +22,18 @@ except ImportError:
     _mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     Config = _mod.Config
+    DEFAULT_DISCORD_CLIENT_ID = _mod.DEFAULT_DISCORD_CLIENT_ID
 
 # Set initial Theme defaults before app init
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
+
+THEME_TO_CONFIG = {
+    "Blue": "blue",
+    "Green": "green",
+    "Dark-Blue": "dark-blue",
+}
+CONFIG_TO_THEME = {v: k for k, v in THEME_TO_CONFIG.items()}
 
 class ModernControlPanel(ctk.CTk):
     def __init__(self, config: Config):
@@ -311,12 +319,14 @@ MIT License (See LICENSE file for full details).
         ctk.set_appearance_mode(new_appearance_mode)
 
     def change_color_theme_event(self, new_color_theme: str):
-        ctk.set_default_color_theme(new_color_theme.lower())
+        ctk.set_default_color_theme(THEME_TO_CONFIG.get(new_color_theme, 'blue'))
 
     def _apply_saved_theme(self):
         appearance_mode = str(self.config.get('ui.appearance_mode', 'System') or 'System')
-        color_theme = str(self.config.get('ui.color_theme', 'blue') or 'blue')
-        color_theme_title = color_theme.title() if color_theme != 'dark-blue' else 'Dark-Blue'
+        color_theme = str(self.config.get('ui.color_theme', 'blue') or 'blue').lower()
+        if color_theme not in CONFIG_TO_THEME:
+            color_theme = 'blue'
+        color_theme_title = CONFIG_TO_THEME[color_theme]
         ctk.set_appearance_mode(appearance_mode)
         ctk.set_default_color_theme(color_theme)
         self._appearance_mode_value = appearance_mode
@@ -334,7 +344,7 @@ MIT License (See LICENSE file for full details).
             self.config.set('system.start_minimized', self.q_tray.get())
             self.config.set('system.auto_start', self.q_autostart.get())
             self.config.set('ui.appearance_mode', self.appearance_mode_menu.get())
-            self.config.set('ui.color_theme', self.color_theme_menu.get().lower())
+            self.config.set('ui.color_theme', THEME_TO_CONFIG.get(self.color_theme_menu.get(), 'blue'))
             
             # Apply Registry Autostart
             self._update_autostart_registry(self.q_autostart.get())
@@ -369,7 +379,7 @@ MIT License (See LICENSE file for full details).
             try:
                 # Reset config logic here (simplified)
                 self.config.data = {
-                    'discord': {'client_id': '', 'fallback_client_ids': ['1437867564762923028'], 'buttons': []},
+                    'discord': {'client_id': '', 'fallback_client_ids': [DEFAULT_DISCORD_CLIENT_ID], 'buttons': []},
                     'privacy': {'mode': 'balanced', 'hide_home_paths': True},
                     'system': {'auto_start': False, 'start_minimized': False},
                     'ui': {'appearance_mode': 'System', 'color_theme': 'blue'},
