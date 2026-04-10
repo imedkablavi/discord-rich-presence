@@ -3,9 +3,11 @@
 
 # إعدادات Discord
 discord:
-  # معرف تطبيق Discord الخاص بك
-  # احصل عليه من: https://discord.com/developers/applications
-  client_id: "123456789"
+  # معرف تطبيق Discord اختياري
+  # إذا تركته فارغًا سيتم استخدام App ID افتراضي تلقائيًا
+  client_id: ""
+  fallback_client_ids:
+    - "1437867564762923028"
   
   # أزرار (حتى 2)
   buttons:
@@ -30,8 +32,8 @@ privacy:
   # إخفاء مسارات المنزل (/home/user)
   hide_home_paths: true
 
-# فترة التحديث بالثواني
-update_interval_secs: 7
+# فترة التحديث بالثواني (منخفضة لسرعة الاستجابة)
+update_interval_secs: 2
 
 # إعدادات النظام
 system:
@@ -39,6 +41,11 @@ system:
   start_minimized: false
   # تشغيل تلقائي مع بدء النظام (Windows: يستخدم السجل)
   auto_start: false
+
+# إعدادات الواجهة (لوحة التحكم)
+ui:
+  appearance_mode: "System" # System | Light | Dark
+  color_theme: "blue"       # blue | green | dark-blue
 
 # أسماء الصور (يجب أن تطابق Art Assets في Discord)
 images:
@@ -129,6 +136,8 @@ rules:
     browser: true
     # تعطيل كشف الألعاب افتراضياً (فعّله إذا كنت لاعباً)
     gaming: false
+    # كاشفات المجتمع (Plugins)
+    plugins: true
   
   # قائمة السماح (فارغة = السماح للكل)
   whitelist:
@@ -141,6 +150,15 @@ rules:
     apps: []
     sites: []
     games: []
+
+# نظام الإضافات (Community Plugins)
+plugins:
+  # اتركه فارغاً لاستخدام المسار الافتراضي:
+  # ~/.config/discord-rich-presence/plugins (أو AppData على ويندوز)
+  directory: ""
+  # قائمة بيضاء لأسماء ملفات الإضافات (بدون .py)
+  # [] = تحميل كل الإضافات
+  enabled: []
 
 # تجاوز يدوي للحالة (Override)
 # فعّل هذا لتعيين حالة ثابتة وتجاهل الكشف التلقائي

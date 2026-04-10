@@ -23,7 +23,7 @@ except ImportError:
     _spec.loader.exec_module(_mod)
     Config = _mod.Config
 
-# Set Theme
+# Set initial Theme defaults before app init
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
@@ -32,6 +32,7 @@ class ModernControlPanel(ctk.CTk):
         super().__init__()
 
         self.config = config
+        self._apply_saved_theme()
         self.title("Discord Rich Presence - Professional Edition")
         self.geometry("1100x750")
         self.minsize(900, 600)
@@ -42,6 +43,8 @@ class ModernControlPanel(ctk.CTk):
 
         # Create Navigation Sidebar
         self._create_sidebar()
+        self.appearance_mode_menu.set(getattr(self, '_appearance_mode_value', 'System'))
+        self.color_theme_menu.set(getattr(self, '_color_theme_value', 'Blue'))
 
         # Create Main Area
         self.main_frames = {}
@@ -84,6 +87,15 @@ class ModernControlPanel(ctk.CTk):
             command=self.change_appearance_mode_event
         )
         self.appearance_mode_menu.grid(row=8, column=0, padx=20, pady=(10, 20))
+
+        self.color_theme_label = ctk.CTkLabel(self.sidebar_frame, text="Color Theme:", anchor="w")
+        self.color_theme_label.grid(row=9, column=0, padx=20, pady=(0, 0))
+        self.color_theme_menu = ctk.CTkOptionMenu(
+            self.sidebar_frame,
+            values=["Blue", "Green", "Dark-Blue"],
+            command=self.change_color_theme_event
+        )
+        self.color_theme_menu.grid(row=10, column=0, padx=20, pady=(10, 20))
         
         # Save Button
         self.save_btn = ctk.CTkButton(
@@ -94,7 +106,7 @@ class ModernControlPanel(ctk.CTk):
             font=ctk.CTkFont(weight="bold"),
             command=self.save_settings
         )
-        self.save_btn.grid(row=9, column=0, padx=20, pady=20)
+        self.save_btn.grid(row=11, column=0, padx=20, pady=20)
 
     def _create_nav_btn(self, text, name, row):
         btn = ctk.CTkButton(
@@ -168,6 +180,7 @@ class ModernControlPanel(ctk.CTk):
             'browser': ('Web Browsers (Chrome, Edge, etc.)', bool(enabled.get('browser', True))),
             'media': ('Media Players (VLC, Spotify)', bool(enabled.get('media', True))),
             'terminal': ('Terminal / Console', bool(enabled.get('terminal', True))),
+            'plugins': ('Community Plugins', bool(enabled.get('plugins', True))),
         }
         
         for key, (label, val) in self.detectors_vars.items():
@@ -213,9 +226,9 @@ class ModernControlPanel(ctk.CTk):
         id_frame.pack(fill="x", padx=30, pady=10)
         
         ctk.CTkLabel(id_frame, text="Discord Client ID (Advanced):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(20, 5))
-        self.client_id_var = tk.StringVar(value=str(self.config.get('discord.client_id', '1437867564762923028')))
+        self.client_id_var = tk.StringVar(value=str(self.config.get('discord.client_id', '')))
         ctk.CTkEntry(id_frame, textvariable=self.client_id_var, width=350, state="disabled").pack(anchor="w", padx=20, pady=5)
-        ctk.CTkLabel(id_frame, text="Using official CYBREX@TECH Application ID. No changes needed.", text_color="gray").pack(anchor="w", padx=20, pady=(0, 20))
+        ctk.CTkLabel(id_frame, text="Application ID is optional. A built-in fallback is used automatically.", text_color="gray").pack(anchor="w", padx=20, pady=(0, 20))
 
         # Buttons
         btn_frame = ctk.CTkFrame(self.settings_frame)
@@ -297,6 +310,18 @@ MIT License (See LICENSE file for full details).
     def change_appearance_mode_event(self, new_appearance_mode: str):
         ctk.set_appearance_mode(new_appearance_mode)
 
+    def change_color_theme_event(self, new_color_theme: str):
+        ctk.set_default_color_theme(new_color_theme.lower())
+
+    def _apply_saved_theme(self):
+        appearance_mode = str(self.config.get('ui.appearance_mode', 'System') or 'System')
+        color_theme = str(self.config.get('ui.color_theme', 'blue') or 'blue')
+        color_theme_title = color_theme.title() if color_theme != 'dark-blue' else 'Dark-Blue'
+        ctk.set_appearance_mode(appearance_mode)
+        ctk.set_default_color_theme(color_theme)
+        self._appearance_mode_value = appearance_mode
+        self._color_theme_value = color_theme_title
+
     def save_settings(self):
         try:
             # Validate URL
@@ -308,6 +333,8 @@ MIT License (See LICENSE file for full details).
             # System
             self.config.set('system.start_minimized', self.q_tray.get())
             self.config.set('system.auto_start', self.q_autostart.get())
+            self.config.set('ui.appearance_mode', self.appearance_mode_menu.get())
+            self.config.set('ui.color_theme', self.color_theme_menu.get().lower())
             
             # Apply Registry Autostart
             self._update_autostart_registry(self.q_autostart.get())
@@ -342,10 +369,12 @@ MIT License (See LICENSE file for full details).
             try:
                 # Reset config logic here (simplified)
                 self.config.data = {
-                    'discord': {'client_id': '1437867564762923028', 'buttons': []},
+                    'discord': {'client_id': '', 'fallback_client_ids': ['1437867564762923028'], 'buttons': []},
                     'privacy': {'mode': 'balanced', 'hide_home_paths': True},
                     'system': {'auto_start': False, 'start_minimized': False},
-                    'rules': {'enabled_detectors': {'gaming': True, 'coding': True, 'browser': True, 'media': True, 'terminal': True}}
+                    'ui': {'appearance_mode': 'System', 'color_theme': 'blue'},
+                    'plugins': {'directory': '', 'enabled': []},
+                    'rules': {'enabled_detectors': {'gaming': True, 'coding': True, 'browser': True, 'media': True, 'terminal': True, 'plugins': True}}
                 }
                 self.config.save()
                 messagebox.showinfo("Reset Complete", "Settings have been reset. Please restart the application.")
@@ -426,6 +455,8 @@ if __name__ == "__main__":
     try:
         cfg = Config()
         app = ModernControlPanel(cfg)
+        app.appearance_mode_menu.set(getattr(app, '_appearance_mode_value', 'System'))
+        app.color_theme_menu.set(getattr(app, '_color_theme_value', 'Blue'))
         app.mainloop()
     except Exception as e:
         import traceback

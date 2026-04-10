@@ -1,0 +1,1 @@
+"""Community detector plugins package."""

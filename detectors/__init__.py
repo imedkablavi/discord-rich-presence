@@ -9,6 +9,7 @@ from .coding import CodingDetector
 from .media import MediaDetector
 from .gaming import GamingDetector
 from .git_helper import GitHelper
+from .plugin_loader import PluginDetectorManager
 
 __all__ = [
     'WindowDetector',
@@ -17,5 +18,6 @@ __all__ = [
     'CodingDetector',
     'MediaDetector',
     'GamingDetector',
+    'PluginDetectorManager',
     'GitHelper',
 ]

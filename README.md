@@ -110,23 +110,42 @@ The service uses a `config.yaml` file for persistent settings. You can modify th
 
 ```yaml
 discord:
-  client_id: "YOUR_CLIENT_ID" # Optional: Use your own App ID
+  client_id: "" # Optional: leave empty to use built-in fallback App ID automatically
+  fallback_client_ids:
+    - "1437867564762923028"
+ui:
+  appearance_mode: "System" # System | Light | Dark
+  color_theme: "blue" # blue | green | dark-blue
+plugins:
+  directory: "" # Optional custom plugin folder; defaults to ~/.config/discord-rich-presence/plugins
+  enabled: [] # Empty list = load all plugins in plugin directory
 privacy:
   mode: "balanced" # off | balanced | strict
   hide_home_paths: true
+update_interval_secs: 2
 rules:
   enabled_detectors:
     coding: true
     media: true
     browser: true
+    plugins: true
 ```
+
+### 🔌 Community Detector Plugins
+
+Drop `.py` files in your plugin directory (default: `~/.config/discord-rich-presence/plugins`).  
+Each plugin must expose either:
+- `detect(window_info, config)` function, or
+- `Plugin` class with a `detect(window_info, config)` method
+
+Return an activity dictionary compatible with the existing presence builder (for example with `type`, `details`, `state`, and image keys).
 
 ## 🗺️ Roadmap
 
 *   [ ] **v2.1:** Browser Extension for 100% accurate URL tracking.
 *   [ ] **v2.2:** Cloud Settings Sync (Encrypted).
-*   [ ] **v2.3:** Custom Themes for Control Panel.
-*   [ ] **v3.0:** Plugin System for community detectors.
+*   [x] **v2.3:** Custom Themes for Control Panel.
+*   [x] **v3.0:** Plugin System for community detectors.
 
 ## 🤝 Contributing
 

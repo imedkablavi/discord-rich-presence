@@ -23,6 +23,7 @@ from detectors.terminal import TerminalDetector
 from detectors.coding import CodingDetector
 from detectors.media import MediaDetector
 from detectors.gaming import GamingDetector
+from detectors.plugin_loader import PluginDetectorManager
 
 
 class DiscordRichPresenceService:
@@ -45,6 +46,7 @@ class DiscordRichPresenceService:
         self.coding_detector = CodingDetector(config)
         self.media_detector = MediaDetector(config)
         self.gaming_detector = GamingDetector(config)
+        self.plugin_detector = PluginDetectorManager(config)
         self.presence_builder = PresenceBuilder(config)
         
         # Setup logging
@@ -52,29 +54,41 @@ class DiscordRichPresenceService:
     
     def connect_discord(self) -> bool:
         """Connect to Discord RPC with error handling"""
-        try:
-            client_id = self.config.get('discord.client_id')
-            if not client_id:
-                self.logger.error("Discord client_id not configured")
-                return False
-            
-            self.rpc = Presence(client_id)
-            self.rpc.connect()
-            self.connected = True
-            self.reconnect_delay = 5
-            self.logger.info("Connected to Discord RPC")
-            return True
-            
-        except (DiscordNotFound, InvalidID, InvalidPipe) as e:
-            self.logger.error(f"Failed to connect to Discord: {e}")
-            self.logger.debug(traceback.format_exc())
-            self.connected = False
+        user_client_id = str(self.config.get('discord.client_id', '') or '').strip()
+        fallback_ids = [
+            str(x).strip()
+            for x in (self.config.get('discord.fallback_client_ids', []) or [])
+            if str(x).strip()
+        ]
+        candidates = []
+        for cid in [user_client_id, *fallback_ids, '1437867564762923028']:
+            if cid and cid not in candidates:
+                candidates.append(cid)
+
+        if not candidates:
+            self.logger.error("No Discord client IDs available")
             return False
-        except Exception as e:
-            self.logger.error(f"Unexpected error connecting to Discord: {e}")
-            self.logger.debug(traceback.format_exc())
-            self.connected = False
-            return False
+
+        for client_id in candidates:
+            try:
+                self.rpc = Presence(client_id)
+                self.rpc.connect()
+                self.connected = True
+                self.reconnect_delay = 5
+                if user_client_id and client_id == user_client_id:
+                    self.logger.info("Connected to Discord RPC")
+                else:
+                    self.logger.info(f"Connected to Discord RPC using fallback client ID: {client_id}")
+                return True
+            except (DiscordNotFound, InvalidID, InvalidPipe) as e:
+                self.logger.warning(f"Discord connection failed with client ID {client_id}: {e}")
+                self.logger.debug(traceback.format_exc())
+            except Exception as e:
+                self.logger.warning(f"Unexpected Discord connection error with client ID {client_id}: {e}")
+                self.logger.debug(traceback.format_exc())
+
+        self.connected = False
+        return False
     
     def disconnect_discord(self):
         """Safely disconnect from Discord RPC"""
@@ -121,6 +135,7 @@ class DiscordRichPresenceService:
                 if not hasattr(self, '_last_config_mtime') or current_mtime != self._last_config_mtime:
                     self.config.load(self.config.config_path)
                     self._last_config_mtime = current_mtime
+                    self.plugin_detector.reload()
         except Exception:
             pass
         
@@ -200,8 +215,13 @@ class DiscordRichPresenceService:
                 return self.presence_builder.build(browser_activity)
             else:
                 return None
+
+        # Priority 6: Community plugins
+        plugin_activity = self.plugin_detector.detect(window_info)
+        if plugin_activity:
+            return self.presence_builder.build(plugin_activity)
         
-        # Priority 6: Generic application
+        # Priority 7: Generic application
         generic_activity = {
             'type': 'application',
             'app_name': window_info.get('app_name', 'Unknown'),
@@ -262,7 +282,7 @@ class DiscordRichPresenceService:
             if not self.connect_discord():
                 self.logger.error("Failed to connect to Discord. Retrying...")
         
-        update_interval = self.config.get('update_interval_secs', 5)
+        update_interval = max(1.0, float(self.config.get('update_interval_secs', 2)))
         
         import threading
         if not hasattr(self, '_stop_event'):
@@ -279,11 +299,12 @@ class DiscordRichPresenceService:
                             self.reconnect_delay = 5
                         else:
                             # Exponential backoff on failure
-                            time.sleep(self.reconnect_delay)
                             self.reconnect_delay = min(
                                 self.reconnect_delay * 2,
                                 self.max_reconnect_delay
                             )
+                            if self._stop_event.wait(self.reconnect_delay):
+                                break
                             continue
                     
                     # Exit if --once flag is set
@@ -292,13 +313,15 @@ class DiscordRichPresenceService:
                         break
                     
                     # Wait for next update
-                    time.sleep(update_interval)
+                    if self._stop_event.wait(update_interval):
+                        break
                     
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
                     self.logger.error(f"Error in main loop: {e}", exc_info=True)
-                    time.sleep(update_interval)
+                    if self._stop_event.wait(update_interval):
+                        break
         
         except KeyboardInterrupt:
             self.logger.info("Received interrupt signal, shutting down")

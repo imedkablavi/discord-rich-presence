@@ -17,7 +17,8 @@ from typing import Any, Dict, Optional
 
 DEFAULT_CONFIG = {
     'discord': {
-        'client_id': '1437867564762923028',  # Default App ID
+        'client_id': '',  # Optional; service will fallback automatically
+        'fallback_client_ids': ['1437867564762923028'],
         'buttons': []
     },
     'privacy': {
@@ -28,10 +29,14 @@ DEFAULT_CONFIG = {
         ],
         'hide_home_paths': True
     },
-    'update_interval_secs': 5,  # Faster update by default
+    'update_interval_secs': 2,  # Lower latency updates by default
     'system': {
         'start_minimized': False,
         'auto_start': False
+    },
+    'ui': {
+        'appearance_mode': 'System',  # System | Light | Dark
+        'color_theme': 'blue'  # blue | green | dark-blue
     },
     'images': {
         'browser': 'browser',
@@ -110,7 +115,8 @@ DEFAULT_CONFIG = {
             'terminal': True,
             'coding': True,
             'browser': True,
-            'gaming': True
+            'gaming': True,
+            'plugins': True
         },
         'whitelist': {
             'apps': [],
@@ -122,6 +128,10 @@ DEFAULT_CONFIG = {
             'sites': [],
             'games': []
         }
+    },
+    'plugins': {
+        'directory': '',
+        'enabled': []
     },
     'override': {
         'enabled': False,

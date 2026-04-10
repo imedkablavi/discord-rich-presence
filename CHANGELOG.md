@@ -1,5 +1,19 @@
 # Changelog - Discord Rich Presence Service
 
+## Version 2.3.0 - Themes, Plugins, and Auto App ID (Apr 2026)
+
+### ✅ Added
+- Custom control panel color themes (Blue, Green, Dark-Blue) with persistence
+- Community detector plugin system with dynamic loading from plugin directory
+- Plugin detector enable/disable support via configuration
+
+### ✅ Improved
+- Discord App ID is now optional and falls back automatically to built-in IDs
+- Lower default update interval for faster presence refresh
+- Main loop waits are now interruptible to reduce perceived delay
+
+---
+
 ## Version 2.0.0 - Windows Support & Complete Feature Set (Nov 2025)
 
 ### 🎉 Major Updates
