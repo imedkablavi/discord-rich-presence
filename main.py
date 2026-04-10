@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any
 
 from pypresence import Presence, DiscordNotFound, InvalidID, InvalidPipe
 
-from config import Config, DEFAULT_DISCORD_CLIENT_ID
+from config import Config, DEFAULT_DISCORD_CLIENT_ID, DEFAULT_UPDATE_INTERVAL_SECS
 from presence import PresenceBuilder
 from tray_icon import run_with_tray
 from detectors.window import WindowDetector
@@ -284,7 +284,10 @@ class DiscordRichPresenceService:
             if not self.connect_discord():
                 self.logger.error("Failed to connect to Discord. Retrying...")
         
-        update_interval = max(MIN_UPDATE_INTERVAL_SECS, float(self.config.get('update_interval_secs', 2)))
+        update_interval = max(
+            MIN_UPDATE_INTERVAL_SECS,
+            float(self.config.get('update_interval_secs', DEFAULT_UPDATE_INTERVAL_SECS))
+        )
         
         import threading
         if not hasattr(self, '_stop_event'):

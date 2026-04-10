@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 DEFAULT_DISCORD_CLIENT_ID = '1437867564762923028'
+DEFAULT_UPDATE_INTERVAL_SECS = 2
 
 
 DEFAULT_CONFIG = {
@@ -31,7 +32,7 @@ DEFAULT_CONFIG = {
         ],
         'hide_home_paths': True
     },
-    'update_interval_secs': 2,  # Lower latency updates by default
+    'update_interval_secs': DEFAULT_UPDATE_INTERVAL_SECS,  # Lower latency updates by default
     'system': {
         'start_minimized': False,
         'auto_start': False
