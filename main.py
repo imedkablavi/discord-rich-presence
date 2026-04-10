@@ -25,6 +25,8 @@ from detectors.media import MediaDetector
 from detectors.gaming import GamingDetector
 from detectors.plugin_loader import PluginDetectorManager
 
+MIN_UPDATE_INTERVAL_SECS = 1.0
+
 
 class DiscordRichPresenceService:
     """Main service class for Discord Rich Presence updates"""
@@ -282,7 +284,7 @@ class DiscordRichPresenceService:
             if not self.connect_discord():
                 self.logger.error("Failed to connect to Discord. Retrying...")
         
-        update_interval = max(1.0, float(self.config.get('update_interval_secs', 2)))
+        update_interval = max(MIN_UPDATE_INTERVAL_SECS, float(self.config.get('update_interval_secs', 2)))
         
         import threading
         if not hasattr(self, '_stop_event'):

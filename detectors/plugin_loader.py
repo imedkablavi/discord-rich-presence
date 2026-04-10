@@ -9,6 +9,8 @@ from typing import Optional, Dict, Any, List, Callable
 
 from config import Config
 
+DEFAULT_PLUGIN_PRIORITY = 50
+
 
 class PluginDetectorManager:
     """Loads and executes community detector plugins."""
@@ -75,7 +77,7 @@ class PluginDetectorManager:
                     self.logger.warning(f"Plugin '{plugin_name}' missing callable detect()")
                     continue
 
-                priority = int(getattr(module, 'PRIORITY', 50))
+                priority = int(getattr(module, 'PRIORITY', DEFAULT_PLUGIN_PRIORITY))
                 display_name = str(getattr(module, 'NAME', plugin_name))
 
                 self.plugins.append({
