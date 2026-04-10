@@ -455,8 +455,6 @@ if __name__ == "__main__":
     try:
         cfg = Config()
         app = ModernControlPanel(cfg)
-        app.appearance_mode_menu.set(getattr(app, '_appearance_mode_value', 'System'))
-        app.color_theme_menu.set(getattr(app, '_color_theme_value', 'Blue'))
         app.mainloop()
     except Exception as e:
         import traceback
