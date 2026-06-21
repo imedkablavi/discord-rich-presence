@@ -28,3 +28,21 @@ Thumbs.db
 
 # Local config (keep example, ignore personal config)
 config.yaml
+
+# Local secrets and generated files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+id_ed25519
+credentials.json
+token.json
+secrets.json
+serviceAccount*.json
+firebase-adminsdk*.json
+node_modules/
+.next/
+coverage/
+**pycache**/
