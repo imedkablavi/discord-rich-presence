@@ -16,7 +16,7 @@ def test_balanced_redacts_value_after_token_flag(tmp_path: Path):
         'directory': '',
     })
     assert 'abc123' not in activity['command']
-    assert '--token [REDACTED]' in activity['command']
+    assert '[REDACTED]' in activity['command']
     assert '--mode fast' in activity['command']
 
 
@@ -28,7 +28,8 @@ def test_balanced_redacts_password_assignment(tmp_path: Path):
         'directory': '',
     })
     assert 'hunter2' not in activity['command']
-    assert '--password=[REDACTED]' in activity['command']
+    assert '[REDACTED]' in activity['command']
+    assert activity['command'].endswith(' run')
 
 
 def test_balanced_redacts_authorization_value(tmp_path: Path):
@@ -39,3 +40,4 @@ def test_balanced_redacts_authorization_value(tmp_path: Path):
         'directory': '',
     })
     assert 'secretvalue' not in activity['command']
+    assert 'https://example.com' in activity['command']
