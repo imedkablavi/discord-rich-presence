@@ -1,4 +1,4 @@
-"""Foreground-window detection for Windows, Linux/X11, and Sway."""
+"""Foreground-window detection for Windows, Linux/X11, Sway, and KDE Plasma Wayland."""
 
 import json
 import logging
@@ -17,6 +17,7 @@ class WindowDetector:
         self.platform_name = platform.system().lower()
         self.windows_detector = None
         self.session_type = ''
+        self.desktop = ''
 
         if self.platform_name == 'windows':
             try:
@@ -27,6 +28,7 @@ class WindowDetector:
                 self.logger.error('Windows foreground-window detector unavailable: %s', e)
         elif self.platform_name == 'linux':
             self.session_type = os.environ.get('XDG_SESSION_TYPE', 'x11').lower()
+            self.desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
             self.logger.info('Detected Linux session type: %s', self.session_type)
         else:
             self.logger.warning(
@@ -86,9 +88,16 @@ class WindowDetector:
         return None
 
     def _get_active_window_wayland(self) -> Optional[Dict[str, Any]]:
-        """Support Sway/wlroots only; never guess foreground state from process lists."""
+        """Use compositor-native tools and never guess foreground state from process lists."""
         if self._command_exists('swaymsg'):
             return self._get_sway_window()
+        if 'kde' in self.desktop and self._command_exists('kdotool'):
+            return self._get_kde_window()
+        if 'kde' in self.desktop:
+            self.logger.debug(
+                'KDE Plasma Wayland detected but kdotool is unavailable; install kdotool for foreground-window detection'
+            )
+            return None
         self.logger.debug(
             'Reliable foreground-window detection is unavailable for this Wayland compositor'
         )
@@ -118,6 +127,49 @@ class WindowDetector:
             self.logger.debug('Sway detection failed: %s', e)
             return None
 
+    def _get_kde_window(self) -> Optional[Dict[str, Any]]:
+        """Read the active KDE Plasma window using kdotool's stable query commands."""
+        try:
+            result = subprocess.run(
+                [
+                    'kdotool',
+                    'getactivewindow',
+                    'getwindowclassname',
+                    'getwindowname',
+                    'getwindowpid',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if result.returncode != 0:
+                self.logger.debug('kdotool failed: %s', result.stderr.strip())
+                return None
+
+            lines = result.stdout.splitlines()
+            if len(lines) < 3:
+                self.logger.debug('Unexpected kdotool output: %r', result.stdout)
+                return None
+
+            app_name = lines[0].strip() or 'Unknown'
+            title = '\n'.join(lines[1:-1]).strip()
+            try:
+                pid = int(lines[-1].strip()) if lines[-1].strip() else None
+            except ValueError:
+                pid = None
+
+            return {
+                'app_name': app_name,
+                'title': title,
+                'pid': pid,
+            }
+        except subprocess.TimeoutExpired:
+            self.logger.debug('kdotool timed out while reading the active window')
+        except Exception as e:
+            self.logger.debug('KDE Plasma detection failed: %s', e)
+        return None
+
     def _find_focused_node(self, node: Dict) -> Optional[Dict]:
         if node.get('focused'):
             return node
@@ -135,7 +187,7 @@ class WindowDetector:
             parts = line.split('=', 1)
             if len(parts) <= 1:
                 continue
-            values = parts[1].strip().strip('"').split('", "')
+            values = parts[1].strip().strip('"').split('\", \"')
             if len(values) > 1:
                 return values[1].strip('"')
             if values:
