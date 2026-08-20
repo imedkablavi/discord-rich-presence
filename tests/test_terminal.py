@@ -24,11 +24,19 @@ def test_pid_specific_command_is_preferred_over_global_cache(tmp_path):
     assert detector._get_last_command(os.getpid()) == 'focused-command'
 
 
-def test_falls_back_to_legacy_global_cache_when_no_pid_match(tmp_path):
+def test_falls_back_to_legacy_global_cache_when_no_pid_scoped_hooks_exist(tmp_path):
     detector = _detector(tmp_path)
     detector.cmd_file.write_text('legacy-command\n', encoding='utf-8')
 
     assert detector._get_last_command(99999999) == 'legacy-command'
+
+
+def test_does_not_leak_global_command_when_other_pid_hook_is_active(tmp_path):
+    detector = _detector(tmp_path)
+    detector.cmd_file.write_text('terminal-a-secret\n', encoding='utf-8')
+    (detector.command_dir / '424242.txt').write_text('terminal-a-secret\n', encoding='utf-8')
+
+    assert detector._get_last_command(99999999) == ''
 
 
 def test_stale_command_cache_is_not_published(tmp_path):
