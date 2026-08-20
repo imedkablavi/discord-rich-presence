@@ -9,9 +9,14 @@
 - Align payload timestamps and clickable URLs with `pypresence 4.6.2`.
 - Add Discord activity types for listening, watching, and playing.
 - Add single-instance locking, runtime heartbeat/status, and graceful stop requests.
-- Stabilize media timelines to avoid unnecessary RPC updates during normal playback.
+- Stabilize media timelines so Discord renders the live elapsed/remaining timer without RPC updates on every scan.
+- Prefer `playerctl` for Linux MPRIS media detection, with pydbus/PyGObject retained as a fallback.
+- Add KDE Plasma Wayland foreground-window detection through `kdotool` and keep Sway support through `swaymsg`.
+- Reduce the default activity detection interval from 5 seconds to 2 seconds while continuing to send RPC updates only when the payload changes.
+- Normalize reverse-domain application IDs such as KDE app IDs into readable Rich Presence labels.
 - Isolate terminal command caches per shell PID and avoid cross-terminal command leakage.
 - Improve editor-title parsing for hyphenated filenames and Windows paths.
+- Reduce Git enrichment to two bounded Git subprocesses per lookup.
 - Remove unreliable process-list guessing for generic Wayland sessions.
 - Keep unsupported platforms from falling through to X11 detection.
 
@@ -19,6 +24,8 @@
 
 - Rebuild configuration from defaults on hot reload and validate critical settings.
 - Make `off`, `balanced`, and `strict` privacy behavior consistent with the UI and documentation.
+- Redact values following sensitive terminal flags such as token/password/authorization arguments in Balanced mode.
+- Drop inferred browser links when their source title required privacy redaction, preventing encoded values from surviving in generated URLs.
 - Validate privacy regexes, detector flags, button/override URLs, terminal cache TTL, and party values.
 - Add lock-screen suppression and a separate toggle for generic application activity.
 - Make GUI settings changes transactional when validation fails.
@@ -36,7 +43,9 @@
 
 - Set the supported Python baseline to 3.10+.
 - Add pytest regression tests and GitHub Actions QA on Windows/Ubuntu with Python 3.10/3.12.
-- Add a PyInstaller build check for the Windows executable.
+- Syntax-check Bash and Zsh terminal hooks in a dedicated Linux CI job.
+- Add a PyInstaller build check and packaged executable smoke test for Windows pull requests.
+- Smoke-test the Windows executable again inside the release workflow before publishing it.
 - Add tagged GitHub Releases with SHA-256 checksums.
 - Add security, privacy, troubleshooting, and contribution documentation.
 - Add Dependabot and structured bug/feature issue templates.
