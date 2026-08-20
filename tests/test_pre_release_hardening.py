@@ -92,3 +92,80 @@ def test_reverse_domain_kde_app_id_is_displayed_cleanly(tmp_path: Path):
     })
     assert payload['details'] == 'Dolphin active'
     assert payload['large_text'] == 'Dolphin'
+    assert payload['large_image'] == 'https://cdn.simpleicons.org/kdeplasma'
+
+
+def test_browser_large_artwork_represents_browser_and_service_is_secondary(tmp_path: Path):
+    payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
+        'type': 'browser',
+        'browser_name': 'Brave',
+        'is_private': False,
+        'page_title': 'Example video',
+        'service': 'YouTube',
+        'url': 'https://www.youtube.com/results?search_query=Example%20video',
+    })
+    assert payload['large_image'] == 'https://cdn.simpleicons.org/brave'
+    assert payload['large_text'] == 'Brave'
+    assert payload['small_image'] == 'https://cdn.simpleicons.org/youtube'
+    assert payload['small_text'] == 'YouTube'
+
+
+def test_browser_media_uses_actual_browser_icon(tmp_path: Path):
+    payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
+        'type': 'media',
+        'player': 'brave',
+        'title': 'Artist - Track',
+        'is_playing': True,
+        'position': 10,
+        'duration': 321,
+    })
+    assert payload['large_image'] == 'https://cdn.simpleicons.org/brave'
+    assert payload['large_text'] == 'Brave'
+    assert payload['state'] == 'Brave'
+
+
+def test_coding_large_artwork_represents_editor(tmp_path: Path):
+    payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
+        'type': 'coding',
+        'editor': 'VS Code',
+        'filename': 'main.py',
+        'language': 'python',
+        'project': 'demo',
+    })
+    assert payload['large_image'] == 'https://cdn.simpleicons.org/visualstudiocode'
+    assert payload['large_text'] == 'VS Code'
+    assert payload['small_image'] == 'py'
+
+
+def test_terminal_large_artwork_represents_terminal_app(tmp_path: Path):
+    payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
+        'type': 'terminal',
+        'terminal_name': 'Konsole',
+        'shell': 'bash',
+        'command': '',
+        'directory': '',
+    })
+    assert payload['large_image'] == 'https://cdn.simpleicons.org/kdeplasma'
+    assert payload['large_text'] == 'Konsole'
+
+
+def test_icon_override_wins_over_builtin_external_icon(tmp_path: Path):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('images.icon_overrides', {'brave': 'my-brave-asset'})
+    payload = PresenceBuilder(cfg).build({
+        'type': 'application',
+        'app_name': 'brave',
+        'window_title': 'Brave',
+    })
+    assert payload['large_image'] == 'my-brave-asset'
+
+
+def test_external_icons_can_be_disabled_for_developer_portal_assets(tmp_path: Path):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('images.use_external_app_icons', False)
+    payload = PresenceBuilder(cfg).build({
+        'type': 'application',
+        'app_name': 'brave',
+        'window_title': 'Brave',
+    })
+    assert payload['large_image'] == 'brave'
