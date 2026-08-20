@@ -41,6 +41,24 @@ def test_polling_interval_boundaries_are_validated(tmp_path: Path):
         Config(too_fast)
 
 
+def test_application_icon_settings_are_validated(tmp_path: Path):
+    invalid_toggle = tmp_path / 'invalid-icon-toggle.yaml'
+    invalid_toggle.write_text(
+        'images:\n  use_external_app_icons: definitely\n',
+        encoding='utf-8',
+    )
+    with pytest.raises(ValueError, match='use_external_app_icons'):
+        Config(invalid_toggle)
+
+    invalid_override = tmp_path / 'invalid-icon-override.yaml'
+    invalid_override.write_text(
+        'images:\n  icon_overrides:\n    brave: 123\n',
+        encoding='utf-8',
+    )
+    with pytest.raises(ValueError, match='icon_overrides values'):
+        Config(invalid_override)
+
+
 def test_button_limits_are_validated(tmp_path: Path):
     path = tmp_path / 'config.yaml'
     path.write_text(
