@@ -60,6 +60,28 @@ def test_playerctl_backend_reads_playing_track_in_one_process(tmp_path: Path, mo
     assert calls[0][0:3] == ['playerctl', '--all-players', 'metadata']
 
 
+def test_browser_mpris_media_inherits_foreground_youtube_service(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr('platform.system', lambda: 'Linux')
+    monkeypatch.setattr('shutil.which', lambda command: '/usr/bin/playerctl' if command == 'playerctl' else None)
+
+    def fake_run(args, **kwargs):
+        sep = '\x1f'
+        line = sep.join(('brave.instance2', 'Playing', 'Artist', 'Track', '10000000', '240000000'))
+        return subprocess.CompletedProcess(args, 0, stdout=line + '\n', stderr='')
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    detector = MediaDetector(Config(tmp_path / 'config.yaml'))
+    activity = detector.detect({
+        'app_name': 'com.brave.Browser',
+        'title': 'Example video - YouTube — Brave',
+    })
+
+    assert activity is not None
+    assert activity['player'] == 'Brave'
+    assert activity['service'] == 'YouTube'
+    assert activity['is_playing'] is True
+
+
 def test_git_helper_parses_branch_status_with_two_queries(tmp_path: Path, monkeypatch):
     helper = GitHelper()
     calls = []
@@ -95,7 +117,7 @@ def test_reverse_domain_kde_app_id_is_displayed_cleanly(tmp_path: Path):
     assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=kde.org&sz=256'
 
 
-def test_browser_large_artwork_represents_browser_and_service_is_secondary(tmp_path: Path):
+def test_browser_service_is_primary_and_browser_is_secondary(tmp_path: Path):
     payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
         'type': 'browser',
         'browser_name': 'Brave',
@@ -104,13 +126,31 @@ def test_browser_large_artwork_represents_browser_and_service_is_secondary(tmp_p
         'service': 'YouTube',
         'url': 'https://www.youtube.com/results?search_query=Example%20video',
     })
-    assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=brave.com&sz=256'
-    assert payload['large_text'] == 'Brave'
-    assert payload['small_image'] == 'https://www.google.com/s2/favicons?domain=youtube.com&sz=256'
-    assert payload['small_text'] == 'YouTube'
+    assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=youtube.com&sz=256'
+    assert payload['large_text'] == 'YouTube'
+    assert payload['small_image'] == 'https://www.google.com/s2/favicons?domain=brave.com&sz=256'
+    assert payload['small_text'] == 'Brave'
+    assert payload['state'] == 'YouTube · Brave'
 
 
-def test_browser_media_uses_actual_browser_icon(tmp_path: Path):
+def test_youtube_media_is_primary_and_browser_is_secondary(tmp_path: Path):
+    payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
+        'type': 'media',
+        'player': 'Brave',
+        'service': 'YouTube',
+        'title': 'Artist - Track',
+        'is_playing': True,
+        'position': 10,
+        'duration': 321,
+    })
+    assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=youtube.com&sz=256'
+    assert payload['large_text'] == 'YouTube'
+    assert payload['small_image'] == 'https://www.google.com/s2/favicons?domain=brave.com&sz=256'
+    assert payload['small_text'] == 'Brave'
+    assert payload['state'] == 'YouTube · Brave'
+
+
+def test_browser_media_without_known_service_uses_browser_icon(tmp_path: Path):
     payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
         'type': 'media',
         'player': 'brave',
