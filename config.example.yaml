@@ -18,8 +18,9 @@ privacy:
     - regex: '([A-Fa-f0-9]{32,})'
   hide_home_paths: true
 
-# Valid range: 1-3600 seconds
-update_interval_secs: 5
+# How often foreground/media state is checked. RPC updates are sent only when
+# the resulting payload changes. Valid range: 0.5-3600 seconds.
+update_interval_secs: 2
 
 system:
   start_minimized: false
