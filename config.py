@@ -230,8 +230,8 @@ class Config:
         interval = data.get('update_interval_secs', 2)
         if isinstance(interval, bool) or not isinstance(interval, (int, float)):
             raise ValueError('update_interval_secs must be a number')
-        if interval < 0.5 or interval > 3600:
-            raise ValueError('update_interval_secs must be between 0.5 and 3600 seconds')
+        if interval < 1 or interval > 3600:
+            raise ValueError('update_interval_secs must be between 1 and 3600 seconds')
 
         system = data.get('system', {})
         if not isinstance(system, dict):
