@@ -12,6 +12,11 @@ from config import Config
 class MediaDetector:
     """Detect active media playback using platform-native session APIs."""
 
+    SERVICES = (
+        'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu',
+        'SoundCloud', 'Spotify', 'Twitch', 'GitHub'
+    )
+
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
@@ -58,7 +63,8 @@ class MediaDetector:
 
         if self.platform_name == 'windows':
             if self.windows_media_available and self.windows_detector:
-                return self.windows_detector.detect(window_info)
+                activity = self.windows_detector.detect(window_info)
+                return self._enrich_with_foreground_service(activity, window_info)
             return None
 
         if self.platform_name != 'linux':
@@ -67,7 +73,7 @@ class MediaDetector:
         if self.playerctl_available:
             activity = self._detect_playerctl()
             if activity:
-                return activity
+                return self._enrich_with_foreground_service(activity, window_info)
 
         if not self.dbus_available:
             return None
@@ -82,6 +88,7 @@ class MediaDetector:
                 activity = self._get_player_activity(player_name)
                 if not activity:
                     continue
+                activity = self._enrich_with_foreground_service(activity, window_info)
                 if activity.get('is_playing'):
                     return activity
                 if paused is None:
@@ -144,6 +151,56 @@ class MediaDetector:
             self.logger.debug('playerctl media detection failed: %s', e)
         return None
 
+    def _enrich_with_foreground_service(
+        self,
+        activity: Optional[Dict[str, Any]],
+        window_info: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Attach a known foreground web service when it matches the media app."""
+        if not activity or not window_info:
+            return activity
+
+        player = str(activity.get('player', '')).lower()
+        app_name = str(window_info.get('app_name', '')).lower()
+        title = str(window_info.get('title', ''))
+
+        # Only decorate browser-backed media when the focused browser is also
+        # the MPRIS player. This avoids labelling background Brave/YouTube media
+        # as YouTube while the user is focused on an unrelated application.
+        browser_aliases = {
+            'brave': ('brave',),
+            'chrome': ('chrome', 'google-chrome'),
+            'chromium': ('chromium',),
+            'firefox': ('firefox',),
+            'edge': ('edge', 'msedge'),
+            'opera': ('opera',),
+            'vivaldi': ('vivaldi',),
+        }
+        matched_browser = False
+        for browser, aliases in browser_aliases.items():
+            if browser in player and any(alias in app_name for alias in aliases):
+                matched_browser = True
+                break
+        if not matched_browser:
+            return activity
+
+        service = self._detect_service(title)
+        if service:
+            enriched = activity.copy()
+            enriched['service'] = service
+            return enriched
+        return activity
+
+    def _detect_service(self, raw_title: str) -> Optional[str]:
+        title_lower = str(raw_title or '').lower()
+        youtube_markers = self.config.get('rules.youtube_domains', []) or []
+        if any(str(marker).lower() in title_lower for marker in youtube_markers if marker):
+            return 'YouTube'
+        for service in self.SERVICES:
+            if service.lower() in title_lower:
+                return service
+        return None
+
     @staticmethod
     def _microseconds_to_seconds(value: Any) -> int:
         try:
@@ -159,6 +216,8 @@ class MediaDetector:
             'vlc': 'VLC', 'spotify': 'Spotify', 'chromium': 'Chromium',
             'chrome': 'Chrome', 'firefox': 'Firefox', 'mpv': 'MPV',
             'rhythmbox': 'Rhythmbox', 'clementine': 'Clementine',
+            'brave': 'Brave', 'edge': 'Edge', 'msedge': 'Edge',
+            'opera': 'Opera', 'vivaldi': 'Vivaldi',
         }
         for key, name in player_names.items():
             if key in lower_name:
