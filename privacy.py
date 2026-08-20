@@ -11,6 +11,12 @@ from config import Config
 class PrivacyRedactor:
     """Apply the documented off/balanced/strict privacy contracts."""
 
+    SENSITIVE_ARG_MARKERS = (
+        'password', 'passwd', 'token', 'secret', 'api_key', 'api-key',
+        'apikey', 'auth', 'authorization', 'access_key', 'access-key',
+        'private_key', 'private-key',
+    )
+
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
@@ -98,12 +104,28 @@ class PrivacyRedactor:
         parts = command.split()
         if not parts:
             return command
+
         redacted = [parts[0]]
+        redact_next = False
         for part in parts[1:]:
-            lower = part.lower()
-            if any(keyword in lower for keyword in ('password', 'token', 'secret', 'key', 'api')):
+            if redact_next:
                 redacted.append('[REDACTED]')
-            elif self._looks_like_path(part):
+                redact_next = False
+                continue
+
+            lower = part.lower()
+            normalized = lower.lstrip('-/').replace('.', '_')
+            sensitive = any(marker in normalized for marker in self.SENSITIVE_ARG_MARKERS)
+            if sensitive:
+                if '=' in part or ':' in part and not part.startswith(('http://', 'https://')):
+                    name = re.split(r'[=:]', part, maxsplit=1)[0]
+                    redacted.append(f'{name}=[REDACTED]')
+                else:
+                    redacted.append(part if part.startswith('-') else '[REDACTED]')
+                    redact_next = True
+                continue
+
+            if self._looks_like_path(part):
                 redacted.append(self._basename(part))
             elif len(part) > 32 and '=' not in part:
                 redacted.append('[...]')
@@ -120,7 +142,6 @@ class PrivacyRedactor:
         if self.hide_home_paths:
             home = str(Path.home())
             redacted = redacted.replace(home, '~')
-            # Windows paths can arrive with either slash style.
             redacted = redacted.replace(home.replace('/', '\\'), '~')
         return re.sub(r'\b[A-Za-z0-9_-]{40,}\b', '[TOKEN]', redacted)
 
