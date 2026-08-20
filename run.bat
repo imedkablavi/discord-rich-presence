@@ -24,11 +24,10 @@ if not exist ".venv\Scripts\python.exe" (
 
 call .venv\Scripts\activate.bat
 
-REM Only install when runtime imports are unavailable. This avoids a network/pip
-REM operation on every normal launch while still self-healing incomplete environments.
-python -c "import pypresence, yaml, customtkinter, pystray, PIL" >nul 2>&1
+REM Validate both imports and the pypresence version whose URL/timestamp API we use.
+python -c "import importlib.metadata as m; import yaml, customtkinter, pystray, PIL, psutil, win32gui; import winsdk.windows.media.control; assert m.version('pypresence') == '4.6.2'" >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Installing runtime dependencies...
+    echo [INFO] Repairing runtime dependencies...
     python -m pip install -r requirements.txt
     if errorlevel 1 goto :install_error
 )
