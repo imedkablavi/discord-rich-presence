@@ -61,8 +61,16 @@ class PrivacyRedactor:
                 result['filename'] = self._basename(str(result.get('filename', '')))
             if 'project' in result:
                 result['project'] = self._shorten_path(str(result.get('project', '') or ''))
-        elif activity_type == 'browser' and 'page_title' in result:
-            result['page_title'] = self._redact_sensitive_patterns(str(result.get('page_title', '')))
+        elif activity_type == 'browser':
+            raw_title = str(result.get('page_title', '') or '')
+            safe_title = self._redact_sensitive_patterns(raw_title)
+            result['page_title'] = safe_title
+            # Browser URLs are inferred from the raw window title. If the title
+            # needed privacy redaction, the percent-encoded URL may still contain
+            # the original secret even though a second text pass would not see it.
+            # Drop the inferred URL entirely in that case.
+            if safe_title != raw_title:
+                result['url'] = None
 
         for key, value in list(result.items()):
             if isinstance(value, str):
