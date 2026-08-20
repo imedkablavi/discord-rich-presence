@@ -82,3 +82,13 @@ def test_git_helper_parses_branch_status_with_two_queries(tmp_path: Path, monkey
     assert info['uncommitted'] == 2
     assert info['is_dirty'] is True
     assert len(calls) == 2
+
+
+def test_reverse_domain_kde_app_id_is_displayed_cleanly(tmp_path: Path):
+    payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
+        'type': 'application',
+        'app_name': 'org.kde.dolphin',
+        'window_title': 'Downloads — Dolphin',
+    })
+    assert payload['details'] == 'Dolphin active'
+    assert payload['large_text'] == 'Dolphin'
