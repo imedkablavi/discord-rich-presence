@@ -12,6 +12,8 @@
 python main.py --dry-run --once --verbose
 ```
 
+If the log says `Connected to Discord RPC` but no update payload is produced, the RPC connection is working and the next step is detector/platform troubleshooting rather than Discord authentication.
+
 ## The service is already running
 
 Only one service instance is allowed per user. The GUI, tray, `run.bat`, and startup entry all share the same runtime lock.
@@ -36,13 +38,38 @@ Restart the shell after installing the hook. The service uses per-shell PID cach
 
 ## Linux foreground detection
 
-X11 requires `xprop`, commonly shipped by `x11-utils`.
+X11 requires `xprop`, commonly shipped by `x11-utils` or the equivalent package for your distribution.
 
-Sway is supported through `swaymsg`. Other Wayland compositors may not expose a reliable foreground-window API; in that case the service returns no foreground activity instead of guessing from running processes.
+KDE Plasma Wayland uses `kdotool`. Verify it can read the focused window directly:
+
+```bash
+kdotool getactivewindow getwindowclassname getwindowname getwindowpid
+```
+
+Sway uses `swaymsg`. Other Wayland compositors may not expose a reliable foreground-window API; in that case the service returns no foreground activity instead of guessing from running processes.
 
 ## Media is not detected on Linux
 
-Linux media detection uses MPRIS over the desktop D-Bus session. Confirm the player exposes an `org.mpris.MediaPlayer2.*` service and that the service is running in the same desktop session.
+Linux media detection prefers `playerctl` and falls back to pydbus/PyGObject when available. Confirm `playerctl` can see a playing MPRIS session:
+
+```bash
+playerctl --all-players status
+playerctl --all-players metadata --format '{{playerName}} | {{artist}} | {{title}} | {{position}} | {{mpris:length}}'
+```
+
+If `playerctl` is unavailable, the pydbus fallback also needs PyGObject (`gi`) to be importable by the same Python environment that runs the service. Installing the `pydbus` wheel alone does not guarantee that `gi` is available inside a virtual environment.
+
+## Activity changes feel delayed
+
+`update_interval_secs` controls local polling. The default is 2 seconds and the supported range is 1-3600 seconds. Existing configuration files keep their saved value, so an older config may still contain `5`.
+
+Check Linux configuration with:
+
+```bash
+grep -n 'update_interval_secs' ~/.config/discord-rich-presence/config.yaml
+```
+
+Setting it to `1` gives the fastest supported polling. Discord RPC updates are still sent only when the resulting payload changes.
 
 ## Windows packaged build does not start
 
