@@ -54,25 +54,40 @@ class PresenceBuilder:
         title = str(activity.get('title', 'Unknown'))
         player = str(activity.get('player', 'Media Player'))
         player_display = self._display_app_name(player)
+        service = str(activity.get('service', '') or '')
         is_playing = bool(activity.get('is_playing', False))
         position = max(0, int(activity.get('position', 0) or 0))
         duration = max(0, int(activity.get('duration', 0) or 0))
 
+        listening = player.lower() == 'spotify' or service.lower() == 'spotify'
         details = (
-            f"{'Listening' if player.lower() == 'spotify' else 'Watching'} · {title}"
+            f"{'Listening' if listening else 'Watching'} · {title}"
             if is_playing else f"Paused · {title}"
         )
-        state = player_display
+        state = f"{service} · {player_display}" if service else player_display
         if not is_playing and duration > 0:
-            state = f"{player_display} · {self._format_time(position)}/{self._format_time(duration)}"
+            state = f"{state} · {self._format_time(position)}/{self._format_time(duration)}"
 
+        service_image = self._resolve_service_image(service) if service else None
+        player_image = self._resolve_media_image(player, player_display)
         payload: Dict[str, Any] = {
-            'activity_type': ActivityType.LISTENING if player.lower() == 'spotify' else ActivityType.WATCHING,
+            'activity_type': ActivityType.LISTENING if listening else ActivityType.WATCHING,
             'details': details[:128],
             'state': state[:128],
-            'large_image': self._resolve_media_image(player, player_display),
-            'large_text': player_display[:128],
+            'large_image': service_image or player_image,
+            'large_text': (service or player_display)[:128],
         }
+
+        if service and service.lower() != player_display.lower():
+            configured_player = self._configured_app_image(player, player_display)
+            small_image = self.icons.resolve_optional(
+                player,
+                player_display,
+                configured=configured_player,
+            )
+            if small_image:
+                payload['small_image'] = small_image
+                payload['small_text'] = player_display[:128]
 
         if is_playing:
             start_ms, end_ms = self._get_media_timeline(player, title, position, duration)
@@ -80,7 +95,7 @@ class PresenceBuilder:
             if end_ms is not None:
                 payload['end'] = end_ms
 
-        self._add_buttons(payload)
+        self._add_buttons(payload, service=service)
         return payload
 
     def _get_media_timeline(
@@ -174,26 +189,32 @@ class PresenceBuilder:
         url = activity.get('url')
 
         details = "Private browsing" if is_private else (page_title or "Browsing")
-        state = browser_name if not service else f"{browser_name} · {service}"
+        state = browser_name if not service else f"{service} · {browser_name}"
+        browser_image = self.icons.resolve(
+            browser_name,
+            configured=self._configured_app_image(browser_name),
+            fallback=self.config.get('images.browser', 'browser'),
+        )
+        service_image = self._resolve_service_image(service) if service else None
+
         payload: Dict[str, Any] = {
             'activity_type': ActivityType.WATCHING if service in {'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu', 'Twitch'} else ActivityType.PLAYING,
             'details': details[:128],
             'state': state[:128],
-            # The large icon represents the application in use. Service/site art,
-            # when available, is shown as the smaller overlay instead.
-            'large_image': self.icons.resolve(
-                browser_name,
-                configured=self._configured_app_image(browser_name),
-                fallback=self.config.get('images.browser', 'browser'),
-            ),
-            'large_text': browser_name[:128],
+            'large_image': service_image or browser_image,
+            'large_text': (service or browser_name)[:128],
             'start': self._get_activity_start('browser', service or browser_name),
         }
-        if service:
-            site_image = self._resolve_service_image(service)
-            if site_image:
-                payload['small_image'] = site_image
-                payload['small_text'] = service[:128]
+
+        if service and service_image:
+            small_browser = self.icons.resolve_optional(
+                browser_name,
+                configured=self._configured_app_image(browser_name),
+            )
+            if small_browser:
+                payload['small_image'] = small_browser
+                payload['small_text'] = browser_name[:128]
+
         if url and not is_private and self.config.get('privacy.mode', 'balanced') != 'strict':
             payload['details_url'] = url
             payload['large_url'] = url
@@ -281,12 +302,12 @@ class PresenceBuilder:
         )
 
     def _resolve_service_image(self, service: str) -> Optional[str]:
+        if not service:
+            return None
         sites = self.config.get('images.sites', {}) or {}
         configured = None
         if isinstance(sites, dict):
             configured = sites.get(str(service).lower())
-        # Only known/configured services get a small overlay. Avoid inserting a
-        # generic fallback because the large image already represents the app.
         return self.icons.resolve_optional(service, configured=str(configured or ''))
 
     def _add_buttons(self, payload: Dict[str, Any], url: Optional[str] = None, service: str = ''):
