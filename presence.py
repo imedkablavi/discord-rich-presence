@@ -17,6 +17,7 @@ class PresenceBuilder:
         self.config = config
         self.redactor = PrivacyRedactor(config)
         self.activity_start_times: Dict[str, int] = {}
+        self.media_timelines: Dict[str, Dict[str, int]] = {}
 
     def reload(self):
         """Refresh cached privacy state after a config hot reload."""
@@ -59,14 +60,49 @@ class PresenceBuilder:
         }
 
         if is_playing:
-            now_ms = int(time.time() * 1000)
-            position_ms = position * 1000
-            payload['start'] = now_ms - position_ms
-            if duration > 0 and duration >= position:
-                payload['end'] = now_ms + ((duration - position) * 1000)
+            start_ms, end_ms = self._get_media_timeline(player, title, position, duration)
+            payload['start'] = start_ms
+            if end_ms is not None:
+                payload['end'] = end_ms
 
         self._add_buttons(payload)
         return payload
+
+    def _get_media_timeline(
+        self,
+        player: str,
+        title: str,
+        position: int,
+        duration: int,
+    ) -> tuple[int, Optional[int]]:
+        """Return a stable timeline, resetting it only for a track change or seek."""
+        now_sec = int(time.time())
+        key = f"{player}\0{title}\0{duration}"
+        timeline = self.media_timelines.get(key)
+
+        if timeline:
+            predicted_position = max(0, now_sec - timeline['start_sec'])
+            # A few seconds of drift are normal because players expose position at
+            # different precision. Larger differences are treated as a seek.
+            if abs(predicted_position - position) > 3:
+                timeline = None
+
+        if timeline is None:
+            start_sec = max(0, now_sec - position)
+            timeline = {'start_sec': start_sec, 'last_seen': now_sec}
+            self.media_timelines[key] = timeline
+        else:
+            timeline['last_seen'] = now_sec
+
+        # Keep this cache bounded; old tracks have no value once they disappear.
+        if len(self.media_timelines) > 10:
+            oldest = sorted(self.media_timelines, key=lambda k: self.media_timelines[k]['last_seen'])[:-10]
+            for old_key in oldest:
+                del self.media_timelines[old_key]
+
+        start_ms = timeline['start_sec'] * 1000
+        end_ms = (timeline['start_sec'] + duration) * 1000 if duration > 0 else None
+        return start_ms, end_ms
 
     def _build_terminal(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         command = str(activity.get('command', ''))
