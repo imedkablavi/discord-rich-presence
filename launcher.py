@@ -14,6 +14,11 @@ def main():
         app.mainloop()
         return
 
+    # A normal double-click on the packaged executable should leave the user
+    # with a visible tray control instead of starting a silent background process.
+    if getattr(sys, 'frozen', False) and len(sys.argv) == 1:
+        sys.argv.append('--tray')
+
     from main import main as service_main
     service_main()
 
