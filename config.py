@@ -1,9 +1,11 @@
-"""
-Configuration management for Discord Rich Presence Service
-"""
+"""Configuration management for Discord Rich Presence Service."""
 
+import copy
 import os
 import platform
+from pathlib import Path
+from typing import Any, Dict, Optional
+
 try:
     import yaml  # type: ignore
     _YAML_AVAILABLE = True
@@ -11,24 +13,22 @@ except Exception:
     yaml = None  # type: ignore
     _YAML_AVAILABLE = False
     import json
-from pathlib import Path
-from typing import Any, Dict, Optional
 
 
 DEFAULT_CONFIG = {
     'discord': {
-        'client_id': '1437867564762923028',  # Default App ID
+        'client_id': '1437867564762923028',
         'buttons': []
     },
     'privacy': {
-        'mode': 'balanced',  # off | balanced | strict
+        'mode': 'balanced',
         'redactions': [
             {'regex': r'(?i)(password|token|secret|key|api[_-]?key)\S*'},
-            {'regex': r'([A-Fa-f0-9]{32,})'},  # Long hex strings
+            {'regex': r'([A-Fa-f0-9]{32,})'},
         ],
         'hide_home_paths': True
     },
-    'update_interval_secs': 5,  # Faster update by default
+    'update_interval_secs': 5,
     'system': {
         'start_minimized': False,
         'auto_start': False
@@ -40,144 +40,96 @@ DEFAULT_CONFIG = {
         'code': 'code',
         'app': 'app',
         'apps': {
-            'explorer': 'explorer',
-            'chrome': 'chrome',
-            'msedge': 'edge',
-            'edge': 'edge',
-            'firefox': 'firefox',
-            'brave': 'brave',
-            'opera': 'opera',
-            'vivaldi': 'vivaldi',
-            'code': 'vscode',
-            'vs code': 'vscode',
-            'pycharm': 'pycharm',
-            'trae': 'trae',
-            'powershell': 'powershell',
-            'cmd': 'cmd'
+            'explorer': 'explorer', 'chrome': 'chrome', 'msedge': 'edge',
+            'edge': 'edge', 'firefox': 'firefox', 'brave': 'brave',
+            'opera': 'opera', 'vivaldi': 'vivaldi', 'code': 'vscode',
+            'vs code': 'vscode', 'pycharm': 'pycharm', 'trae': 'trae',
+            'powershell': 'powershell', 'cmd': 'cmd'
         },
         'langs': {
-            'python': 'py',
-            'javascript': 'js',
-            'typescript': 'ts',
-            'cpp': 'cpp',
-            'c': 'c',
-            'java': 'java',
-            'go': 'go',
-            'rust': 'rust',
-            'php': 'php',
-            'ruby': 'ruby',
-            'swift': 'swift',
-            'kotlin': 'kotlin',
-            'dart': 'dart',
-            'html': 'html',
-            'css': 'css',
-            'json': 'json',
-            'yaml': 'yaml',
-            'markdown': 'md',
-        }
-        ,
+            'python': 'py', 'javascript': 'js', 'typescript': 'ts',
+            'cpp': 'cpp', 'c': 'c', 'java': 'java', 'go': 'go',
+            'rust': 'rust', 'php': 'php', 'ruby': 'ruby', 'swift': 'swift',
+            'kotlin': 'kotlin', 'dart': 'dart', 'html': 'html', 'css': 'css',
+            'json': 'json', 'yaml': 'yaml', 'markdown': 'md'
+        },
         'players': {
-            'spotify': 'spotify',
-            'vlc': 'vlc',
-            'chrome': 'chrome',
-            'edge': 'edge',
-            'firefox': 'firefox',
-            'mpv': 'mpv',
+            'spotify': 'spotify', 'vlc': 'vlc', 'chrome': 'chrome',
+            'edge': 'edge', 'firefox': 'firefox', 'mpv': 'mpv',
             'windows media player': 'wmp'
         },
         'sites': {
-            'youtube': 'youtube',
-            'netflix': 'netflix',
-            'hulu': 'hulu',
+            'youtube': 'youtube', 'netflix': 'netflix', 'hulu': 'hulu',
             'prime video': 'prime'
         },
         'games': {
-            'league of legends': 'lol',
-            'valorant': 'valorant',
-            'minecraft': 'minecraft',
-            'rocket league': 'rocketleague',
-            'fortnite': 'fortnite',
-            'apex legends': 'apex',
-            'grand theft auto v': 'gtav',
-            'dota 2': 'dota2'
+            'league of legends': 'lol', 'valorant': 'valorant',
+            'minecraft': 'minecraft', 'rocket league': 'rocketleague',
+            'fortnite': 'fortnite', 'apex legends': 'apex',
+            'grand theft auto v': 'gtav', 'dota 2': 'dota2'
         }
     },
     'rules': {
         'youtube_domains': ['YouTube', 'youtu.be'],
         'private_markers': ['Incognito', 'Private Browsing', 'InPrivate'],
         'enabled_detectors': {
-            'media': True,
-            'terminal': True,
-            'coding': True,
-            'browser': True,
-            'gaming': True
+            'media': True, 'terminal': True, 'coding': True,
+            'browser': True, 'gaming': True
         },
-        'whitelist': {
-            'apps': [],
-            'sites': [],
-            'games': []
-        },
-        'blacklist': {
-            'apps': [],
-            'sites': [],
-            'games': []
-        }
+        'whitelist': {'apps': [], 'sites': [], 'games': []},
+        'blacklist': {'apps': [], 'sites': [], 'games': []}
     },
     'override': {
-        'enabled': False,
-        'details': '',
-        'state': '',
-        'use_start_timestamp': False,
-        'large_image_key': '',
-        'large_text': '',
-        'small_image_key': '',
-        'small_text': '',
-        'details_url': '',
-        'state_url': '',
-        'large_url': '',
-        'small_url': '',
-        'party_id': '',
-        'party_current': 0,
-        'party_max': 0,
-        'buttons': []
+        'enabled': False, 'details': '', 'state': '',
+        'use_start_timestamp': False, 'large_image_key': '',
+        'large_text': '', 'small_image_key': '', 'small_text': '',
+        'details_url': '', 'state_url': '', 'large_url': '', 'small_url': '',
+        'party_id': '', 'party_current': 0, 'party_max': 0, 'buttons': []
     }
 }
 
 
 class Config:
-    """Configuration manager with nested key access"""
-    
+    """Configuration manager with nested key access and safe hot reloads."""
+
     def __init__(self, config_path: Optional[Path] = None):
-        # Use platform-specific default path if not provided
         if config_path is None:
             config_path = self._get_default_config_path()
-        
         self.config_path = config_path
-        self.data = DEFAULT_CONFIG.copy()
-        
+        self.data = copy.deepcopy(DEFAULT_CONFIG)
         if config_path and config_path.exists():
             self.load(config_path)
-    
+
     def load(self, path: Path):
+        """Load from defaults + file, replacing the previous in-memory snapshot."""
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 if _YAML_AVAILABLE:
                     user_config = yaml.safe_load(f)  # type: ignore
                 else:
                     user_config = json.load(f)
-                if user_config:
-                    self._deep_update(self.data, user_config)
+
+            if user_config is None:
+                user_config = {}
+            if not isinstance(user_config, dict):
+                raise ValueError('Top-level configuration must be a mapping/object')
+
+            new_data = copy.deepcopy(DEFAULT_CONFIG)
+            self._deep_update(new_data, user_config)
+            self._validate(new_data)
+            self.data = new_data
+            self.config_path = path
         except Exception as e:
-            raise ValueError(f"Failed to load config from {path}: {e}")
-    
+            raise ValueError(f"Failed to load config from {path}: {e}") from e
+
     def save(self, path: Optional[Path] = None):
         save_path = path or self.config_path
         if not save_path:
             raise ValueError("No config path specified")
+
+        self._validate(self.data)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Atomic write: write to temp file then rename
-        tmp_path = save_path.with_suffix('.tmp')
+        tmp_path = save_path.with_suffix(save_path.suffix + '.tmp')
         try:
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 if _YAML_AVAILABLE:
@@ -185,85 +137,79 @@ class Config:
                 else:
                     import json as _json
                     _json.dump(self.data, f, ensure_ascii=False, indent=2)
-            
-            # Atomic rename with retry for Windows
-            import time
-            max_retries = 3
-            for i in range(max_retries):
-                try:
-                    if os.path.exists(save_path):
-                        os.replace(tmp_path, save_path)
-                    else:
-                        os.rename(tmp_path, save_path)
-                    break
-                except PermissionError:
-                    if i == max_retries - 1:
-                        raise
-                    time.sleep(0.1)
-                except OSError:
-                    # On Windows, os.replace might fail if destination exists
-                    if os.path.exists(save_path):
-                        os.remove(save_path)
-                    os.rename(tmp_path, save_path)
-                    break
+            os.replace(tmp_path, save_path)
         except Exception as e:
-            if tmp_path.exists():
-                try:
+            try:
+                if tmp_path.exists():
                     tmp_path.unlink()
-                except:
-                    pass
-            raise ValueError(f"Failed to save config to {save_path}: {e}")
-    
+            except OSError:
+                pass
+            raise ValueError(f"Failed to save config to {save_path}: {e}") from e
+
     def get(self, key: str, default: Any = None) -> Any:
-        """
-        Get configuration value using dot notation
-        Example: config.get('privacy.mode')
-        """
-        keys = key.split('.')
-        value = self.data
-        
-        for k in keys:
-            if isinstance(value, dict) and k in value:
-                value = value[k]
+        value: Any = self.data
+        for part in key.split('.'):
+            if isinstance(value, dict) and part in value:
+                value = value[part]
             else:
                 return default
-        
         return value
-    
+
     def set(self, key: str, value: Any):
-        """
-        Set configuration value using dot notation
-        Example: config.set('privacy.mode', 'strict')
-        """
         keys = key.split('.')
         data = self.data
-        
-        for k in keys[:-1]:
-            if k not in data or not isinstance(data[k], dict):
-                data[k] = {}
-            data = data[k]
-        
+        for part in keys[:-1]:
+            if part not in data or not isinstance(data[part], dict):
+                data[part] = {}
+            data = data[part]
         data[keys[-1]] = value
-    
-    def _deep_update(self, base: Dict, update: Dict):
-        """Recursively update nested dictionaries"""
+
+    @staticmethod
+    def _deep_update(base: Dict, update: Dict):
         for key, value in update.items():
             if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-                self._deep_update(base[key], value)
+                Config._deep_update(base[key], value)
             else:
-                base[key] = value
-    
+                base[key] = copy.deepcopy(value)
+
+    @staticmethod
+    def _validate(data: Dict[str, Any]):
+        mode = data.get('privacy', {}).get('mode', 'balanced')
+        if mode not in {'off', 'balanced', 'strict'}:
+            raise ValueError("privacy.mode must be one of: off, balanced, strict")
+
+        interval = data.get('update_interval_secs', 5)
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)):
+            raise ValueError('update_interval_secs must be a number')
+        if interval < 1 or interval > 3600:
+            raise ValueError('update_interval_secs must be between 1 and 3600 seconds')
+
+        client_id = str(data.get('discord', {}).get('client_id', '')).strip()
+        if not client_id or not client_id.isdigit():
+            raise ValueError('discord.client_id must be a numeric Discord application ID')
+
+        buttons = data.get('discord', {}).get('buttons', []) or []
+        if not isinstance(buttons, list) or len(buttons) > 2:
+            raise ValueError('discord.buttons must be a list with at most 2 buttons')
+        for button in buttons:
+            if not isinstance(button, dict):
+                raise ValueError('Each Discord button must be an object')
+            label = str(button.get('label', '')).strip()
+            url = str(button.get('url', '')).strip()
+            if not (1 <= len(label) <= 32):
+                raise ValueError('Discord button labels must be 1-32 characters')
+            if not (url.startswith('https://') or url.startswith('http://')):
+                raise ValueError('Discord button URLs must start with http:// or https://')
+            if len(url) > 512:
+                raise ValueError('Discord button URLs must be at most 512 characters')
+
     @staticmethod
     def _get_default_config_path() -> Path:
-        """Get platform-specific default config path"""
         system = platform.system().lower()
-        
         if system == 'windows':
-            # Windows: %APPDATA%\discord-rich-presence\config.yaml
-            config_dir = Path(os.environ.get('APPDATA', '')) / 'discord-rich-presence'
+            base = os.environ.get('APPDATA')
+            config_dir = Path(base) / 'discord-rich-presence' if base else Path.home() / 'AppData' / 'Roaming' / 'discord-rich-presence'
         else:
-            # Linux/Mac: ~/.config/discord-rich-presence/config.yaml
             config_dir = Path.home() / '.config' / 'discord-rich-presence'
-        
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / 'config.yaml'
