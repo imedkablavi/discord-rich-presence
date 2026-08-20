@@ -1,149 +1,162 @@
 # Discord Rich Presence Service
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=for-the-badge)](https://github.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Status](https://img.shields.io/badge/status-active-success.svg?style=for-the-badge)]()
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge)](http://makeapullrequest.com)
+A local Discord Rich Presence service that derives activity from the foreground application, applies configurable privacy rules, and publishes a Rich Presence payload through Discord Desktop RPC.
 
-**A professional, privacy-first background service that bridges the gap between your local activity and Discord's Rich Presence.**
+## Status
 
----
+This project currently targets **Windows and Linux**. macOS is not advertised as supported until a native foreground-window implementation is added.
 
-## 🚀 Why This Project Exists
+**Requirements:** Python 3.9+ and Discord Desktop.
 
-Discord's native game detection is great, but it falls short for power users, developers, and media consumers. It often fails to detect:
-*   Specific code editors or the project you're working on.
-*   Music playing in a web browser or local media player.
-*   Terminal commands and shell activities.
-*   Privacy-sensitive context that you *don't* want to share.
+## Features
 
-**Discord Rich Presence Service** solves this by running a lightweight, modular daemon that intelligently scans your active windows, processes, and media sessions to update your status with rich, accurate, and privacy-conscious details.
+- Foreground application detection on Windows and Linux/X11.
+- Limited Wayland support (best on Sway; other compositors may not expose reliable focus information).
+- Browser, coding, media, terminal, and conservative gaming detectors.
+- Discord activity types for listening/watching/playing.
+- Clickable Rich Presence URLs with `pypresence 4.6.2`.
+- Privacy modes: `off`, `balanced`, and `strict`.
+- Whitelist/blacklist rules.
+- Config hot reload with validation.
+- System tray controls.
+- Rotating local logs.
+- Automated regression tests on Windows and Linux.
 
-## 🌟 Feature Highlights
+## Privacy modes
 
-*   **Smart Context Awareness:** Distinguishes between "Watching YouTube", "Coding in Python", and "Debugging in Terminal".
-*   **Zero-Cloud Privacy:** All data processing happens locally. No logs are sent to third-party servers.
-*   **Auto-Redaction:** Automatically strips sensitive information (API keys, file paths, passwords) from your status.
-*   **Cross-Platform:** Designed for Windows, Linux, and macOS.
-*   **Extensible:** Modular detector system makes adding new apps trivial.
+| Mode | Behavior |
+| --- | --- |
+| `off` | Sends detected activity without privacy redaction. Use only if you accept the exposure risk. |
+| `balanced` | Redacts configured secret patterns and reduces path exposure while preserving useful context. |
+| `strict` | Sends generic activity descriptions and removes browser URLs/buttons and identifying details. |
 
-### 📊 Supported Detectors
+If an activity becomes blocked, disappears, or the service shuts down normally, the service clears the previous Rich Presence instead of intentionally leaving stale activity visible.
 
-| Category | Supported Applications / Services |
-| :--- | :--- |
-| **💻 Coding** | VS Code, Trae, JetBrains (IntelliJ, PyCharm, etc.), Sublime Text, Notepad++, Vim/Neovim |
-| **🌐 Browser** | Chrome, Firefox, Edge, Brave, Opera, Vivaldi (YouTube, Netflix, SoundCloud, GitHub) |
-| **🎵 Media** | Spotify (Desktop/Web), VLC, Windows Media Player, MPC-HC |
-| **⌨️ Terminal** | PowerShell, CMD, Bash, Zsh (displays shell & current command) |
-| **🎮 Gaming** | Automatic process detection for thousands of games |
+## Installation
 
-## 🏗️ Architecture
+### Windows
 
-The system follows a modular "Pipeline" architecture to ensure stability and extensibility.
-
-```ascii
-+-----------------+      +------------------+      +------------------+
-|  Active Window  | ---> |   Detector API   | ---> |  Activity Object |
-|    (Scanner)    |      | (Strategy Pattern)|      | (Raw Metadata)   |
-+-----------------+      +------------------+      +------------------+
-                                                          |
-                                                          v
-+-----------------+      +------------------+      +------------------+
-|   Discord RPC   | <--- |  Privacy Filter  | <--- | Presence Builder |
-|    (Output)     |      | (Redaction/Mode) |      | (Format & Icon)  |
-+-----------------+      +------------------+      +------------------+
+```bat
+git clone https://github.com/imedkablavi/discord-rich-presence.git
+cd discord-rich-presence
+run.bat
 ```
 
-## 🔒 Privacy & Security
+### Linux
 
-We believe your status should enhance your social presence, not leak your personal life.
+```bash
+git clone https://github.com/imedkablavi/discord-rich-presence.git
+cd discord-rich-presence
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
 
-### Privacy Modes Comparison
+X11 foreground-window detection uses `xprop` (usually provided by `x11-utils`). Linux media detection uses MPRIS/D-Bus.
 
-| Feature | 🔴 Off (Public) | 🟡 Balanced (Default) | 🟢 Strict (Private) |
-| :--- | :---: | :---: | :---: |
-| **App Name** | ✅ Visible | ✅ Visible | ✅ Generic ("Coding") |
-| **Project/File** | ✅ Visible | ✅ Filename only | ❌ Hidden |
-| **Full Paths** | ✅ Visible | ❌ Redacted (`~/...`) | ❌ Hidden |
-| **Browser URL** | ✅ Visible | ❌ Hidden | ❌ Hidden |
-| **Buttons** | ✅ Enabled | ✅ Enabled | ❌ Disabled |
+## Configuration
 
-*To change modes, access the **Settings Panel** via the System Tray.*
+The default config lives at:
 
-## 📸 Screenshots
+- Windows: `%APPDATA%\discord-rich-presence\config.yaml`
+- Linux: `~/.config/discord-rich-presence/config.yaml`
 
-| Control Panel | Activity Detection |
-| :---: | :---: |
-| ![Control Panel](docs/images/control-panel.png) | ![Activity Detection](docs/images/activity.png) |
-| *Modern Dark Mode UI* | *Rich Presence in Discord* |
+See `config.example.yaml` for the available options.
 
-## 🛠️ Installation
-
-### Prerequisites
-*   Python 3.8 or higher
-*   Discord Desktop App
-
-### 📦 Windows (Recommended)
-1.  Clone the repository.
-2.  Run `run.bat` to automatically install dependencies and start the service.
-3.  The app will minimize to the System Tray.
-
-### 🐧 Linux / macOS (Source)
-1.  Clone the repository:
-    ```bash
-    git clone https://github.com/imedkablavi/discord-rich-presence.git
-    cd discord-rich-presence
-    ```
-2.  Install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  Run the service:
-    ```bash
-    python main.py
-    ```
-
-## ⚙️ Configuration
-
-The service uses a `config.yaml` file for persistent settings. You can modify this via the **GUI Settings Panel** or by editing the file directly.
+Example:
 
 ```yaml
 discord:
-  client_id: "YOUR_CLIENT_ID" # Optional: Use your own App ID
+  client_id: "1437867564762923028"
+  buttons: []
+
 privacy:
-  mode: "balanced" # off | balanced | strict
+  mode: balanced
   hide_home_paths: true
+
+update_interval_secs: 5
+
 rules:
   enabled_detectors:
-    coding: true
     media: true
+    terminal: true
+    coding: true
     browser: true
+    gaming: true
+  whitelist:
+    apps: []
+    sites: []
+    games: []
+  blacklist:
+    apps: []
+    sites: []
+    games: []
 ```
 
-## 🗺️ Roadmap
+## Terminal command tracking
 
-*   [ ] **v2.1:** Browser Extension for 100% accurate URL tracking.
-*   [ ] **v2.2:** Cloud Settings Sync (Encrypted).
-*   [ ] **v2.3:** Custom Themes for Control Panel.
-*   [ ] **v3.0:** Plugin System for community detectors.
+The service does not inspect shell command lines remotely. Optional local shell hooks write the current/recent command to a local cache file that the terminal detector reads.
 
-## 🤝 Contributing
+### Bash
 
-We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for details.
-1.  Fork the Project
-2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4.  Push to the Branch (`git push origin feature/AmazingFeature`)
-5.  Open a Pull Request
+Add to `~/.bashrc`:
 
-## 📄 License
+```bash
+source /path/to/discord-rich-presence/scripts/hooks/bash.sh
+```
 
-Distributed under the **MIT License**. See `LICENSE` for more information.
+### Zsh
 
----
+Add to `~/.zshrc`:
 
-<div align="center">
-  <strong>Built with ❤️ by CYBREX@TECH</strong><br>
-  Check out our other projects at <a href="https://imedkablavi.info">imedkablavi.info</a>
-</div>
+```zsh
+source /path/to/discord-rich-presence/scripts/hooks/zsh.zsh
+```
+
+### PowerShell
+
+Add to `$PROFILE`:
+
+```powershell
+. "C:\path\to\discord-rich-presence\scripts\hooks\powershell.ps1"
+```
+
+Restart the shell after installing a hook. Balanced and strict privacy rules are still applied before terminal information is sent to Discord.
+
+## CLI
+
+```text
+python main.py [--config PATH] [--privacy off|balanced|strict]
+               [--dry-run] [--once] [--verbose] [--tray]
+```
+
+`--dry-run` is useful when validating detectors and privacy output without publishing it to Discord.
+
+## Logs
+
+Logs rotate automatically:
+
+- Windows: `%LOCALAPPDATA%\discord-rich-presence\logs\app.log`
+- Linux: `~/.local/state/discord-rich-presence/app.log`
+
+## Development / QA
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+ruff check . --select E9,F63,F7,F82
+```
+
+GitHub Actions runs the regression suite on Windows and Ubuntu with Python 3.9 and 3.12.
+
+## Known limitations
+
+- Generic Wayland compositors may not expose a trustworthy foreground window; Sway has a dedicated path.
+- Browser URLs are inferred search/home links from window-title metadata, not exact tab URLs. An extension/native browser integration is required for exact URLs.
+- Game detection intentionally favors fewer false positives over claiming support for arbitrary games.
+- macOS support is not implemented yet.
+
+## License
+
+MIT. See `LICENSE`.
