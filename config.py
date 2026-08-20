@@ -37,6 +37,12 @@ DEFAULT_CONFIG = {
         'auto_start': False
     },
     'images': {
+        # Prefer application-specific external artwork for known apps. Set false
+        # to rely only on Discord Developer Portal asset keys below.
+        'use_external_app_icons': True,
+        # Optional per-app overrides. Values can be Discord asset keys or direct
+        # http(s) image URLs accepted by Discord Rich Presence.
+        'icon_overrides': {},
         'browser': 'browser',
         'video': 'video',
         'terminal': 'terminal',
@@ -239,6 +245,20 @@ class Config:
         for key in ('start_minimized', 'auto_start'):
             if not isinstance(system.get(key, False), bool):
                 raise ValueError(f'system.{key} must be true or false')
+
+        images = data.get('images', {})
+        if not isinstance(images, dict):
+            raise ValueError('images must be an object')
+        if not isinstance(images.get('use_external_app_icons', True), bool):
+            raise ValueError('images.use_external_app_icons must be true or false')
+        icon_overrides = images.get('icon_overrides', {}) or {}
+        if not isinstance(icon_overrides, dict):
+            raise ValueError('images.icon_overrides must be an object')
+        for key, value in icon_overrides.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError('images.icon_overrides keys must be non-empty strings')
+            if not isinstance(value, str) or not (1 <= len(value.strip()) <= 300):
+                raise ValueError('images.icon_overrides values must be 1-300 character asset keys or URLs')
 
         discord = data.get('discord', {})
         if not isinstance(discord, dict):
