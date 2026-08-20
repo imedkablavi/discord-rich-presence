@@ -66,6 +66,25 @@ class DiscordRichPresenceService:
             except Exception as e:
                 self.logger.debug("Could not update runtime status: %s", e)
 
+    def _wait(self, timeout: float) -> bool:
+        """Wait interruptibly and honor GUI/runtime graceful-stop requests."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        while not self._stop_event.is_set():
+            runtime = getattr(self, 'runtime', None)
+            if runtime:
+                try:
+                    if runtime.stop_requested():
+                        self.logger.info("Graceful stop requested")
+                        self._stop_event.set()
+                        break
+                except Exception as e:
+                    self.logger.debug("Could not read runtime stop request: %s", e)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._stop_event.wait(min(0.25, remaining))
+        return self._stop_event.is_set()
+
     @staticmethod
     def _activity_summary(payload: Optional[Dict[str, Any]]) -> Optional[str]:
         if not payload:
@@ -74,7 +93,7 @@ class DiscordRichPresenceService:
         state = str(payload.get('state') or '').strip()
         if details and state:
             return f"{details} — {state}"[:240]
-        return (details or state or None)
+        return details or state or None
 
     def connect_discord(self) -> bool:
         try:
@@ -311,7 +330,7 @@ class DiscordRichPresenceService:
 
     def _handle_rpc_failure(self):
         self._runtime_update(retry_in_seconds=self.reconnect_delay)
-        self._stop_event.wait(self.reconnect_delay)
+        self._wait(self.reconnect_delay)
         self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
 
     def run(self):
@@ -347,13 +366,13 @@ class DiscordRichPresenceService:
                     if self.once:
                         break
                     interval = float(self.config.get('update_interval_secs', 5))
-                    self._stop_event.wait(max(1.0, interval))
+                    self._wait(max(1.0, interval))
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
                     self.logger.error("Error in main loop: %s", e, exc_info=True)
                     self._runtime_update(state='loop_error', last_error=str(e)[:300])
-                    self._stop_event.wait(max(1.0, float(self.config.get('update_interval_secs', 5))))
+                    self._wait(max(1.0, float(self.config.get('update_interval_secs', 5))))
         except KeyboardInterrupt:
             self.logger.info("Received interrupt signal")
         finally:
