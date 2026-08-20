@@ -4,6 +4,7 @@ import logging
 import platform
 import shutil
 import subprocess
+import time
 from typing import Optional, Dict, Any
 
 from config import Config
@@ -29,6 +30,13 @@ class MediaDetector:
         'GitHub': ('github.com',),
     }
 
+    # Browser MPRIS sessions such as Brave/Chromium often omit xesam:url and
+    # expose artwork only as a local file:// URL. Once a service is verified
+    # from a foreground browser title or a real metadata URL, retain that
+    # association for the same media title while the user changes windows.
+    SERVICE_CACHE_TTL_SECS = 6 * 60 * 60
+    SERVICE_CACHE_MAX_ENTRIES = 50
+
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
@@ -38,6 +46,7 @@ class MediaDetector:
         self.windows_media_available = False
         self.bus = None
         self.windows_detector = None
+        self._service_cache: Dict[str, Dict[str, Any]] = {}
 
         if self.platform_name == 'windows':
             try:
@@ -176,17 +185,19 @@ class MediaDetector:
         activity: Optional[Dict[str, Any]],
         window_info: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        """Attach a known foreground web service when it matches the media app."""
-        if not activity or activity.get('service') or not window_info:
+        """Attach only verified web-service metadata to browser-backed media."""
+        if not activity:
+            return activity
+
+        existing_service = str(activity.get('service', '') or '')
+        if existing_service:
+            self._remember_service(activity, existing_service)
             return activity
 
         player = str(activity.get('player', '')).lower()
-        app_name = str(window_info.get('app_name', '')).lower()
-        title = str(window_info.get('title', ''))
+        app_name = str((window_info or {}).get('app_name', '')).lower()
+        title = str((window_info or {}).get('title', ''))
 
-        # Only decorate browser-backed media when the focused browser is also
-        # the MPRIS player. This avoids labelling background Brave/YouTube media
-        # as YouTube while the user is focused on an unrelated application.
         browser_aliases = {
             'brave': ('brave',),
             'chrome': ('chrome', 'google-chrome'),
@@ -196,20 +207,68 @@ class MediaDetector:
             'opera': ('opera',),
             'vivaldi': ('vivaldi',),
         }
-        matched_browser = False
-        for browser, aliases in browser_aliases.items():
-            if browser in player and any(alias in app_name for alias in aliases):
-                matched_browser = True
-                break
-        if not matched_browser:
-            return activity
+        matched_browser = any(
+            browser in player and any(alias in app_name for alias in aliases)
+            for browser, aliases in browser_aliases.items()
+        )
 
-        service = self._detect_service(title)
-        if service:
+        if matched_browser:
+            service = self._detect_service(title)
+            if service:
+                enriched = activity.copy()
+                enriched['service'] = service
+                self._remember_service(enriched, service)
+                return enriched
+
+        cached_service = self._cached_service(activity)
+        if cached_service:
             enriched = activity.copy()
-            enriched['service'] = service
+            enriched['service'] = cached_service
             return enriched
         return activity
+
+    def _service_cache_key(self, activity: Dict[str, Any]) -> str:
+        player = str(activity.get('player', '') or '').strip().lower()
+        title = str(activity.get('title', '') or '').strip().lower()
+        return f'{player}\0{title}' if player and title else ''
+
+    def _remember_service(self, activity: Dict[str, Any], service: str) -> None:
+        key = self._service_cache_key(activity)
+        if not key or not service:
+            return
+        now = time.monotonic()
+        self._service_cache[key] = {'service': service, 'seen_at': now}
+        self._prune_service_cache(now)
+
+    def _cached_service(self, activity: Dict[str, Any]) -> Optional[str]:
+        key = self._service_cache_key(activity)
+        if not key:
+            return None
+        now = time.monotonic()
+        record = self._service_cache.get(key)
+        if not record:
+            self._prune_service_cache(now)
+            return None
+        if now - float(record.get('seen_at', 0)) > self.SERVICE_CACHE_TTL_SECS:
+            self._service_cache.pop(key, None)
+            return None
+        return str(record.get('service', '') or '') or None
+
+    def _prune_service_cache(self, now: Optional[float] = None) -> None:
+        current = time.monotonic() if now is None else now
+        expired = [
+            key for key, record in self._service_cache.items()
+            if current - float(record.get('seen_at', 0)) > self.SERVICE_CACHE_TTL_SECS
+        ]
+        for key in expired:
+            self._service_cache.pop(key, None)
+        if len(self._service_cache) > self.SERVICE_CACHE_MAX_ENTRIES:
+            oldest = sorted(
+                self._service_cache,
+                key=lambda key: float(self._service_cache[key].get('seen_at', 0)),
+            )[:-self.SERVICE_CACHE_MAX_ENTRIES]
+            for key in oldest:
+                self._service_cache.pop(key, None)
 
     def _detect_service(self, *values: Any) -> Optional[str]:
         combined = ' '.join(str(value or '') for value in values).lower()
