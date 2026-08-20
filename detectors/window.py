@@ -1,250 +1,170 @@
-"""
-Active window detection for X11 and Wayland
-"""
+"""Foreground-window detection for Windows, Linux/X11, and Sway."""
 
+import json
+import logging
 import os
 import platform
+import shutil
 import subprocess
-import logging
 from typing import Optional, Dict, Any
 
 
 class WindowDetector:
-    """Detects active window information on X11 and Wayland"""
-    
+    """Return foreground-window metadata only when it can be determined reliably."""
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.platform_name = platform.system().lower()
-        
+        self.windows_detector = None
+        self.session_type = ''
+
         if self.platform_name == 'windows':
             try:
                 from .window_windows import WindowsWindowDetector
                 self.windows_detector = WindowsWindowDetector()
-                self.logger.info("Using Windows window detector")
-            except ImportError:
-                self.logger.error("Windows detector not available")
-                self.windows_detector = None
-        else:
-            self.windows_detector = None
+                self.logger.info('Using Windows foreground-window detector')
+            except ImportError as e:
+                self.logger.error('Windows foreground-window detector unavailable: %s', e)
+        elif self.platform_name == 'linux':
             self.session_type = os.environ.get('XDG_SESSION_TYPE', 'x11').lower()
-            self.logger.info(f"Detected session type: {self.session_type}")
-    
-    def get_active_window(self) -> Optional[Dict[str, Any]]:
-        """Get information about the currently active window"""
-        if self.platform_name == 'windows':
-            if self.windows_detector:
-                return self.windows_detector.get_active_window()
-            return None
-        elif self.session_type == 'wayland':
-            return self._get_active_window_wayland()
+            self.logger.info('Detected Linux session type: %s', self.session_type)
         else:
-            return self._get_active_window_x11()
-    
+            self.logger.warning(
+                'Foreground-window detection is not implemented for %s; activity publishing is disabled',
+                self.platform_name or 'this platform',
+            )
+
+    def get_active_window(self) -> Optional[Dict[str, Any]]:
+        if self.platform_name == 'windows':
+            return self.windows_detector.get_active_window() if self.windows_detector else None
+        if self.platform_name != 'linux':
+            return None
+        if self.session_type == 'wayland':
+            return self._get_active_window_wayland()
+        return self._get_active_window_x11()
+
     def _get_active_window_x11(self) -> Optional[Dict[str, Any]]:
-        """Get active window info on X11 using xprop"""
         try:
-            # Get active window ID
             result = subprocess.run(
                 ['xprop', '-root', '_NET_ACTIVE_WINDOW'],
                 capture_output=True,
                 text=True,
-                timeout=2
+                timeout=2,
+                check=False,
             )
-            
             if result.returncode != 0:
                 return None
-            
-            # Extract window ID
             output = result.stdout.strip()
             if 'window id #' not in output.lower():
                 return None
-            
             window_id = output.split()[-1]
-            
-            # Get window properties
+            if window_id in {'0x0', '0'}:
+                return None
+
             result = subprocess.run(
                 ['xprop', '-id', window_id, 'WM_CLASS', 'WM_NAME', '_NET_WM_NAME', '_NET_WM_PID'],
                 capture_output=True,
                 text=True,
-                timeout=2
+                timeout=2,
+                check=False,
             )
-            
             if result.returncode != 0:
                 return None
-            
             props = result.stdout
-            
-            # Parse properties
-            window_info = {
+            return {
                 'window_id': window_id,
                 'app_name': self._extract_wm_class(props),
                 'title': self._extract_wm_name(props),
-                'pid': self._extract_pid(props)
+                'pid': self._extract_pid(props),
             }
-            
-            return window_info
-            
         except subprocess.TimeoutExpired:
-            self.logger.warning("xprop command timed out")
-            return None
+            self.logger.warning('xprop command timed out')
         except FileNotFoundError:
-            self.logger.warning("xprop not found, install x11-utils")
-            return None
+            self.logger.warning('xprop not found; install x11-utils for X11 detection')
         except Exception as e:
-            self.logger.error(f"Error getting X11 window: {e}")
-            return None
-    
+            self.logger.error('Error getting X11 foreground window: %s', e)
+        return None
+
     def _get_active_window_wayland(self) -> Optional[Dict[str, Any]]:
-        """
-        Get active window info on Wayland (fallback method)
-        Wayland doesn't expose window info easily, so we use process inspection
-        """
-        try:
-            # Try to get focused window from swaymsg (if using Sway)
-            if self._command_exists('swaymsg'):
-                return self._get_sway_window()
-            
-            # Try GNOME Shell extension (if available)
-            # This would require a custom extension, so we fall back to process inspection
-            
-            # Fallback: inspect running processes
-            return self._get_window_from_processes()
-            
-        except Exception as e:
-            self.logger.error(f"Error getting Wayland window: {e}")
-            return None
-    
+        """Support Sway/wlroots only; never guess foreground state from process lists."""
+        if self._command_exists('swaymsg'):
+            return self._get_sway_window()
+        self.logger.debug(
+            'Reliable foreground-window detection is unavailable for this Wayland compositor'
+        )
+        return None
+
     def _get_sway_window(self) -> Optional[Dict[str, Any]]:
-        """Get focused window from Sway compositor"""
         try:
-            import json
-            
             result = subprocess.run(
                 ['swaymsg', '-t', 'get_tree'],
                 capture_output=True,
                 text=True,
-                timeout=2
+                timeout=2,
+                check=False,
             )
-            
             if result.returncode != 0:
                 return None
-            
-            tree = json.loads(result.stdout)
-            focused = self._find_focused_node(tree)
-            
-            if focused:
-                return {
-                    'app_name': focused.get('app_id') or focused.get('window_properties', {}).get('class', 'Unknown'),
-                    'title': focused.get('name', ''),
-                    'pid': focused.get('pid')
-                }
-            
+            focused = self._find_focused_node(json.loads(result.stdout))
+            if not focused:
+                return None
+            return {
+                'app_name': focused.get('app_id')
+                or focused.get('window_properties', {}).get('class', 'Unknown'),
+                'title': focused.get('name', ''),
+                'pid': focused.get('pid'),
+            }
         except Exception as e:
-            self.logger.debug(f"Sway detection failed: {e}")
-        
-        return None
-    
+            self.logger.debug('Sway detection failed: %s', e)
+            return None
+
     def _find_focused_node(self, node: Dict) -> Optional[Dict]:
-        """Recursively find focused node in Sway tree"""
         if node.get('focused'):
             return node
-        
         for child in node.get('nodes', []) + node.get('floating_nodes', []):
             result = self._find_focused_node(child)
             if result:
                 return result
-        
         return None
-    
-    def _get_window_from_processes(self) -> Optional[Dict[str, Any]]:
-        """
-        Fallback: try to determine active application from running processes
-        This is less accurate but works on Wayland
-        """
-        try:
-            # Get list of GUI processes
-            result = subprocess.run(
-                ['ps', 'aux'],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            
-            if result.returncode != 0:
-                return None
-            
-            # Look for common GUI applications
-            lines = result.stdout.split('\n')
-            for line in lines:
-                for app in ['firefox', 'chrome', 'chromium', 'code', 'gnome-terminal', 'kitty', 'alacritty']:
-                    if app in line.lower() and 'grep' not in line:
-                        return {
-                            'app_name': app,
-                            'title': '',
-                            'pid': None
-                        }
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error inspecting processes: {e}")
-            return None
-    
+
     @staticmethod
     def _extract_wm_class(props: str) -> str:
-        """Extract application name from WM_CLASS"""
         for line in props.split('\n'):
-            if 'WM_CLASS(STRING)' in line:
-                # WM_CLASS returns two values, we want the second one
-                parts = line.split('=', 1)
-                if len(parts) > 1:
-                    values = parts[1].strip().strip('"').split('", "')
-                    if len(values) > 1:
-                        return values[1].strip('"')
-                    elif len(values) > 0:
-                        return values[0].strip('"')
+            if 'WM_CLASS(STRING)' not in line:
+                continue
+            parts = line.split('=', 1)
+            if len(parts) <= 1:
+                continue
+            values = parts[1].strip().strip('"').split('", "')
+            if len(values) > 1:
+                return values[1].strip('"')
+            if values:
+                return values[0].strip('"')
         return 'Unknown'
-    
+
     @staticmethod
     def _extract_wm_name(props: str) -> str:
-        """Extract window title from WM_NAME or _NET_WM_NAME"""
-        # Prefer _NET_WM_NAME (UTF-8) over WM_NAME
-        for line in props.split('\n'):
-            if '_NET_WM_NAME(UTF8_STRING)' in line:
-                parts = line.split('=', 1)
-                if len(parts) > 1:
-                    return parts[1].strip().strip('"')
-        
-        for line in props.split('\n'):
-            if 'WM_NAME(STRING)' in line:
-                parts = line.split('=', 1)
-                if len(parts) > 1:
-                    return parts[1].strip().strip('"')
-        
+        for marker in ('_NET_WM_NAME(UTF8_STRING)', 'WM_NAME(STRING)'):
+            for line in props.split('\n'):
+                if marker in line:
+                    parts = line.split('=', 1)
+                    if len(parts) > 1:
+                        return parts[1].strip().strip('"')
         return ''
-    
+
     @staticmethod
     def _extract_pid(props: str) -> Optional[int]:
-        """Extract process ID from _NET_WM_PID"""
         for line in props.split('\n'):
-            if '_NET_WM_PID(CARDINAL)' in line:
-                parts = line.split('=', 1)
-                if len(parts) > 1:
-                    try:
-                        return int(parts[1].strip())
-                    except ValueError:
-                        pass
+            if '_NET_WM_PID(CARDINAL)' not in line:
+                continue
+            parts = line.split('=', 1)
+            if len(parts) > 1:
+                try:
+                    return int(parts[1].strip())
+                except ValueError:
+                    return None
         return None
-    
+
     @staticmethod
     def _command_exists(command: str) -> bool:
-        """Check if a command exists in PATH"""
-        try:
-            result = subprocess.run(
-                ['which', command],
-                capture_output=True,
-                timeout=1
-            )
-            return result.returncode == 0
-        except (subprocess.SubprocessError, FileNotFoundError, OSError):
-            return False
+        return shutil.which(command) is not None
