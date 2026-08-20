@@ -19,7 +19,7 @@ privacy:
   hide_home_paths: true
 
 # How often foreground/media state is checked. RPC updates are sent only when
-# the resulting payload changes. Valid range: 0.5-3600 seconds.
+# the resulting payload changes. Valid range: 1-3600 seconds.
 update_interval_secs: 2
 
 system:
