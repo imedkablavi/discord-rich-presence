@@ -2,6 +2,7 @@
 
 import logging
 import re
+import shlex
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -65,10 +66,6 @@ class PrivacyRedactor:
             raw_title = str(result.get('page_title', '') or '')
             safe_title = self._redact_sensitive_patterns(raw_title)
             result['page_title'] = safe_title
-            # Browser URLs are inferred from the raw window title. If the title
-            # needed privacy redaction, the percent-encoded URL may still contain
-            # the original secret even though a second text pass would not see it.
-            # Drop the inferred URL entirely in that case.
             if safe_title != raw_title:
                 result['url'] = None
 
@@ -106,10 +103,22 @@ class PrivacyRedactor:
             }
         return {'type': 'application', 'app_name': 'Application', 'window_title': ''}
 
+    @staticmethod
+    def _split_command(command: str) -> List[str]:
+        try:
+            # posix=False preserves quoted Windows/PowerShell-looking tokens while
+            # still keeping a quoted multi-word value as one token.
+            return shlex.split(command, posix=False)
+        except ValueError:
+            # Never fail activity processing because a shell line contains an
+            # unmatched quote; the conservative whitespace fallback still lets
+            # the pattern redactor run.
+            return command.split()
+
     def _redact_command_balanced(self, command: str) -> str:
         if not command:
             return command
-        parts = command.split()
+        parts = self._split_command(command)
         if not parts:
             return command
 
@@ -125,7 +134,7 @@ class PrivacyRedactor:
             normalized = lower.lstrip('-/').replace('.', '_')
             sensitive = any(marker in normalized for marker in self.SENSITIVE_ARG_MARKERS)
             if sensitive:
-                if '=' in part or ':' in part and not part.startswith(('http://', 'https://')):
+                if '=' in part or (':' in part and not part.startswith(('http://', 'https://'))):
                     name = re.split(r'[=:]', part, maxsplit=1)[0]
                     redacted.append(f'{name}=[REDACTED]')
                 else:
