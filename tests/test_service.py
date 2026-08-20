@@ -1,4 +1,5 @@
 import logging
+import threading
 
 from main import DiscordRichPresenceService
 
@@ -18,6 +19,18 @@ class FakeRPC:
         pass
 
 
+class StopRuntime:
+    def __init__(self, requested=False):
+        self.requested = requested
+        self.updates = []
+
+    def stop_requested(self):
+        return self.requested
+
+    def update(self, **fields):
+        self.updates.append(fields)
+
+
 def _service():
     service = DiscordRichPresenceService.__new__(DiscordRichPresenceService)
     service.dry_run = False
@@ -25,6 +38,8 @@ def _service():
     service.rpc = FakeRPC()
     service.presence_active = True
     service.last_payload = {'details': 'old', 'buttons': [{'label': 'A', 'url': 'https://a.test'}]}
+    service.runtime = None
+    service._stop_event = threading.Event()
     service.logger = logging.getLogger('test')
     return service
 
@@ -46,3 +61,11 @@ def test_payload_comparison_includes_buttons_and_urls():
 def test_identical_full_payload_does_not_update():
     service = _service()
     assert service.should_update(dict(service.last_payload)) is False
+
+
+def test_wait_honors_runtime_graceful_stop_request():
+    service = _service()
+    service.runtime = StopRuntime(requested=True)
+
+    assert service._wait(10) is True
+    assert service._stop_event.is_set()
