@@ -29,6 +29,8 @@ The service watches the foreground application, converts it into a Discord activ
 
 Media activities use Discord listening/watching activity types where appropriate. Playing media uses Discord start/end timestamps so elapsed time continues to advance without repeatedly rewriting the RPC payload. Browser service links are inferred from visible window-title metadata; the service does not currently read the exact browser tab URL.
 
+For known applications, the large Rich Presence artwork follows the application actually in use instead of always showing one generic category image. For example, Brave media uses Brave artwork, VS Code uses VS Code artwork, and KDE apps use KDE artwork. Browser services such as YouTube can appear as the smaller overlay while the large image remains the browser itself. Discord supports external image URLs for Rich Presence assets, so the default setup uses Simple Icons artwork for common apps without requiring every icon to be uploaded manually to the Developer Portal. You can disable this behavior or override any icon in configuration.
+
 ## Privacy
 
 There are three privacy modes:
@@ -112,6 +114,10 @@ privacy:
 
 update_interval_secs: 2
 
+images:
+  use_external_app_icons: true
+  icon_overrides: {}
+
 rules:
   clear_on_lock_screen: true
   terminal_command_ttl_secs: 21600
@@ -126,9 +132,19 @@ rules:
 
 `update_interval_secs` controls how often local activity is checked, not how often Discord is updated. The service only sends a new RPC payload when the resulting activity changes. The default is 2 seconds; values down to 1 second are accepted when faster switching is preferred.
 
+`images.use_external_app_icons: true` enables built-in application-aware artwork for common browsers, editors, terminals, media players, and services. Set it to `false` if you want to use only assets uploaded to your Discord application. `images.icon_overrides` can replace any known icon with your own Developer Portal asset key or direct image URL, for example:
+
+```yaml
+images:
+  use_external_app_icons: true
+  icon_overrides:
+    trae: "https://example.com/trae.png"
+    konsole: "my-konsole-asset"
+```
+
 Set `application: false` if you only want recognized activity categories and do not want generic foreground-window titles published.
 
-The config loader validates Client IDs, button limits, URLs, privacy regexes, detector settings, party sizes, and other values before saving or applying them.
+The config loader validates Client IDs, button limits, URLs, privacy regexes, icon settings, detector settings, party sizes, and other values before saving or applying them.
 
 ## Control panel
 
@@ -229,6 +245,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Security r
 
 - Exact browser URLs are not available without a browser extension or native browser integration.
 - Wayland foreground-window support currently covers KDE Plasma through `kdotool` and Sway through `swaymsg`; other compositors may need a dedicated implementation.
+- Built-in application-aware icons cover common apps; unknown or unbranded apps still use configured category/Developer Portal fallbacks unless you add an `icon_overrides` entry.
+- External application icons depend on Discord being able to fetch the configured image URL; disable them if you prefer only Developer Portal assets.
 - Game detection intentionally avoids broad guesses, so unknown games may fall back to normal application activity.
 - Lock-screen detection uses known lock applications/window markers and may need updates for new desktop environments.
 - macOS foreground-window detection is not implemented yet.
