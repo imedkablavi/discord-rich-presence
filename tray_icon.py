@@ -1,25 +1,18 @@
-"""
-System tray icon for Discord Rich Presence Service
-Optional GUI component for easy control
-"""
+"""System tray controls for Discord Rich Presence."""
 
 import logging
-import platform
 from typing import Optional, Callable
 
 
 class TrayIcon:
-    """System tray icon with menu for service control"""
-    
-    def __init__(self, on_exit: Optional[Callable] = None, on_toggle_privacy: Optional[Callable] = None, on_open_panel: Optional[Callable] = None):
+    def __init__(self, on_exit: Optional[Callable] = None, on_toggle_privacy: Optional[Callable] = None, on_open_panel: Optional[Callable] = None, get_privacy_mode: Optional[Callable] = None):
         self.logger = logging.getLogger(__name__)
         self.on_exit = on_exit
         self.on_toggle_privacy = on_toggle_privacy
         self.on_open_panel = on_open_panel
+        self.get_privacy_mode = get_privacy_mode or (lambda: 'balanced')
         self.icon = None
         self.available = False
-        
-        # Try to import platform-specific tray library
         try:
             import pystray
             from PIL import Image, ImageDraw
@@ -27,173 +20,125 @@ class TrayIcon:
             self.Image = Image
             self.ImageDraw = ImageDraw
             self.available = True
-            self.logger.info("System tray support available")
         except ImportError:
-            self.logger.warning("pystray not available, tray icon disabled")
-            self.logger.warning("Install with: pip install pystray pillow")
-    
+            self.logger.warning("pystray/Pillow unavailable; tray icon disabled")
+
     def create_icon(self) -> None:
-        """Create the tray icon"""
         if not self.available:
             return
-        
-        # Create a simple icon image
-        image = self._create_image()
-        
-        # Create menu
-        menu = self._create_menu()
-        
-        # Create icon
         self.icon = self.pystray.Icon(
-            "discord-rich-presence",
-            image,
-            "Discord Rich Presence",
-            menu
+            'discord-rich-presence', self._create_image(),
+            'Discord Rich Presence', self._create_menu()
         )
-    
+
     def _create_image(self):
-        """Create icon image"""
-        # Create a simple Discord-like icon
-        width = 64
-        height = 64
-        image = self.Image.new('RGB', (width, height), 'white')
+        image = self.Image.new('RGB', (64, 64), 'white')
         draw = self.ImageDraw.Draw(image)
-        
-        # Draw a simple "D" shape
         draw.ellipse([10, 10, 54, 54], fill='#5865F2', outline='#5865F2')
         draw.rectangle([32, 10, 54, 54], fill='white')
         draw.ellipse([20, 20, 44, 44], fill='white', outline='white')
-        
         return image
-    
+
+    def _is_mode(self, mode: str) -> bool:
+        try:
+            return str(self.get_privacy_mode()) == mode
+        except Exception:
+            return False
+
     def _create_menu(self):
-        """Create tray menu"""
         return self.pystray.Menu(
-            self.pystray.MenuItem(
-                "Discord Rich Presence",
-                lambda: None,
-                enabled=False
-            ),
+            self.pystray.MenuItem('Discord Rich Presence', lambda: None, enabled=False),
             self.pystray.Menu.SEPARATOR,
-            self.pystray.MenuItem(
-                "فتح لوحة التحكم",
-                lambda: self._open_panel()
-            ),
+            self.pystray.MenuItem('Open Control Panel', lambda: self._open_panel()),
             self.pystray.Menu.SEPARATOR,
-            self.pystray.MenuItem(
-                "Privacy: Off",
-                lambda: self._toggle_privacy('off'),
-                radio=True
-            ),
-            self.pystray.MenuItem(
-                "Privacy: Balanced",
-                lambda: self._toggle_privacy('balanced'),
-                radio=True,
-                checked=lambda item: True  # Default
-            ),
-            self.pystray.MenuItem(
-                "Privacy: Strict",
-                lambda: self._toggle_privacy('strict'),
-                radio=True
-            ),
+            self.pystray.MenuItem('Privacy: Off', lambda: self._toggle_privacy('off'), radio=True, checked=lambda item: self._is_mode('off')),
+            self.pystray.MenuItem('Privacy: Balanced', lambda: self._toggle_privacy('balanced'), radio=True, checked=lambda item: self._is_mode('balanced')),
+            self.pystray.MenuItem('Privacy: Strict', lambda: self._toggle_privacy('strict'), radio=True, checked=lambda item: self._is_mode('strict')),
             self.pystray.Menu.SEPARATOR,
-            self.pystray.MenuItem(
-                "Exit",
-                self._on_exit_clicked
-            )
+            self.pystray.MenuItem('Exit', self._on_exit_clicked),
         )
-    
+
     def _toggle_privacy(self, mode: str):
-        """Toggle privacy mode"""
         if self.on_toggle_privacy:
             self.on_toggle_privacy(mode)
+        if self.icon:
+            try:
+                self.icon.update_menu()
+            except Exception:
+                pass
 
     def _open_panel(self):
         if self.on_open_panel:
             self.on_open_panel()
-    
+
     def _on_exit_clicked(self, icon, item):
-        """Handle exit menu click"""
         if self.on_exit:
             self.on_exit()
         if self.icon:
             self.icon.stop()
-    
+
     def run(self):
-        """Run the tray icon (blocking)"""
-        if not self.available or not self.icon:
-            return
-        
-        self.icon.run()
-    
+        if self.available and self.icon:
+            self.icon.run()
+
     def stop(self):
-        """Stop the tray icon"""
         if self.icon:
             self.icon.stop()
-    
+
     @staticmethod
     def is_available() -> bool:
-        """Check if tray icon is available"""
         try:
-            import pystray
+            import pystray  # noqa: F401
             return True
         except ImportError:
             return False
 
 
 def run_with_tray(service_run_func: Callable, config, stop_func: Optional[Callable] = None):
-    """
-    Run service with tray icon in separate thread
-    
-    Args:
-        service_run_func: Function to run the service
-        config: Configuration object
-    """
+    import os
+    import subprocess
+    import sys
     import threading
-    
+
     if not TrayIcon.is_available():
-        # No tray available, just run service
         service_run_func()
         return
-    
-    # Create tray icon
+
     def on_toggle_privacy(mode: str):
         config.set('privacy.mode', mode)
-        logging.info(f"Privacy mode changed to: {mode}")
-    
-    def on_exit():
-        logging.info("Exit requested from tray icon")
         try:
-            if stop_func:
-                stop_func()
+            config.save()
         except Exception as e:
-            logging.error(f"Failed to stop service: {e}")
-    
+            logging.error('Failed to persist privacy mode: %s', e)
+        logging.info('Privacy mode changed to: %s', mode)
+
+    def on_exit():
+        if stop_func:
+            stop_func()
+
     def on_open_panel():
-        import subprocess
-        import sys
-        import os
-        
-        # Launch GUI in a separate process to avoid thread conflicts with tray icon
         try:
-            # Get path to python interpreter
-            python_exe = sys.executable
-            
-            # Get path to gui_modern.py
             script_dir = os.path.dirname(os.path.abspath(__file__))
             gui_script = os.path.join(script_dir, 'gui_modern.py')
-            
-            # Launch
-            subprocess.Popen([python_exe, gui_script], cwd=script_dir)
-            
+            if getattr(sys, 'frozen', False):
+                logging.warning('Control panel launch is unavailable from this packaged build')
+                return
+            subprocess.Popen([sys.executable, gui_script], cwd=script_dir)
         except Exception as e:
-            logging.error(f"Failed to open control panel: {e}")
-    tray = TrayIcon(on_exit=on_exit, on_toggle_privacy=on_toggle_privacy, on_open_panel=on_open_panel)
+            logging.error('Failed to open control panel: %s', e)
+
+    tray = TrayIcon(
+        on_exit=on_exit,
+        on_toggle_privacy=on_toggle_privacy,
+        on_open_panel=on_open_panel,
+        get_privacy_mode=lambda: config.get('privacy.mode', 'balanced'),
+    )
     tray.create_icon()
-    
-    # Run service in separate thread
-    service_thread = threading.Thread(target=service_run_func, daemon=True)
+    service_thread = threading.Thread(target=service_run_func, daemon=False)
     service_thread.start()
-    
-    # Run tray icon in main thread (blocking)
-    tray.run()
+    try:
+        tray.run()
+    finally:
+        if stop_func:
+            stop_func()
+        service_thread.join(timeout=10)
