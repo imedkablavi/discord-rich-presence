@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""
-Discord Rich Presence Service
-Automatically updates Discord Rich Presence based on current activity
-"""
+"""Discord Rich Presence Service."""
 
-import sys
-import time
-import logging
 import argparse
+import logging
+import os
+import sys
+import threading
+import time
 import traceback
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -26,19 +26,22 @@ from detectors.gaming import GamingDetector
 
 
 class DiscordRichPresenceService:
-    """Main service class for Discord Rich Presence updates"""
-    
+    """Detect activity and keep Discord RPC synchronized with the current state."""
+
     def __init__(self, config: Config, dry_run: bool = False, once: bool = False):
         self.config = config
         self.dry_run = dry_run
         self.once = once
         self.rpc: Optional[Presence] = None
         self.connected = False
+        self.presence_active = False
         self.last_payload: Optional[Dict[str, Any]] = None
         self.reconnect_delay = 5
         self.max_reconnect_delay = 300
-        
-        # Initialize detectors
+        self._stop_event = threading.Event()
+        self._last_config_mtime: Optional[float] = None
+        self.logger = logging.getLogger(__name__)
+
         self.window_detector = WindowDetector()
         self.browser_detector = BrowserDetector(config)
         self.terminal_detector = TerminalDetector(config)
@@ -46,93 +49,114 @@ class DiscordRichPresenceService:
         self.media_detector = MediaDetector(config)
         self.gaming_detector = GamingDetector(config)
         self.presence_builder = PresenceBuilder(config)
-        
-        # Setup logging
-        self.logger = logging.getLogger(__name__)
-    
+
     def connect_discord(self) -> bool:
-        """Connect to Discord RPC with error handling"""
         try:
-            client_id = self.config.get('discord.client_id')
+            client_id = str(self.config.get('discord.client_id', '')).strip()
             if not client_id:
                 self.logger.error("Discord client_id not configured")
                 return False
-            
             self.rpc = Presence(client_id)
             self.rpc.connect()
             self.connected = True
             self.reconnect_delay = 5
             self.logger.info("Connected to Discord RPC")
             return True
-            
         except (DiscordNotFound, InvalidID, InvalidPipe) as e:
-            self.logger.error(f"Failed to connect to Discord: {e}")
-            self.logger.debug(traceback.format_exc())
-            self.connected = False
-            return False
+            self.logger.warning("Discord RPC unavailable: %s", e)
         except Exception as e:
-            self.logger.error(f"Unexpected error connecting to Discord: {e}")
+            self.logger.error("Unexpected Discord connection error: %s", e)
             self.logger.debug(traceback.format_exc())
-            self.connected = False
-            return False
-    
+        self.connected = False
+        self.rpc = None
+        return False
+
     def disconnect_discord(self):
-        """Safely disconnect from Discord RPC"""
         if self.rpc and self.connected:
             try:
                 self.rpc.close()
-                self.logger.info("Disconnected from Discord RPC")
             except Exception as e:
-                self.logger.warning(f"Error during disconnect: {e}")
-            finally:
-                self.connected = False
-    
+                self.logger.debug("Error while closing Discord RPC: %s", e)
+        self.connected = False
+        self.rpc = None
+
     def update_presence(self, payload: Dict[str, Any]) -> bool:
-        """Update Discord presence with given payload"""
+        clean_payload = {key: value for key, value in payload.items() if value is not None}
         if self.dry_run:
-            self.logger.info(f"[DRY RUN] Would send: {payload}")
+            self.logger.info("[DRY RUN] update: %s", clean_payload)
+            self.last_payload = clean_payload
+            self.presence_active = True
             return True
-        
-        if not self.connected:
-            if not self.connect_discord():
-                return False
-        
+
+        if not self.connected and not self.connect_discord():
+            return False
         try:
-            # Remove None values
-            clean_payload = {k: v for k, v in payload.items() if v is not None}
-            
+            assert self.rpc is not None
             self.rpc.update(**clean_payload)
-            self.last_payload = payload
-            self.logger.debug(f"Updated presence: {clean_payload}")
+            self.last_payload = clean_payload
+            self.presence_active = True
+            self.logger.debug("Updated presence: %s", clean_payload)
             return True
-            
         except Exception as e:
-            self.logger.error(f"Failed to update presence: {e}")
+            self.logger.error("Failed to update presence: %s", e)
             self.logger.debug(traceback.format_exc())
             self.connected = False
+            self.rpc = None
             return False
-    
-    def detect_activity(self) -> Optional[Dict[str, Any]]:
-        """Detect current activity and build presence payload"""
+
+    def clear_presence(self) -> bool:
+        """Clear Discord when activity disappears, is blocked, or privacy requires it."""
+        if not self.presence_active:
+            return True
+        if self.dry_run:
+            self.logger.info("[DRY RUN] clear presence")
+            self.last_payload = None
+            self.presence_active = False
+            return True
+        if not self.connected and not self.connect_discord():
+            return False
         try:
-            if hasattr(self.config, 'config_path') and self.config.config_path and self.config.config_path.exists():
-                # Check modification time to avoid unnecessary reloads
-                current_mtime = self.config.config_path.stat().st_mtime
-                if not hasattr(self, '_last_config_mtime') or current_mtime != self._last_config_mtime:
-                    self.config.load(self.config.config_path)
-                    self._last_config_mtime = current_mtime
-        except Exception:
-            pass
-        
-        # Manual override
+            assert self.rpc is not None
+            self.rpc.clear()
+            self.last_payload = None
+            self.presence_active = False
+            self.logger.debug("Cleared Discord presence")
+            return True
+        except Exception as e:
+            self.logger.error("Failed to clear Discord presence: %s", e)
+            self.connected = False
+            self.rpc = None
+            return False
+
+    def _reload_config_if_changed(self):
+        path = getattr(self.config, 'config_path', None)
+        if not path or not path.exists():
+            return
+        try:
+            current_mtime = path.stat().st_mtime
+            if self._last_config_mtime is None:
+                self._last_config_mtime = current_mtime
+                return
+            if current_mtime == self._last_config_mtime:
+                return
+            self.config.load(path)
+            self.presence_builder.reload()
+            self._last_config_mtime = current_mtime
+            self.logger.info("Configuration reloaded")
+        except Exception as e:
+            self.logger.error("Config hot reload rejected; keeping previous config: %s", e)
+
+    def detect_activity(self) -> Optional[Dict[str, Any]]:
+        self._reload_config_if_changed()
+
         if self.config.get('override.enabled', False):
             override = self.config.get('override', {}) or {}
-            payload = {
+            payload: Dict[str, Any] = {
                 'details': str(override.get('details', ''))[:128],
                 'state': str(override.get('state', ''))[:128],
-                'large_image': (override.get('large_image_key') or self.config.get('images.app', 'app')),
+                'large_image': override.get('large_image_key') or self.config.get('images.app', 'app'),
                 'large_text': override.get('large_text') or None,
-                'small_image': (override.get('small_image_key') or None),
+                'small_image': override.get('small_image_key') or None,
                 'small_text': override.get('small_text') or None,
                 'details_url': override.get('details_url') or None,
                 'state_url': override.get('state_url') or None,
@@ -140,243 +164,196 @@ class DiscordRichPresenceService:
                 'small_url': override.get('small_url') or None,
             }
             buttons = override.get('buttons') or []
-            if isinstance(buttons, list) and len(buttons) > 0:
+            if isinstance(buttons, list):
                 payload['buttons'] = [
-                    {'label': str(b.get('label','')).strip(), 'url': str(b.get('url','')).strip()}
+                    {'label': str(b.get('label', '')).strip()[:32], 'url': str(b.get('url', '')).strip()[:512]}
                     for b in buttons[:2]
-                    if b.get('label') and b.get('url')
+                    if isinstance(b, dict) and b.get('label') and str(b.get('url', '')).startswith(('http://', 'https://'))
                 ]
             if override.get('use_start_timestamp'):
-                payload['start'] = int(time.time())
-            # Party info
+                payload['start'] = int(time.time() * 1000)
             party_id = override.get('party_id') or None
-            party_cur = override.get('party_current') or 0
-            party_max = override.get('party_max') or 0
+            try:
+                party_cur = int(override.get('party_current') or 0)
+                party_max = int(override.get('party_max') or 0)
+            except (TypeError, ValueError):
+                party_cur = party_max = 0
             if party_id:
-                payload['party_id'] = party_id
-            if party_max and party_cur and int(party_max) >= int(party_cur):
-                payload['party_size'] = [int(party_cur), int(party_max)]
-            if self.config.get('privacy.mode','balanced') == 'strict':
+                payload['party_id'] = str(party_id)
+            if party_cur > 0 and party_max >= party_cur:
+                payload['party_size'] = [party_cur, party_max]
+            if self.config.get('privacy.mode', 'balanced') == 'strict':
                 payload.pop('buttons', None)
+                for key in ('details_url', 'state_url', 'large_url', 'small_url'):
+                    payload.pop(key, None)
             return payload
 
-        # Get active window info
         window_info = self.window_detector.get_active_window()
         if not window_info:
             return None
-        app_name_norm = window_info.get('app_name', '').lower()
-        if not self._is_app_allowed(app_name_norm):
+
+        app_name = str(window_info.get('app_name', '')).lower()
+        if not self._is_app_allowed(app_name):
             return None
 
-        # Priority 1: Gaming
-        gaming_activity = self.gaming_detector.detect(window_info)
-        if gaming_activity:
-            # Optional gaming whitelist/blacklist
-            gname = str(gaming_activity.get('game_name') or '').lower()
-            if not self._is_game_allowed(gname):
+        gaming = self.gaming_detector.detect(window_info)
+        if gaming and gaming.get('is_game'):
+            game_name = str(gaming.get('game_name') or '').lower()
+            if not self._is_game_allowed(game_name):
                 return None
-            return self.presence_builder.build(gaming_activity)
+            return self.presence_builder.build(gaming)
 
-        # Priority 2: Media playback (MPRIS)
-        media_activity = self.media_detector.detect(window_info)
-        if media_activity and media_activity.get('is_playing'):
-            return self.presence_builder.build(media_activity)
-        
-        # Priority 3: Terminal with active command
-        terminal_activity = self.terminal_detector.detect(window_info)
-        if terminal_activity and terminal_activity.get('has_command'):
-            return self.presence_builder.build(terminal_activity)
-        
-        # Priority 4: Code editor
-        coding_activity = self.coding_detector.detect(window_info)
-        if coding_activity:
-            return self.presence_builder.build(coding_activity)
-        
-        # Priority 5: Browser
-        browser_activity = self.browser_detector.detect(window_info)
-        if browser_activity:
-            page_title = browser_activity.get('page_title', '')
-            if self._is_site_allowed(page_title):
-                return self.presence_builder.build(browser_activity)
-            else:
+        media = self.media_detector.detect(window_info)
+        if media and media.get('is_playing'):
+            return self.presence_builder.build(media)
+
+        terminal = self.terminal_detector.detect(window_info)
+        if terminal and terminal.get('has_command'):
+            return self.presence_builder.build(terminal)
+
+        coding = self.coding_detector.detect(window_info)
+        if coding:
+            return self.presence_builder.build(coding)
+
+        browser = self.browser_detector.detect(window_info)
+        if browser:
+            searchable = f"{browser.get('service', '')} {browser.get('page_title', '')}".strip()
+            if not self._is_site_allowed(searchable):
                 return None
-        
-        # Priority 6: Generic application
-        generic_activity = {
+            return self.presence_builder.build(browser)
+
+        generic = {
             'type': 'application',
             'app_name': window_info.get('app_name', 'Unknown'),
             'window_title': window_info.get('title', '')
         }
-        return self.presence_builder.build(generic_activity)
+        return self.presence_builder.build(generic)
 
     def _is_game_allowed(self, game_name: str) -> bool:
-        wl = [str(x).lower() for x in (self.config.get('rules.whitelist.games', []) or [])]
-        bl = [str(x).lower() for x in (self.config.get('rules.blacklist.games', []) or [])]
-        if game_name in bl:
+        whitelist = [str(x).lower() for x in (self.config.get('rules.whitelist.games', []) or [])]
+        blacklist = [str(x).lower() for x in (self.config.get('rules.blacklist.games', []) or [])]
+        if game_name in blacklist:
             return False
-        if wl and game_name not in wl:
-            return False
-        return True
+        return not whitelist or game_name in whitelist
 
     def _is_app_allowed(self, app_name: str) -> bool:
-        wl = [str(x).lower() for x in (self.config.get('rules.whitelist.apps', []) or [])]
-        bl = [str(x).lower() for x in (self.config.get('rules.blacklist.apps', []) or [])]
-        if app_name in bl:
+        whitelist = [str(x).lower() for x in (self.config.get('rules.whitelist.apps', []) or [])]
+        blacklist = [str(x).lower() for x in (self.config.get('rules.blacklist.apps', []) or [])]
+        if app_name in blacklist:
             return False
-        if wl and app_name not in wl:
-            return False
-        return True
+        return not whitelist or app_name in whitelist
 
     def _is_site_allowed(self, title: str) -> bool:
-        wl = [str(x).lower() for x in (self.config.get('rules.whitelist.sites', []) or [])]
-        bl = [str(x).lower() for x in (self.config.get('rules.blacklist.sites', []) or [])]
-        title_l = str(title).lower()
-        for kw in bl:
-            if kw and kw in title_l:
-                return False
-        if wl:
-            return any(kw in title_l for kw in wl if kw)
-        return True
-    
+        whitelist = [str(x).lower() for x in (self.config.get('rules.whitelist.sites', []) or [])]
+        blacklist = [str(x).lower() for x in (self.config.get('rules.blacklist.sites', []) or [])]
+        title_lower = str(title).lower()
+        if any(keyword and keyword in title_lower for keyword in blacklist):
+            return False
+        return not whitelist or any(keyword and keyword in title_lower for keyword in whitelist)
+
     def should_update(self, new_payload: Optional[Dict[str, Any]]) -> bool:
-        """Check if presence should be updated"""
         if new_payload is None:
             return False
-        
-        if self.last_payload is None:
-            return True
-        
-        # Compare key fields to avoid unnecessary updates
-        key_fields = ['details', 'state', 'large_image', 'small_image']
-        for field in key_fields:
-            if new_payload.get(field) != self.last_payload.get(field):
-                return True
-        
-        return False
-    
+        normalized = {key: value for key, value in new_payload.items() if value is not None}
+        return not self.presence_active or normalized != (self.last_payload or {})
+
+    def _handle_rpc_failure(self):
+        self._stop_event.wait(self.reconnect_delay)
+        self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
+
     def run(self):
-        """Main service loop"""
         self.logger.info("Starting Discord Rich Presence Service")
-        
-        if not self.dry_run:
-            if not self.connect_discord():
-                self.logger.error("Failed to connect to Discord. Retrying...")
-        
-        update_interval = self.config.get('update_interval_secs', 5)
-        
-        import threading
-        if not hasattr(self, '_stop_event'):
-            self._stop_event = threading.Event()
+        if not self.dry_run and not self.connect_discord():
+            self.logger.warning("Discord is not available yet; service will retry")
+
         try:
             while not self._stop_event.is_set():
                 try:
-                    # Detect current activity
                     payload = self.detect_activity()
-                    
-                    # Update if changed
-                    if self.should_update(payload):
-                        if self.update_presence(payload):
-                            self.reconnect_delay = 5
-                        else:
-                            # Exponential backoff on failure
-                            time.sleep(self.reconnect_delay)
-                            self.reconnect_delay = min(
-                                self.reconnect_delay * 2,
-                                self.max_reconnect_delay
-                            )
-                            continue
-                    
-                    # Exit if --once flag is set
+                    success = True
+                    if payload is None:
+                        if self.presence_active:
+                            success = self.clear_presence()
+                    elif self.should_update(payload):
+                        success = self.update_presence(payload)
+
+                    if not success:
+                        self._handle_rpc_failure()
+                        continue
+
+                    self.reconnect_delay = 5
                     if self.once:
-                        self.logger.info("Single update completed, exiting")
                         break
-                    
-                    # Wait for next update
-                    time.sleep(update_interval)
-                    
+                    interval = float(self.config.get('update_interval_secs', 5))
+                    self._stop_event.wait(max(1.0, interval))
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
-                    self.logger.error(f"Error in main loop: {e}", exc_info=True)
-                    time.sleep(update_interval)
-        
+                    self.logger.error("Error in main loop: %s", e, exc_info=True)
+                    self._stop_event.wait(max(1.0, float(self.config.get('update_interval_secs', 5))))
         except KeyboardInterrupt:
-            self.logger.info("Received interrupt signal, shutting down")
+            self.logger.info("Received interrupt signal")
         finally:
-            self.disconnect_discord()
+            # Do not intentionally leave a stale status after normal service shutdown.
+            try:
+                self.clear_presence()
+            finally:
+                self.disconnect_discord()
+            self.logger.info("Discord Rich Presence Service stopped")
 
     def stop(self):
-        try:
-            if hasattr(self, '_stop_event'):
-                self._stop_event.set()
-        except Exception:
-            pass
+        self._stop_event.set()
+
+
+def _default_log_path() -> Path:
+    if sys.platform == 'win32':
+        base = os.environ.get('LOCALAPPDATA')
+        root = Path(base) if base else Path.home() / 'AppData' / 'Local'
+        return root / 'discord-rich-presence' / 'logs' / 'app.log'
+    return Path.home() / '.local' / 'state' / 'discord-rich-presence' / 'app.log'
+
+
+def setup_logging(verbose: bool = False):
+    level = logging.DEBUG if verbose else logging.INFO
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    if not any(isinstance(h, logging.StreamHandler) and not isinstance(h, RotatingFileHandler) for h in root.handlers):
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        root.addHandler(console)
+
+    try:
+        log_path = _default_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=5, encoding='utf-8')
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
+    except Exception:
+        root.exception("Could not initialize file logging")
 
 
 def main():
-    """Entry point"""
-    parser = argparse.ArgumentParser(
-        description='Discord Rich Presence Service - Auto-update based on activity'
-    )
-    parser.add_argument(
-        '--config',
-        type=Path,
-        default=None,  # Will use platform-specific default in Config class
-        help='Path to configuration file'
-    )
-    parser.add_argument(
-        '--privacy',
-        choices=['off', 'balanced', 'strict'],
-        help='Override privacy mode'
-    )
-    parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Show what would be sent without actually sending'
-    )
-    parser.add_argument(
-        '--once',
-        action='store_true',
-        help='Update once and exit'
-    )
-    parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help='Enable verbose logging'
-    )
-    parser.add_argument(
-        '--tray',
-        action='store_true',
-        help='Show system tray for privacy and control'
-    )
-    
+    parser = argparse.ArgumentParser(description='Discord Rich Presence Service')
+    parser.add_argument('--config', type=Path, default=None, help='Path to configuration file')
+    parser.add_argument('--privacy', choices=['off', 'balanced', 'strict'], help='Override privacy mode')
+    parser.add_argument('--dry-run', action='store_true', help='Show RPC operations without sending them')
+    parser.add_argument('--once', action='store_true', help='Perform one detection cycle and exit')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
+    parser.add_argument('--tray', action='store_true', help='Show the system tray control')
     args = parser.parse_args()
-    
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Load configuration
+
+    setup_logging(args.verbose)
     try:
         config = Config(args.config)
-        
-        # Override privacy mode if specified
         if args.privacy:
             config.set('privacy.mode', args.privacy)
-        
     except Exception as e:
-        logging.error(f"Failed to load configuration: {e}")
+        logging.error("Failed to load configuration: %s", e)
         sys.exit(1)
-    
-    # Run service
-    service = DiscordRichPresenceService(
-        config=config,
-        dry_run=args.dry_run,
-        once=args.once
-    )
+
+    service = DiscordRichPresenceService(config, dry_run=args.dry_run, once=args.once)
     if args.tray or config.get('system.start_minimized', False):
         run_with_tray(service.run, config, service.stop)
     else:
