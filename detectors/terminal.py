@@ -111,6 +111,12 @@ class TerminalDetector:
             pass
         return files
 
+    def _fresh_pid_command_files(self) -> list[Path]:
+        try:
+            return [path for path in self.command_dir.glob('*.txt') if self._is_fresh(path)]
+        except OSError:
+            return []
+
     def _cleanup_command_cache(self):
         """Bound stale per-shell cache files without touching fresh active entries."""
         try:
@@ -141,8 +147,12 @@ class TerminalDetector:
                 if command:
                     return command
 
-            # Backward-compatible fallback for older hooks. New hooks write both
-            # the PID-specific file and this global file.
+            # If new PID-scoped hooks are active but none match this focused terminal,
+            # returning the global cache could leak a command from another terminal.
+            # Only use the old global cache when there are no fresh PID-scoped files.
+            if self._fresh_pid_command_files():
+                return ''
+
             if self.cmd_file.exists() and self._is_fresh(self.cmd_file):
                 return self._read_command(self.cmd_file)
         except (OSError, ValueError) as e:
