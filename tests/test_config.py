@@ -30,6 +30,17 @@ def test_invalid_interval_is_rejected(tmp_path: Path):
         Config(path)
 
 
+def test_polling_interval_boundaries_are_validated(tmp_path: Path):
+    valid = tmp_path / 'valid.yaml'
+    valid.write_text('update_interval_secs: 1\n', encoding='utf-8')
+    assert Config(valid).get('update_interval_secs') == 1
+
+    too_fast = tmp_path / 'too-fast.yaml'
+    too_fast.write_text('update_interval_secs: 0.5\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='between 1 and 3600'):
+        Config(too_fast)
+
+
 def test_button_limits_are_validated(tmp_path: Path):
     path = tmp_path / 'config.yaml'
     path.write_text(
