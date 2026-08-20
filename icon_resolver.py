@@ -9,66 +9,69 @@ from config import Config
 class IconResolver:
     """Prefer per-application artwork while keeping existing asset-key fallbacks."""
 
-    # Discord accepts external image URLs for Rich Presence assets. These URLs
-    # are only placed in the RPC payload; this service does not download them.
-    # Simple Icons provides stable brand artwork for common applications.
-    BUILTIN_EXTERNAL_ICONS = {
+    # Discord's traditional desktop RPC path is more reliable with raster
+    # external artwork. Google S2 returns PNG favicons and avoids sending SVG
+    # artwork that some Discord desktop clients silently ignore.
+    BUILTIN_ICON_DOMAINS = {
         # Browsers
-        'brave': 'https://cdn.simpleicons.org/brave',
-        'chrome': 'https://cdn.simpleicons.org/googlechrome',
-        'google chrome': 'https://cdn.simpleicons.org/googlechrome',
-        'chromium': 'https://cdn.simpleicons.org/chromium',
-        'firefox': 'https://cdn.simpleicons.org/firefoxbrowser',
-        'firefox browser': 'https://cdn.simpleicons.org/firefoxbrowser',
-        'edge': 'https://cdn.simpleicons.org/microsoftedge',
-        'microsoft edge': 'https://cdn.simpleicons.org/microsoftedge',
-        'opera': 'https://cdn.simpleicons.org/opera',
-        'vivaldi': 'https://cdn.simpleicons.org/vivaldi',
+        'brave': 'brave.com',
+        'chrome': 'chrome.google.com',
+        'google chrome': 'chrome.google.com',
+        'chromium': 'chromium.org',
+        'firefox': 'firefox.com',
+        'firefox browser': 'firefox.com',
+        'edge': 'microsoftedge.microsoft.com',
+        'microsoft edge': 'microsoftedge.microsoft.com',
+        'opera': 'opera.com',
+        'vivaldi': 'vivaldi.com',
 
         # Media
-        'spotify': 'https://cdn.simpleicons.org/spotify',
-        'mpv': 'https://cdn.simpleicons.org/mpv',
+        'spotify': 'spotify.com',
+        'vlc': 'videolan.org',
+        'mpv': 'mpv.io',
+        'windows media player': 'microsoft.com',
 
         # Editors / IDEs
-        'visual studio code': 'https://cdn.simpleicons.org/visualstudiocode',
-        'vs code': 'https://cdn.simpleicons.org/visualstudiocode',
-        'vs code oss': 'https://cdn.simpleicons.org/visualstudiocode',
-        'vscodium': 'https://cdn.simpleicons.org/vscodium',
-        'pycharm': 'https://cdn.simpleicons.org/pycharm',
-        'intellij idea': 'https://cdn.simpleicons.org/intellijidea',
-        'webstorm': 'https://cdn.simpleicons.org/webstorm',
-        'phpstorm': 'https://cdn.simpleicons.org/phpstorm',
-        'goland': 'https://cdn.simpleicons.org/goland',
-        'rider': 'https://cdn.simpleicons.org/rider',
-        'clion': 'https://cdn.simpleicons.org/clion',
-        'rubymine': 'https://cdn.simpleicons.org/rubymine',
-        'android studio': 'https://cdn.simpleicons.org/androidstudio',
-        'sublime text': 'https://cdn.simpleicons.org/sublimetext',
-        'vim': 'https://cdn.simpleicons.org/vim',
-        'neovim': 'https://cdn.simpleicons.org/neovim',
-        'emacs': 'https://cdn.simpleicons.org/gnuemacs',
+        'visual studio code': 'code.visualstudio.com',
+        'vs code': 'code.visualstudio.com',
+        'vs code oss': 'code.visualstudio.com',
+        'vscodium': 'vscodium.com',
+        'pycharm': 'jetbrains.com',
+        'intellij idea': 'jetbrains.com',
+        'webstorm': 'jetbrains.com',
+        'phpstorm': 'jetbrains.com',
+        'goland': 'jetbrains.com',
+        'rider': 'jetbrains.com',
+        'clion': 'jetbrains.com',
+        'rubymine': 'jetbrains.com',
+        'android studio': 'developer.android.com',
+        'sublime text': 'sublimetext.com',
+        'vim': 'vim.org',
+        'neovim': 'neovim.io',
+        'emacs': 'gnu.org',
+        'trae': 'trae.ai',
 
         # Shells / terminals / KDE applications
-        'powershell': 'https://cdn.simpleicons.org/powershell',
-        'powershell core': 'https://cdn.simpleicons.org/powershell',
-        'windows terminal': 'https://cdn.simpleicons.org/windowsterminal',
-        'bash': 'https://cdn.simpleicons.org/gnubash',
-        'konsole': 'https://cdn.simpleicons.org/kdeplasma',
-        'dolphin': 'https://cdn.simpleicons.org/kdeplasma',
-        'kate': 'https://cdn.simpleicons.org/kdeplasma',
-        'okular': 'https://cdn.simpleicons.org/kdeplasma',
-        'kde plasma': 'https://cdn.simpleicons.org/kdeplasma',
+        'powershell': 'microsoft.com',
+        'powershell core': 'microsoft.com',
+        'windows terminal': 'microsoft.com',
+        'bash': 'gnu.org',
+        'konsole': 'kde.org',
+        'dolphin': 'kde.org',
+        'kate': 'kate-editor.org',
+        'okular': 'okular.kde.org',
+        'kde plasma': 'kde.org',
 
-        # Services / launchers that are useful as secondary artwork too
-        'youtube': 'https://cdn.simpleicons.org/youtube',
-        'netflix': 'https://cdn.simpleicons.org/netflix',
-        'twitch': 'https://cdn.simpleicons.org/twitch',
-        'github': 'https://cdn.simpleicons.org/github',
-        'soundcloud': 'https://cdn.simpleicons.org/soundcloud',
-        'hulu': 'https://cdn.simpleicons.org/hulu',
-        'disney+': 'https://cdn.simpleicons.org/disneyplus',
-        'steam': 'https://cdn.simpleicons.org/steam',
-        'discord': 'https://cdn.simpleicons.org/discord',
+        # Services / launchers useful as secondary artwork too
+        'youtube': 'youtube.com',
+        'netflix': 'netflix.com',
+        'twitch': 'twitch.tv',
+        'github': 'github.com',
+        'soundcloud': 'soundcloud.com',
+        'hulu': 'hulu.com',
+        'disney+': 'disneyplus.com',
+        'steam': 'steampowered.com',
+        'discord': 'discord.com',
     }
 
     def __init__(self, config: Config):
@@ -81,6 +84,10 @@ class IconResolver:
             text = text.rsplit('.', 1)[-1]
         text = text.replace('_', ' ').replace('-', ' ')
         return re.sub(r'\s+', ' ', text).strip()
+
+    @staticmethod
+    def _png_favicon_url(domain: str) -> str:
+        return f'https://www.google.com/s2/favicons?domain={domain}&sz=256'
 
     def _names(self, values: Iterable[object]) -> list[str]:
         names = []
@@ -119,9 +126,9 @@ class IconResolver:
 
         if self.config.get('images.use_external_app_icons', True):
             for name in names:
-                external = self.BUILTIN_EXTERNAL_ICONS.get(name)
-                if external:
-                    return external
+                domain = self.BUILTIN_ICON_DOMAINS.get(name)
+                if domain:
+                    return self._png_favicon_url(domain)
 
         configured_value = str(configured or '').strip()
         return configured_value or None
