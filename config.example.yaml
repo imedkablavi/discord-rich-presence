@@ -102,7 +102,12 @@ rules:
     coding: true
     browser: true
     gaming: true
+    # Set false to avoid publishing generic/unknown application window titles.
+    application: true
+  # Clear existing Presence when a known OS/compositor lock screen is foreground.
+  clear_on_lock_screen: true
   # Ignore terminal hook cache entries older than this. 0 disables expiration.
+  # Valid range: 0-604800 (7 days).
   terminal_command_ttl_secs: 21600
   whitelist:
     apps: []
