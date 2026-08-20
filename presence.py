@@ -287,13 +287,7 @@ class PresenceBuilder:
             configured = sites.get(str(service).lower())
         # Only known/configured services get a small overlay. Avoid inserting a
         # generic fallback because the large image already represents the app.
-        external = self.icons.BUILTIN_EXTERNAL_ICONS.get(self.icons._normalize(service))
-        custom = self.icons._custom_override(self.icons._names((service,)))
-        if custom:
-            return custom
-        if self.config.get('images.use_external_app_icons', True) and external:
-            return external
-        return str(configured).strip() if configured else None
+        return self.icons.resolve_optional(service, configured=str(configured or ''))
 
     def _add_buttons(self, payload: Dict[str, Any], url: Optional[str] = None, service: str = ''):
         if self.config.get('privacy.mode', 'balanced') == 'strict':
