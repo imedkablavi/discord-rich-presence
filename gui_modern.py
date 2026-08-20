@@ -1,433 +1,306 @@
-import customtkinter as ctk
+"""Modern configuration/control panel for Discord Rich Presence."""
+
+import copy
+import os
+import subprocess
+import sys
+import threading
+import webbrowser
+from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
-import webbrowser
-import threading
-import sys
-import os
+
+import customtkinter as ctk
+
+from config import Config, DEFAULT_CONFIG
+
 try:
     import winreg
     _WINREG_AVAILABLE = True
 except ImportError:
     _WINREG_AVAILABLE = False
-from PIL import Image
 
-# Import Config
-try:
-    from config import Config
-except ImportError:
-    import importlib.util
-    _p = os.path.join(os.path.dirname(__file__), 'config.py')
-    _spec = importlib.util.spec_from_file_location('config_fallback', _p)
-    _mod = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(_mod)
-    Config = _mod.Config
 
-# Set Theme
-ctk.set_appearance_mode("System")
-ctk.set_default_color_theme("blue")
+ctk.set_appearance_mode('System')
+ctk.set_default_color_theme('blue')
+
 
 class ModernControlPanel(ctk.CTk):
     def __init__(self, config: Config):
         super().__init__()
-
         self.config = config
-        self.title("Discord Rich Presence - Professional Edition")
-        self.geometry("1100x750")
-        self.minsize(900, 600)
-        
-        # Grid Layout
+        self.service_process: subprocess.Popen | None = None
+        self.title('Discord Rich Presence Manager')
+        self.geometry('1000x720')
+        self.minsize(850, 600)
+        self.protocol('WM_DELETE_WINDOW', self.destroy)
+
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+        self._build_sidebar()
+        self._build_pages()
+        self.select_page('dashboard')
+        self.after(1000, self._poll_service)
 
-        # Create Navigation Sidebar
-        self._create_sidebar()
+    def _build_sidebar(self):
+        sidebar = ctk.CTkFrame(self, width=210, corner_radius=0)
+        sidebar.grid(row=0, column=0, sticky='nsew')
+        sidebar.grid_rowconfigure(7, weight=1)
+        ctk.CTkLabel(sidebar, text='DRP Manager', font=ctk.CTkFont(size=23, weight='bold')).grid(row=0, column=0, padx=20, pady=(30, 20))
 
-        # Create Main Area
-        self.main_frames = {}
-        self._create_frames()
+        self.nav = {}
+        for row, (name, label) in enumerate((
+            ('dashboard', 'Dashboard'), ('activity', 'Activity'),
+            ('privacy', 'Privacy'), ('settings', 'Settings'), ('about', 'About')
+        ), start=1):
+            button = ctk.CTkButton(sidebar, text=label, anchor='w', corner_radius=0, fg_color='transparent', command=lambda n=name: self.select_page(n))
+            button.grid(row=row, column=0, sticky='ew', padx=0, pady=2)
+            self.nav[name] = button
 
-        # Select default
-        self.select_frame("home")
-        
-        # Check autostart status from registry to sync UI
-        self._check_registry_autostart()
+        self.theme_menu = ctk.CTkOptionMenu(sidebar, values=['System', 'Light', 'Dark'], command=ctk.set_appearance_mode)
+        self.theme_menu.grid(row=8, column=0, padx=20, pady=10)
+        ctk.CTkButton(sidebar, text='Save Changes', command=self.save_settings).grid(row=9, column=0, padx=20, pady=(10, 25))
 
-    def _create_sidebar(self):
-        self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, rowspan=4, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(5, weight=1)
+    def _build_pages(self):
+        self.pages = {}
+        self._build_dashboard()
+        self._build_activity()
+        self._build_privacy()
+        self._build_settings()
+        self._build_about()
 
-        # App Logo / Title
-        self.logo_label = ctk.CTkLabel(
-            self.sidebar_frame, 
-            text="DRP Manager\nPro Edition", 
-            font=ctk.CTkFont(size=24, weight="bold")
-        )
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
+    def _page(self, name: str, title: str):
+        page = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color='transparent')
+        self.pages[name] = page
+        ctk.CTkLabel(page, text=title, font=ctk.CTkFont(size=28, weight='bold')).pack(anchor='w', padx=30, pady=(25, 15))
+        return page
 
-        # Navigation Buttons
-        self.nav_buttons = {}
-        
-        self.nav_buttons["home"] = self._create_nav_btn("Dashboard", "home", 1)
-        self.nav_buttons["activity"] = self._create_nav_btn("Activity Rules", "activity", 2)
-        self.nav_buttons["privacy"] = self._create_nav_btn("Privacy & Security", "privacy", 3)
-        self.nav_buttons["settings"] = self._create_nav_btn("Settings", "settings", 4)
-        self.nav_buttons["about"] = self._create_nav_btn("About & Legal", "about", 5)
+    def _build_dashboard(self):
+        page = self._page('dashboard', 'Service Dashboard')
+        card = ctk.CTkFrame(page)
+        card.pack(fill='x', padx=30, pady=10)
+        self.status_label = ctk.CTkLabel(card, text='● Not managed by this panel', font=ctk.CTkFont(size=16, weight='bold'))
+        self.status_label.pack(anchor='w', padx=20, pady=(20, 10))
+        ctk.CTkLabel(card, text='The panel only reports services it starts itself; it no longer claims Running by default.', text_color='gray').pack(anchor='w', padx=20, pady=(0, 15))
 
-        # Appearance Mode
-        self.appearance_mode_label = ctk.CTkLabel(self.sidebar_frame, text="Theme:", anchor="w")
-        self.appearance_mode_label.grid(row=7, column=0, padx=20, pady=(10, 0))
-        self.appearance_mode_menu = ctk.CTkOptionMenu(
-            self.sidebar_frame, 
-            values=["System", "Light", "Dark"],
-            command=self.change_appearance_mode_event
-        )
-        self.appearance_mode_menu.grid(row=8, column=0, padx=20, pady=(10, 20))
-        
-        # Save Button
-        self.save_btn = ctk.CTkButton(
-            self.sidebar_frame,
-            text="Save Changes",
-            fg_color="#2ecc71",
-            hover_color="#27ae60",
-            font=ctk.CTkFont(weight="bold"),
-            command=self.save_settings
-        )
-        self.save_btn.grid(row=9, column=0, padx=20, pady=20)
+        controls = ctk.CTkFrame(card, fg_color='transparent')
+        controls.pack(fill='x', padx=15, pady=(0, 20))
+        self.start_button = ctk.CTkButton(controls, text='Start Service', command=self.start_service)
+        self.start_button.pack(side='left', padx=5)
+        self.stop_button = ctk.CTkButton(controls, text='Stop Managed Service', command=self.stop_service)
+        self.stop_button.pack(side='left', padx=5)
+        ctk.CTkButton(controls, text='Test Discord RPC', command=self.test_rpc).pack(side='left', padx=5)
+        ctk.CTkButton(controls, text='Open Logs', command=self.open_logs).pack(side='left', padx=5)
 
-    def _create_nav_btn(self, text, name, row):
-        btn = ctk.CTkButton(
-            self.sidebar_frame,
-            corner_radius=0,
-            height=45,
-            border_spacing=15,
-            text=text,
-            fg_color="transparent",
-            text_color=("gray10", "gray90"),
-            hover_color=("gray70", "gray30"),
-            anchor="w",
-            font=ctk.CTkFont(size=14),
-            command=lambda: self.select_frame(name)
-        )
-        btn.grid(row=row, column=0, sticky="ew")
-        return btn
-
-    def _create_frames(self):
-        # 1. Home Dashboard
-        self.home_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_frames["home"] = self.home_frame
-        
-        ctk.CTkLabel(self.home_frame, text="System Status", font=ctk.CTkFont(size=28, weight="bold")).pack(anchor="w", padx=30, pady=20)
-        
-        # Status Card
-        status_card = ctk.CTkFrame(self.home_frame, fg_color=("gray85", "gray20"))
-        status_card.pack(fill="x", padx=30, pady=10)
-        
-        ctk.CTkLabel(status_card, text="Service Status:", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=20, pady=20)
-        self.status_label = ctk.CTkLabel(status_card, text="● Running", text_color="#2ecc71", font=ctk.CTkFont(size=16, weight="bold"))
-        self.status_label.pack(side="left", padx=10)
-        
-        # Test Connection Button
-        ctk.CTkButton(status_card, text="Test Discord Connection", command=self._test_connection, width=200).pack(side="right", padx=20, pady=20)
-        
-        # Quick Toggles
-        ctk.CTkLabel(self.home_frame, text="Quick Actions", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=30, pady=(30, 10))
-        
-        q_frame = ctk.CTkFrame(self.home_frame, fg_color="transparent")
-        q_frame.pack(fill="x", padx=30)
-        
-        self.q_autostart = ctk.BooleanVar(value=bool(self.config.get('system.auto_start', False)))
-        as_switch = ctk.CTkSwitch(q_frame, text="Start with Windows (Registry)", variable=self.q_autostart, font=ctk.CTkFont(size=14))
-        as_switch.pack(anchor="w", pady=10)
-        
-        self.q_tray = ctk.BooleanVar(value=bool(self.config.get('system.start_minimized', False)))
-        tray_switch = ctk.CTkSwitch(q_frame, text="Start Minimized to Tray", variable=self.q_tray, font=ctk.CTkFont(size=14))
-        tray_switch.pack(anchor="w", pady=10)
-        
-        # Tips
-        tip_frame = ctk.CTkFrame(self.home_frame, border_width=1, border_color=("gray70", "gray30"))
-        tip_frame.pack(fill="x", padx=30, pady=30)
-        ctk.CTkLabel(tip_frame, text="💡 Pro Tip: Use 'Activity Rules' to exclude specific apps or games you don't want to show.", justify="left", wraplength=600).pack(padx=20, pady=15, anchor="w")
-
-        # 2. Activity Rules
-        self.activity_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_frames["activity"] = self.activity_frame
-        
-        ctk.CTkLabel(self.activity_frame, text="Activity Detection Rules", font=ctk.CTkFont(size=28, weight="bold")).pack(anchor="w", padx=30, pady=20)
-        ctk.CTkLabel(self.activity_frame, text="Select which activities are broadcast to Discord.", font=ctk.CTkFont(size=14)).pack(anchor="w", padx=30, pady=(0, 20))
-        
-        # Detectors
-        det_frame = ctk.CTkFrame(self.activity_frame)
-        det_frame.pack(fill="x", padx=30, pady=10)
-        
+    def _build_activity(self):
+        page = self._page('activity', 'Activity Detectors')
         enabled = self.config.get('rules.enabled_detectors', {}) or {}
-        self.detectors_vars = {
-            'gaming': ('Game Detection', bool(enabled.get('gaming', True))),
-            'coding': ('Code Editors (VS Code, Trae, JetBrains)', bool(enabled.get('coding', True))),
-            'browser': ('Web Browsers (Chrome, Edge, etc.)', bool(enabled.get('browser', True))),
-            'media': ('Media Players (VLC, Spotify)', bool(enabled.get('media', True))),
-            'terminal': ('Terminal / Console', bool(enabled.get('terminal', True))),
+        self.detector_vars = {}
+        labels = {
+            'gaming': 'Games', 'coding': 'Code editors', 'browser': 'Browsers',
+            'media': 'Media players', 'terminal': 'Terminal / console'
         }
-        
-        for key, (label, val) in self.detectors_vars.items():
-            var = ctk.BooleanVar(value=val)
-            self.detectors_vars[key] = var # Store var
-            ctk.CTkCheckBox(det_frame, text=label, variable=var, font=ctk.CTkFont(size=14)).pack(anchor="w", padx=20, pady=12)
+        box = ctk.CTkFrame(page)
+        box.pack(fill='x', padx=30, pady=10)
+        for key, label in labels.items():
+            var = ctk.BooleanVar(value=bool(enabled.get(key, True)))
+            self.detector_vars[key] = var
+            ctk.CTkCheckBox(box, text=label, variable=var).pack(anchor='w', padx=20, pady=10)
 
-        # 3. Privacy
-        self.privacy_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_frames["privacy"] = self.privacy_frame
-        
-        ctk.CTkLabel(self.privacy_frame, text="Privacy & Security", font=ctk.CTkFont(size=28, weight="bold")).pack(anchor="w", padx=30, pady=20)
-        
-        p_frame = ctk.CTkFrame(self.privacy_frame)
-        p_frame.pack(fill="x", padx=30, pady=10)
-        
-        self.privacy_mode_var = tk.StringVar(value=str(self.config.get('privacy.mode', 'balanced')))
-        
-        ctk.CTkLabel(p_frame, text="Privacy Mode:", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=20, pady=(20, 10))
-        
-        modes = [
-            ("Off", "off", "Share everything (Filename, Project Name, URL)"),
-            ("Balanced", "balanced", "Hide sensitive paths, secrets, and private browsing"),
-            ("Strict", "strict", "Hide all filenames, details, and buttons")
-        ]
-        
-        for label, val, desc in modes:
-            rb = ctk.CTkRadioButton(p_frame, text=f"{label} - {desc}", variable=self.privacy_mode_var, value=val, font=ctk.CTkFont(size=14))
-            rb.pack(anchor="w", padx=20, pady=8)
-            
-        ctk.CTkLabel(p_frame, text="File System Privacy:", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=20, pady=(30, 10))
-        self.hide_home_var = ctk.BooleanVar(value=bool(self.config.get('privacy.hide_home_paths', True)))
-        ctk.CTkSwitch(p_frame, text="Auto-redact Home Directory (e.g. C:/Users/Name -> ~)", variable=self.hide_home_var, font=ctk.CTkFont(size=14)).pack(anchor="w", padx=20, pady=(10, 20))
+    def _build_privacy(self):
+        page = self._page('privacy', 'Privacy & Security')
+        box = ctk.CTkFrame(page)
+        box.pack(fill='x', padx=30, pady=10)
+        self.privacy_mode = tk.StringVar(value=str(self.config.get('privacy.mode', 'balanced')))
+        descriptions = (
+            ('off', 'Off — no activity redaction'),
+            ('balanced', 'Balanced — redact secrets and reduce path exposure'),
+            ('strict', 'Strict — generic activity only, no browser URLs/buttons'),
+        )
+        for value, label in descriptions:
+            ctk.CTkRadioButton(box, text=label, variable=self.privacy_mode, value=value).pack(anchor='w', padx=20, pady=10)
+        self.hide_home = ctk.BooleanVar(value=bool(self.config.get('privacy.hide_home_paths', True)))
+        ctk.CTkSwitch(box, text='Redact home directory in Balanced mode', variable=self.hide_home).pack(anchor='w', padx=20, pady=(15, 20))
 
-        # 4. Settings
-        self.settings_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_frames["settings"] = self.settings_frame
-        
-        ctk.CTkLabel(self.settings_frame, text="Application Settings", font=ctk.CTkFont(size=28, weight="bold")).pack(anchor="w", padx=30, pady=20)
-        
-        # Client ID
-        id_frame = ctk.CTkFrame(self.settings_frame)
-        id_frame.pack(fill="x", padx=30, pady=10)
-        
-        ctk.CTkLabel(id_frame, text="Discord Client ID (Advanced):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(20, 5))
-        self.client_id_var = tk.StringVar(value=str(self.config.get('discord.client_id', '1437867564762923028')))
-        ctk.CTkEntry(id_frame, textvariable=self.client_id_var, width=350, state="disabled").pack(anchor="w", padx=20, pady=5)
-        ctk.CTkLabel(id_frame, text="Using official CYBREX@TECH Application ID. No changes needed.", text_color="gray").pack(anchor="w", padx=20, pady=(0, 20))
+    def _build_settings(self):
+        page = self._page('settings', 'Application Settings')
+        box = ctk.CTkFrame(page)
+        box.pack(fill='x', padx=30, pady=10)
 
-        # Buttons
-        btn_frame = ctk.CTkFrame(self.settings_frame)
-        btn_frame.pack(fill="x", padx=30, pady=10)
-        
-        ctk.CTkLabel(btn_frame, text="Custom Buttons (Optional):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(20, 10))
-        
+        ctk.CTkLabel(box, text='Discord Client ID').pack(anchor='w', padx=20, pady=(20, 5))
+        self.client_id = tk.StringVar(value=str(self.config.get('discord.client_id', '')))
+        ctk.CTkEntry(box, textvariable=self.client_id, width=380).pack(anchor='w', padx=20, pady=(0, 15))
+
+        ctk.CTkLabel(box, text='Update interval (seconds)').pack(anchor='w', padx=20, pady=(5, 5))
+        self.update_interval = tk.StringVar(value=str(self.config.get('update_interval_secs', 5)))
+        ctk.CTkEntry(box, textvariable=self.update_interval, width=150).pack(anchor='w', padx=20, pady=(0, 15))
+
         buttons = self.config.get('discord.buttons', []) or []
-        btn1 = buttons[0] if len(buttons) > 0 else {}
-        
-        self.btn1_label = tk.StringVar(value=btn1.get('label', ''))
-        self.btn1_url = tk.StringVar(value=btn1.get('url', ''))
-        
-        b1 = ctk.CTkFrame(btn_frame, fg_color="transparent")
-        b1.pack(fill="x", padx=10)
-        ctk.CTkEntry(b1, textvariable=self.btn1_label, placeholder_text="Label (e.g. My Website)", width=180).pack(side="left", padx=5)
-        ctk.CTkEntry(b1, textvariable=self.btn1_url, placeholder_text="URL (https://...)", width=300).pack(side="left", padx=5)
+        self.button_fields = []
+        ctk.CTkLabel(box, text='Custom Rich Presence buttons (up to 2)').pack(anchor='w', padx=20, pady=(10, 5))
+        for index in range(2):
+            current = buttons[index] if index < len(buttons) else {}
+            row = ctk.CTkFrame(box, fg_color='transparent')
+            row.pack(fill='x', padx=15, pady=5)
+            label_var = tk.StringVar(value=str(current.get('label', '')))
+            url_var = tk.StringVar(value=str(current.get('url', '')))
+            ctk.CTkEntry(row, textvariable=label_var, placeholder_text='Label', width=200).pack(side='left', padx=5)
+            ctk.CTkEntry(row, textvariable=url_var, placeholder_text='https://...', width=430).pack(side='left', padx=5)
+            self.button_fields.append((label_var, url_var))
 
-        ctk.CTkLabel(btn_frame, text="Leave empty to use dynamic buttons (YouTube, GitHub, etc.)", text_color="gray", font=ctk.CTkFont(size=12)).pack(anchor="w", padx=20, pady=(5, 20))
-        
-        # Reset Button
-        ctk.CTkButton(self.settings_frame, text="Reset All Settings to Default", fg_color="#e74c3c", hover_color="#c0392b", command=self._reset_settings).pack(anchor="w", padx=30, pady=30)
+        self.autostart = ctk.BooleanVar(value=self._registry_autostart_enabled())
+        if _WINREG_AVAILABLE:
+            ctk.CTkSwitch(box, text='Start with Windows', variable=self.autostart).pack(anchor='w', padx=20, pady=(15, 20))
 
-        # 5. About & Legal
-        self.about_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_frames["about"] = self.about_frame
-        
-        ctk.CTkLabel(self.about_frame, text="About & Legal", font=ctk.CTkFont(size=28, weight="bold")).pack(anchor="w", padx=30, pady=20)
-        
-        # Credits
-        cred_frame = ctk.CTkFrame(self.about_frame)
-        cred_frame.pack(fill="x", padx=30, pady=10)
-        
-        ctk.CTkLabel(cred_frame, text="Developed by CYBREX@TECH", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(20, 5))
-        link = ctk.CTkLabel(cred_frame, text="SITE: imedkablavi.info", text_color="#3498db", cursor="hand2", font=ctk.CTkFont(size=14, underline=True))
-        link.pack(pady=(0, 20))
-        link.bind("<Button-1>", lambda e: webbrowser.open("https://imedkablavi.info"))
-        
-        # Legal Text
-        legal_text = """
-TERMS OF USE
-----------------
-This software is provided "as is", without warranty of any kind. 
-By using this software, you agree that the developer (CYBREX@TECH) 
-is not liable for any damages or account issues arising from its use.
+        ctk.CTkButton(page, text='Reset to Defaults', command=self.reset_settings).pack(anchor='w', padx=30, pady=25)
 
-PRIVACY POLICY
-----------------
-1. Data Collection: This application runs locally on your machine.
-2. No Cloud Upload: We do not upload your personal files or activity to any external server.
-3. Discord RPC: Activity data (window titles, app names) is sent to Discord's servers 
-   ONLY to display your Rich Presence status, in accordance with Discord's Terms of Service.
-4. Sensitive Data: The application includes a "Privacy Mode" to automatically redact 
-   passwords, API keys, and sensitive paths before sending data to Discord.
+    def _build_about(self):
+        page = self._page('about', 'About')
+        ctk.CTkLabel(page, text='Discord Rich Presence Service\nLocal activity detection with configurable privacy controls.', justify='left').pack(anchor='w', padx=30, pady=10)
+        link = ctk.CTkLabel(page, text='GitHub repository', text_color='#3b8ed0', cursor='hand2')
+        link.pack(anchor='w', padx=30, pady=10)
+        link.bind('<Button-1>', lambda _: webbrowser.open('https://github.com/imedkablavi/discord-rich-presence'))
 
-LICENSE
-----------------
-Copyright (c) 2024 CYBREX@TECH. All rights reserved.
-MIT License (See LICENSE file for full details).
-        """
-        
-        textbox = ctk.CTkTextbox(self.about_frame, height=350, font=ctk.CTkFont(family="Consolas", size=12))
-        textbox.pack(fill="x", padx=30, pady=10)
-        textbox.insert("0.0", legal_text)
-        textbox.configure(state="disabled")
-
-    def select_frame(self, name):
-        # Update buttons color
-        for n, btn in self.nav_buttons.items():
-            btn.configure(fg_color=("gray75", "gray25") if n == name else "transparent")
-
-        # Show frame
-        for n, frame in self.main_frames.items():
-            if n == name:
-                frame.grid(row=0, column=1, sticky="nsew")
+    def select_page(self, name: str):
+        for page_name, page in self.pages.items():
+            if page_name == name:
+                page.grid(row=0, column=1, sticky='nsew')
             else:
-                frame.grid_forget()
-
-    def change_appearance_mode_event(self, new_appearance_mode: str):
-        ctk.set_appearance_mode(new_appearance_mode)
+                page.grid_forget()
+        for button_name, button in self.nav.items():
+            button.configure(fg_color=('gray75', 'gray25') if button_name == name else 'transparent')
 
     def save_settings(self):
         try:
-            # Validate URL
-            url = self.btn1_url.get().strip()
-            if url and not (url.startswith('http://') or url.startswith('https://')):
-                 messagebox.showwarning("Validation Error", "Button URL must start with http:// or https://")
-                 return
+            self.config.set('discord.client_id', self.client_id.get().strip())
+            self.config.set('privacy.mode', self.privacy_mode.get())
+            self.config.set('privacy.hide_home_paths', self.hide_home.get())
+            self.config.set('update_interval_secs', float(self.update_interval.get()))
+            self.config.set('rules.enabled_detectors', {key: var.get() for key, var in self.detector_vars.items()})
 
-            # System
-            self.config.set('system.start_minimized', self.q_tray.get())
-            self.config.set('system.auto_start', self.q_autostart.get())
-            
-            # Apply Registry Autostart
-            self._update_autostart_registry(self.q_autostart.get())
-            
-            # Detectors
-            detectors = {}
-            for k, var in self.detectors_vars.items():
-                if isinstance(var, ctk.BooleanVar):
-                    detectors[k] = var.get()
-            self.config.set('rules.enabled_detectors', detectors)
-            
-            # Privacy
-            self.config.set('privacy.mode', self.privacy_mode_var.get())
-            self.config.set('privacy.hide_home_paths', self.hide_home_var.get())
-            
-            # Buttons
-            btns = []
-            if self.btn1_label.get() and url:
-                btns.append({'label': self.btn1_label.get(), 'url': url})
-            self.config.set('discord.buttons', btns)
-            
-            # Save
+            buttons = []
+            for label_var, url_var in self.button_fields:
+                label = label_var.get().strip()
+                url = url_var.get().strip()
+                if label or url:
+                    buttons.append({'label': label, 'url': url})
+            self.config.set('discord.buttons', buttons)
             self.config.save()
-            
-            messagebox.showinfo("Success", "Settings saved successfully!")
-            
+            if _WINREG_AVAILABLE:
+                self._set_registry_autostart(self.autostart.get())
+            messagebox.showinfo('Saved', 'Settings saved and validated.')
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save settings: {e}")
+            messagebox.showerror('Validation Error', str(e))
 
-    def _reset_settings(self):
-        if messagebox.askyesno("Confirm Reset", "Are you sure you want to reset all settings to default?"):
-            try:
-                # Reset config logic here (simplified)
-                self.config.data = {
-                    'discord': {'client_id': '1437867564762923028', 'buttons': []},
-                    'privacy': {'mode': 'balanced', 'hide_home_paths': True},
-                    'system': {'auto_start': False, 'start_minimized': False},
-                    'rules': {'enabled_detectors': {'gaming': True, 'coding': True, 'browser': True, 'media': True, 'terminal': True}}
-                }
-                self.config.save()
-                messagebox.showinfo("Reset Complete", "Settings have been reset. Please restart the application.")
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
+    def reset_settings(self):
+        if not messagebox.askyesno('Reset Settings', 'Reset all settings to defaults?'):
+            return
+        self.config.data = copy.deepcopy(DEFAULT_CONFIG)
+        try:
+            self.config.save()
+            messagebox.showinfo('Reset Complete', 'Defaults restored. Reopen the panel to refresh all controls.')
+        except Exception as e:
+            messagebox.showerror('Reset Error', str(e))
 
-    def _test_connection(self):
-        # Simple test to see if Discord is running
-        import psutil
-        discord_running = False
-        for proc in psutil.process_iter(['name']):
-            try:
-                if 'discord' in proc.info['name'].lower():
-                    discord_running = True
-                    break
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
-        
-        if discord_running:
-            messagebox.showinfo("Connection Test", "Discord process detected! RPC should work.")
-        else:
-            messagebox.showwarning("Connection Test", "Discord process NOT found. Please start Discord first.")
-
-    def _update_autostart_registry(self, enable):
-        """Update Windows Registry for Auto-Start"""
-        if not _WINREG_AVAILABLE:
+    def start_service(self):
+        if self.service_process and self.service_process.poll() is None:
             return
         try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
-            app_name = "DiscordRichPresence"
-            
-            if enable:
-                # Determine path
+            script = Path(__file__).with_name('main.py')
+            python = sys.executable
+            if sys.platform == 'win32' and python.lower().endswith('python.exe'):
+                pythonw = python[:-10] + 'pythonw.exe'
+                if os.path.exists(pythonw):
+                    python = pythonw
+            self.service_process = subprocess.Popen([python, str(script)], cwd=str(script.parent))
+        except Exception as e:
+            messagebox.showerror('Start Error', str(e))
+
+    def stop_service(self):
+        if self.service_process and self.service_process.poll() is None:
+            self.service_process.terminate()
+            try:
+                self.service_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.service_process.kill()
+        self.service_process = None
+
+    def _poll_service(self):
+        if self.service_process and self.service_process.poll() is None:
+            self.status_label.configure(text='● Running (managed by this panel)', text_color='#2ecc71')
+        elif self.service_process:
+            code = self.service_process.poll()
+            self.status_label.configure(text=f'● Stopped (exit code {code})', text_color='#e74c3c')
+        else:
+            self.status_label.configure(text='● External status unknown / not managed', text_color='gray')
+        self.after(1000, self._poll_service)
+
+    def test_rpc(self):
+        client_id = self.client_id.get().strip()
+
+        def worker():
+            try:
+                from pypresence import Presence
+                rpc = Presence(client_id)
+                rpc.connect()
+                rpc.close()
+                self.after(0, lambda: messagebox.showinfo('Discord RPC', 'RPC connection succeeded.'))
+            except Exception as e:
+                error_message = str(e)
+                self.after(0, lambda msg=error_message: messagebox.showerror('Discord RPC', f'Connection failed: {msg}'))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def open_logs(self):
+        if sys.platform == 'win32':
+            base = os.environ.get('LOCALAPPDATA') or str(Path.home() / 'AppData' / 'Local')
+            path = Path(base) / 'discord-rich-presence' / 'logs'
+        else:
+            path = Path.home() / '.local' / 'state' / 'discord-rich-presence'
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            if sys.platform == 'win32':
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', str(path)])
+            else:
+                subprocess.Popen(['xdg-open', str(path)])
+        except Exception as e:
+            messagebox.showerror('Logs', str(e))
+
+    def _registry_autostart_enabled(self) -> bool:
+        if not _WINREG_AVAILABLE:
+            return False
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run', 0, winreg.KEY_READ) as key:
+                winreg.QueryValueEx(key, 'DiscordRichPresence')
+                return True
+        except OSError:
+            return False
+
+    def _set_registry_autostart(self, enabled: bool):
+        if not _WINREG_AVAILABLE:
+            return
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run', 0, winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                root = Path(__file__).resolve().parent
                 if getattr(sys, 'frozen', False):
-                    # Running as exe
-                    exe_path = sys.executable
-                    cmd = f'"{exe_path}" --tray'
+                    command = f'"{sys.executable}" --tray'
                 else:
-                    # Running as script
-                    python_exe = sys.executable.replace("python.exe", "pythonw.exe") # Use no-console python
-                    script = os.path.abspath(sys.argv[0])
-                    # Assuming running from root dir
-                    script_dir = os.path.dirname(script)
-                    main_script = os.path.join(script_dir, "main.py")
-                    if not os.path.exists(main_script):
-                         main_script = script # Fallback
-                    cmd = f'"{python_exe}" "{main_script}" --tray'
-                
-                winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, cmd)
+                    python = sys.executable
+                    if python.lower().endswith('python.exe'):
+                        candidate = python[:-10] + 'pythonw.exe'
+                        if os.path.exists(candidate):
+                            python = candidate
+                    command = f'"{python}" "{root / "main.py"}" --tray'
+                winreg.SetValueEx(key, 'DiscordRichPresence', 0, winreg.REG_SZ, command)
             else:
                 try:
-                    winreg.DeleteValue(key, app_name)
+                    winreg.DeleteValue(key, 'DiscordRichPresence')
                 except FileNotFoundError:
-                    pass # Already deleted
-            
-            winreg.CloseKey(key)
-        except Exception as e:
-            print(f"Registry error: {e}")
-            # Non-fatal, just log
+                    pass
 
-    def _check_registry_autostart(self):
-        """Check if registry key exists and sync UI"""
-        if not _WINREG_AVAILABLE:
-            return
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
-            try:
-                winreg.QueryValueEx(key, "DiscordRichPresence")
-                # Key exists
-                self.q_autostart.set(True)
-            except FileNotFoundError:
-                self.q_autostart.set(False)
-            winreg.CloseKey(key)
-        except Exception:
-            pass
 
-if __name__ == "__main__":
-    try:
-        cfg = Config()
-        app = ModernControlPanel(cfg)
-        app.mainloop()
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        input("Press Enter to exit...")
+if __name__ == '__main__':
+    app = ModernControlPanel(Config())
+    app.mainloop()

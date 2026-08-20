@@ -1,17 +1,14 @@
-# Discord Rich Presence Service - Python Requirements
+# Runtime dependencies. This project targets Python 3.10+.
+pypresence==4.6.2
+PyYAML>=6.0,<7
+customtkinter>=5.2,<6
+pystray>=0.19.5,<1
+Pillow>=10,<12
 
-# Core dependencies (all platforms)
-pypresence>=4.2.1
-PyYAML>=6.0
-customtkinter>=5.2.0
+# Linux media integration
+pydbus>=0.6,<1; sys_platform == 'linux'
 
-# Linux-specific dependencies
-pydbus>=0.6.0; sys_platform == 'linux'
-
-# Windows-specific dependencies
+# Windows integrations
 pywin32>=305; sys_platform == 'win32'
-psutil>=5.9.0; sys_platform == 'win32'
+psutil>=5.9,<8; sys_platform == 'win32'
 winsdk>=1.0.0b10; sys_platform == 'win32'
-pystray>=0.19.5
-Pillow>=10.0.0
-pyinstaller>=6.0.0
