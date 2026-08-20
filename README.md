@@ -27,7 +27,7 @@ The service watches the foreground application, converts it into a Discord activ
 | Gaming | Known game processes with conservative matching to reduce false positives |
 | Applications | Optional fallback for foreground apps that do not match a specialized detector |
 
-Media activities use Discord listening/watching activity types where appropriate. Browser service links are inferred from visible window-title metadata; the service does not currently read the exact browser tab URL.
+Media activities use Discord listening/watching activity types where appropriate. Playing media uses Discord start/end timestamps so elapsed time continues to advance without repeatedly rewriting the RPC payload. Browser service links are inferred from visible window-title metadata; the service does not currently read the exact browser tab URL.
 
 ## Privacy
 
@@ -41,7 +41,7 @@ There are three privacy modes:
 
 The default is `balanced`.
 
-Rich Presence is cleared when activity disappears or becomes blocked. It can also be cleared when a known lock-screen window is detected. Terminal tracking uses local per-shell cache files and tries to match the focused terminal process tree before publishing a command.
+Rich Presence is cleared when activity disappears or becomes blocked. It can also be cleared when a known lock-screen window is detected. Terminal tracking uses local per-shell cache files and tries to match the focused terminal process tree before publishing a command. In Balanced mode, values following sensitive command flags such as token/password arguments are redacted. Inferred browser links are removed when their source title contains data that required redaction.
 
 For the exact data paths and behavior, see [docs/PRIVACY.md](docs/PRIVACY.md).
 
@@ -76,8 +76,10 @@ Requirements:
 
 - Python 3.10 or newer
 - Discord Desktop
-- `xprop` for X11 foreground-window detection
-- a working desktop D-Bus session for MPRIS media detection
+- X11: `xprop` for foreground-window detection
+- KDE Plasma Wayland: `kdotool`
+- Sway: `swaymsg`
+- Media: `playerctl` is recommended for MPRIS detection; pydbus/PyGObject remains a fallback
 
 ```bash
 git clone https://github.com/imedkablavi/discord-rich-presence.git
@@ -88,7 +90,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Sway is supported through `swaymsg`. Other Wayland compositors may not expose a reliable foreground-window API, so the service returns no foreground activity instead of guessing from unrelated running processes.
+KDE Plasma Wayland is supported through `kdotool`, and Sway is supported through `swaymsg`. Other Wayland compositors may not expose a reliable foreground-window API, so the service returns no foreground activity instead of guessing from unrelated running processes.
 
 ## Configuration
 
@@ -108,7 +110,7 @@ privacy:
   mode: balanced
   hide_home_paths: true
 
-update_interval_secs: 5
+update_interval_secs: 2
 
 rules:
   clear_on_lock_screen: true
@@ -121,6 +123,8 @@ rules:
     gaming: true
     application: true
 ```
+
+`update_interval_secs` controls how often local activity is checked, not how often Discord is updated. The service only sends a new RPC payload when the resulting activity changes. The default is 2 seconds; values down to 0.5 seconds are accepted when faster switching is preferred.
 
 Set `application: false` if you only want recognized activity categories and do not want generic foreground-window titles published.
 
@@ -162,7 +166,7 @@ Add this to `$PROFILE`:
 . "C:\path\to\discord-rich-presence\scripts\hooks\powershell.ps1"
 ```
 
-Restart the shell after adding the hook. The supplied hooks write local PID-scoped cache files. The PowerShell hook preserves an existing PSReadLine history handler instead of replacing it.
+Restart the shell after adding the hook. The supplied hooks write local PID-scoped cache files. The Bash hook composes with an existing `PROMPT_COMMAND` instead of replacing a user's DEBUG trap, and the PowerShell hook preserves an existing PSReadLine history handler.
 
 ## Command line
 
@@ -217,14 +221,14 @@ ruff check . --select E9,F63,F7,F82
 pytest -q
 ```
 
-CI runs on Windows and Ubuntu with Python 3.10 and 3.12.
+CI runs on Windows and Ubuntu with Python 3.10 and 3.12. Linux CI also syntax-checks the Bash and Zsh hooks.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Security reports should follow [SECURITY.md](SECURITY.md).
 
 ## Current limitations
 
 - Exact browser URLs are not available without a browser extension or native browser integration.
-- Wayland support depends on the compositor; Sway has a dedicated implementation.
+- Wayland foreground-window support currently covers KDE Plasma through `kdotool` and Sway through `swaymsg`; other compositors may need a dedicated implementation.
 - Game detection intentionally avoids broad guesses, so unknown games may fall back to normal application activity.
 - Lock-screen detection uses known lock applications/window markers and may need updates for new desktop environments.
 - macOS foreground-window detection is not implemented yet.
