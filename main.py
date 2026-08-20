@@ -16,6 +16,7 @@ from pypresence import Presence, DiscordNotFound, InvalidID, InvalidPipe
 
 from config import Config
 from presence import PresenceBuilder
+from runtime_state import RuntimeState
 from tray_icon import run_with_tray
 from detectors.window import WindowDetector
 from detectors.browser import BrowserDetector
@@ -28,10 +29,17 @@ from detectors.gaming import GamingDetector
 class DiscordRichPresenceService:
     """Detect activity and keep Discord RPC synchronized with the current state."""
 
-    def __init__(self, config: Config, dry_run: bool = False, once: bool = False):
+    def __init__(
+        self,
+        config: Config,
+        dry_run: bool = False,
+        once: bool = False,
+        runtime: Optional[RuntimeState] = None,
+    ):
         self.config = config
         self.dry_run = dry_run
         self.once = once
+        self.runtime = runtime
         self.rpc: Optional[Presence] = None
         self.connected = False
         self.presence_active = False
@@ -50,23 +58,45 @@ class DiscordRichPresenceService:
         self.gaming_detector = GamingDetector(config)
         self.presence_builder = PresenceBuilder(config)
 
+    def _runtime_update(self, **fields: Any):
+        runtime = getattr(self, 'runtime', None)
+        if runtime:
+            try:
+                runtime.update(**fields)
+            except Exception as e:
+                self.logger.debug("Could not update runtime status: %s", e)
+
+    @staticmethod
+    def _activity_summary(payload: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not payload:
+            return None
+        details = str(payload.get('details') or '').strip()
+        state = str(payload.get('state') or '').strip()
+        if details and state:
+            return f"{details} — {state}"[:240]
+        return (details or state or None)
+
     def connect_discord(self) -> bool:
         try:
             client_id = str(self.config.get('discord.client_id', '')).strip()
             if not client_id:
                 self.logger.error("Discord client_id not configured")
+                self._runtime_update(connected=False, state='configuration_error', last_error='Missing Discord client ID')
                 return False
             self.rpc = Presence(client_id)
             self.rpc.connect()
             self.connected = True
             self.reconnect_delay = 5
             self.logger.info("Connected to Discord RPC")
+            self._runtime_update(connected=True, state='running', last_error=None)
             return True
         except (DiscordNotFound, InvalidID, InvalidPipe) as e:
             self.logger.warning("Discord RPC unavailable: %s", e)
+            self._runtime_update(connected=False, state='discord_offline', last_error=str(e)[:300])
         except Exception as e:
             self.logger.error("Unexpected Discord connection error: %s", e)
             self.logger.debug(traceback.format_exc())
+            self._runtime_update(connected=False, state='rpc_error', last_error=str(e)[:300])
         self.connected = False
         self.rpc = None
         return False
@@ -79,6 +109,7 @@ class DiscordRichPresenceService:
                 self.logger.debug("Error while closing Discord RPC: %s", e)
         self.connected = False
         self.rpc = None
+        self._runtime_update(connected=False)
 
     def update_presence(self, payload: Dict[str, Any]) -> bool:
         clean_payload = {key: value for key, value in payload.items() if value is not None}
@@ -86,6 +117,13 @@ class DiscordRichPresenceService:
             self.logger.info("[DRY RUN] update: %s", clean_payload)
             self.last_payload = clean_payload
             self.presence_active = True
+            self._runtime_update(
+                connected=False,
+                presence_active=True,
+                state='dry_run',
+                activity=self._activity_summary(clean_payload),
+                last_error=None,
+            )
             return True
 
         if not self.connected and not self.connect_discord():
@@ -96,22 +134,32 @@ class DiscordRichPresenceService:
             self.last_payload = clean_payload
             self.presence_active = True
             self.logger.debug("Updated presence: %s", clean_payload)
+            self._runtime_update(
+                connected=True,
+                presence_active=True,
+                state='running',
+                activity=self._activity_summary(clean_payload),
+                last_error=None,
+            )
             return True
         except Exception as e:
             self.logger.error("Failed to update presence: %s", e)
             self.logger.debug(traceback.format_exc())
             self.connected = False
             self.rpc = None
+            self._runtime_update(connected=False, state='rpc_error', last_error=str(e)[:300])
             return False
 
     def clear_presence(self) -> bool:
         """Clear Discord when activity disappears, is blocked, or privacy requires it."""
         if not self.presence_active:
+            self._runtime_update(presence_active=False, activity=None)
             return True
         if self.dry_run:
             self.logger.info("[DRY RUN] clear presence")
             self.last_payload = None
             self.presence_active = False
+            self._runtime_update(presence_active=False, activity=None, state='dry_run')
             return True
         if not self.connected and not self.connect_discord():
             return False
@@ -121,11 +169,13 @@ class DiscordRichPresenceService:
             self.last_payload = None
             self.presence_active = False
             self.logger.debug("Cleared Discord presence")
+            self._runtime_update(connected=True, presence_active=False, activity=None, state='running')
             return True
         except Exception as e:
             self.logger.error("Failed to clear Discord presence: %s", e)
             self.connected = False
             self.rpc = None
+            self._runtime_update(connected=False, state='rpc_error', last_error=str(e)[:300])
             return False
 
     def _reload_config_if_changed(self):
@@ -143,8 +193,10 @@ class DiscordRichPresenceService:
             self.presence_builder.reload()
             self._last_config_mtime = current_mtime
             self.logger.info("Configuration reloaded")
+            self._runtime_update(last_config_reload=time.time(), last_error=None)
         except Exception as e:
             self.logger.error("Config hot reload rejected; keeping previous config: %s", e)
+            self._runtime_update(last_error=f"Config reload: {e}"[:300])
 
     def detect_activity(self) -> Optional[Dict[str, Any]]:
         self._reload_config_if_changed()
@@ -258,11 +310,13 @@ class DiscordRichPresenceService:
         return not self.presence_active or normalized != (self.last_payload or {})
 
     def _handle_rpc_failure(self):
+        self._runtime_update(retry_in_seconds=self.reconnect_delay)
         self._stop_event.wait(self.reconnect_delay)
         self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
 
     def run(self):
         self.logger.info("Starting Discord Rich Presence Service")
+        self._runtime_update(state='starting', connected=False, presence_active=False, activity=None, last_error=None)
         if not self.dry_run and not self.connect_discord():
             self.logger.warning("Discord is not available yet; service will retry")
 
@@ -274,6 +328,8 @@ class DiscordRichPresenceService:
                     if payload is None:
                         if self.presence_active:
                             success = self.clear_presence()
+                        else:
+                            self._runtime_update(presence_active=False, activity=None)
                     elif self.should_update(payload):
                         success = self.update_presence(payload)
 
@@ -282,6 +338,12 @@ class DiscordRichPresenceService:
                         continue
 
                     self.reconnect_delay = 5
+                    self._runtime_update(
+                        state='dry_run' if self.dry_run else 'running',
+                        connected=self.connected,
+                        presence_active=self.presence_active,
+                        retry_in_seconds=None,
+                    )
                     if self.once:
                         break
                     interval = float(self.config.get('update_interval_secs', 5))
@@ -290,11 +352,12 @@ class DiscordRichPresenceService:
                     raise
                 except Exception as e:
                     self.logger.error("Error in main loop: %s", e, exc_info=True)
+                    self._runtime_update(state='loop_error', last_error=str(e)[:300])
                     self._stop_event.wait(max(1.0, float(self.config.get('update_interval_secs', 5))))
         except KeyboardInterrupt:
             self.logger.info("Received interrupt signal")
         finally:
-            # Do not intentionally leave a stale status after normal service shutdown.
+            self._runtime_update(state='stopping')
             try:
                 self.clear_presence()
             finally:
@@ -327,9 +390,10 @@ def setup_logging(verbose: bool = False):
     try:
         log_path = _default_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=5, encoding='utf-8')
-        file_handler.setFormatter(formatter)
-        root.addHandler(file_handler)
+        if not any(isinstance(h, RotatingFileHandler) and Path(h.baseFilename) == log_path for h in root.handlers):
+            file_handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=5, encoding='utf-8')
+            file_handler.setFormatter(formatter)
+            root.addHandler(file_handler)
     except Exception:
         root.exception("Could not initialize file logging")
 
@@ -345,19 +409,33 @@ def main():
     args = parser.parse_args()
 
     setup_logging(args.verbose)
-    try:
-        config = Config(args.config)
-        if args.privacy:
-            config.set('privacy.mode', args.privacy)
-    except Exception as e:
-        logging.error("Failed to load configuration: %s", e)
-        sys.exit(1)
+    runtime = RuntimeState()
+    if not runtime.acquire():
+        logging.warning("Another Discord Rich Presence service instance is already running")
+        return
 
-    service = DiscordRichPresenceService(config, dry_run=args.dry_run, once=args.once)
-    if args.tray or config.get('system.start_minimized', False):
-        run_with_tray(service.run, config, service.stop)
-    else:
-        service.run()
+    try:
+        try:
+            config = Config(args.config)
+            if args.privacy:
+                config.set('privacy.mode', args.privacy)
+        except Exception as e:
+            logging.error("Failed to load configuration: %s", e)
+            runtime.update(state='configuration_error', last_error=str(e)[:300])
+            return
+
+        service = DiscordRichPresenceService(
+            config,
+            dry_run=args.dry_run,
+            once=args.once,
+            runtime=runtime,
+        )
+        if args.tray or config.get('system.start_minimized', False):
+            run_with_tray(service.run, config, service.stop)
+        else:
+            service.run()
+    finally:
+        runtime.release()
 
 
 if __name__ == '__main__':
