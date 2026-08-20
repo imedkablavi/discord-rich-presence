@@ -46,15 +46,21 @@ class PresenceBuilder:
         position = max(0, int(activity.get('position', 0) or 0))
         duration = max(0, int(activity.get('duration', 0) or 0))
 
-        details = f"{'Listening' if player.lower() == 'spotify' else 'Watching'} · {title}" if is_playing else f"Paused · {title}"
-        state_parts = [player]
-        if duration > 0:
-            state_parts.append(f"{self._format_time(position)}/{self._format_time(duration)}")
+        details = (
+            f"{'Listening' if player.lower() == 'spotify' else 'Watching'} · {title}"
+            if is_playing else f"Paused · {title}"
+        )
+        # During playback Discord renders the live elapsed/remaining timer from
+        # start/end. Keeping position out of state makes the RPC payload stable,
+        # so normal playback does not cause an update every detection cycle.
+        state = player
+        if not is_playing and duration > 0:
+            state = f"{player} · {self._format_time(position)}/{self._format_time(duration)}"
 
         payload: Dict[str, Any] = {
             'activity_type': ActivityType.LISTENING if player.lower() == 'spotify' else ActivityType.WATCHING,
             'details': details[:128],
-            'state': ' · '.join(state_parts)[:128],
+            'state': state[:128],
             'large_image': self._resolve_media_image(player),
             'large_text': player[:128],
         }
@@ -82,8 +88,6 @@ class PresenceBuilder:
 
         if timeline:
             predicted_position = max(0, now_sec - timeline['start_sec'])
-            # A few seconds of drift are normal because players expose position at
-            # different precision. Larger differences are treated as a seek.
             if abs(predicted_position - position) > 3:
                 timeline = None
 
@@ -94,9 +98,11 @@ class PresenceBuilder:
         else:
             timeline['last_seen'] = now_sec
 
-        # Keep this cache bounded; old tracks have no value once they disappear.
         if len(self.media_timelines) > 10:
-            oldest = sorted(self.media_timelines, key=lambda k: self.media_timelines[k]['last_seen'])[:-10]
+            oldest = sorted(
+                self.media_timelines,
+                key=lambda k: self.media_timelines[k]['last_seen'],
+            )[:-10]
             for old_key in oldest:
                 del self.media_timelines[old_key]
 
