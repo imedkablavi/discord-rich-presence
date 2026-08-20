@@ -13,6 +13,15 @@ from privacy import PrivacyRedactor
 class PresenceBuilder:
     """Build Discord Rich Presence payloads from normalized activity data."""
 
+    FRIENDLY_APP_NAMES = {
+        'org.kde.konsole': 'Konsole',
+        'org.kde.dolphin': 'Dolphin',
+        'org.kde.kate': 'Kate',
+        'org.kde.okular': 'Okular',
+        'org.kde.discover': 'Discover',
+        'org.kde.systemsettings': 'System Settings',
+    }
+
     def __init__(self, config: Config):
         self.config = config
         self.redactor = PrivacyRedactor(config)
@@ -50,9 +59,6 @@ class PresenceBuilder:
             f"{'Listening' if player.lower() == 'spotify' else 'Watching'} · {title}"
             if is_playing else f"Paused · {title}"
         )
-        # During playback Discord renders the live elapsed/remaining timer from
-        # start/end. Keeping position out of state makes the RPC payload stable,
-        # so normal playback does not cause an update every detection cycle.
         state = player
         if not is_playing and duration > 0:
             state = f"{player} · {self._format_time(position)}/{self._format_time(duration)}"
@@ -170,17 +176,22 @@ class PresenceBuilder:
         return payload
 
     def _build_application(self, activity: Dict[str, Any]) -> Dict[str, Any]:
-        app_name = str(activity.get('app_name', 'Application'))
+        raw_app_name = str(activity.get('app_name', 'Application'))
+        app_name = self._display_app_name(raw_app_name)
         window_title = str(activity.get('window_title', '') or '')
         apps_map = self.config.get('images.apps', {}) or {}
-        image_key = apps_map.get(app_name.lower(), self.config.get('images.app', 'app'))
+        image_key = (
+            apps_map.get(raw_app_name.lower())
+            or apps_map.get(app_name.lower())
+            or self.config.get('images.app', 'app')
+        )
         payload = {
             'activity_type': ActivityType.PLAYING,
             'details': f"{app_name} active"[:128],
             'state': (window_title if window_title else app_name)[:128],
             'large_image': image_key,
             'large_text': app_name[:128],
-            'start': self._get_activity_start('app', app_name),
+            'start': self._get_activity_start('app', raw_app_name),
         }
         self._add_buttons(payload)
         return payload
@@ -203,6 +214,17 @@ class PresenceBuilder:
         }
         self._add_buttons(payload)
         return payload
+
+    @classmethod
+    def _display_app_name(cls, app_name: str) -> str:
+        raw = str(app_name or 'Application').strip()
+        mapped = cls.FRIENDLY_APP_NAMES.get(raw.lower())
+        if mapped:
+            return mapped
+        if raw.lower().startswith(('org.', 'com.', 'io.', 'net.')) and '.' in raw:
+            raw = raw.rsplit('.', 1)[-1]
+        cleaned = raw.replace('_', ' ').replace('-', ' ').strip()
+        return cleaned.title() if cleaned and cleaned.islower() else (cleaned or 'Application')
 
     def _add_buttons(self, payload: Dict[str, Any], url: Optional[str] = None, service: str = ''):
         if self.config.get('privacy.mode', 'balanced') == 'strict':
