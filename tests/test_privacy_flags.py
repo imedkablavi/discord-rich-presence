@@ -41,3 +41,17 @@ def test_balanced_redacts_authorization_value(tmp_path: Path):
     })
     assert 'secretvalue' not in activity['command']
     assert 'https://example.com' in activity['command']
+
+
+def test_balanced_drops_inferred_browser_url_when_title_is_redacted(tmp_path: Path):
+    redactor = _redactor(tmp_path)
+    activity = redactor.redact_activity({
+        'type': 'browser',
+        'browser_name': 'Firefox',
+        'is_private': False,
+        'page_title': 'token=abc123',
+        'service': 'YouTube',
+        'url': 'https://www.youtube.com/results?search_query=token%3Dabc123',
+    })
+    assert 'abc123' not in activity['page_title']
+    assert activity['url'] is None
