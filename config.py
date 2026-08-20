@@ -29,7 +29,9 @@ DEFAULT_CONFIG = {
         ],
         'hide_home_paths': True
     },
-    'update_interval_secs': 5,
+    # Two seconds keeps window switching responsive without continuously
+    # hammering compositor/media APIs. RPC is only updated when payload changes.
+    'update_interval_secs': 2,
     'system': {
         'start_minimized': False,
         'auto_start': False
@@ -225,11 +227,11 @@ class Config:
             except re.error as e:
                 raise ValueError(f"Invalid privacy regex {entry['regex']!r}: {e}") from e
 
-        interval = data.get('update_interval_secs', 5)
+        interval = data.get('update_interval_secs', 2)
         if isinstance(interval, bool) or not isinstance(interval, (int, float)):
             raise ValueError('update_interval_secs must be a number')
-        if interval < 1 or interval > 3600:
-            raise ValueError('update_interval_secs must be between 1 and 3600 seconds')
+        if interval < 0.5 or interval > 3600:
+            raise ValueError('update_interval_secs must be between 0.5 and 3600 seconds')
 
         system = data.get('system', {})
         if not isinstance(system, dict):
