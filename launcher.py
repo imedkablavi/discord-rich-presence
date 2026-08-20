@@ -2,6 +2,24 @@
 """Entry point used by packaged builds."""
 
 import sys
+from pathlib import Path
+
+
+def _normalize_packaged_args():
+    """Translate source-style child launches into packaged service arguments."""
+    if not getattr(sys, 'frozen', False):
+        return
+
+    # The source GUI starts the service as `python main.py`. In a one-file build
+    # sys.executable is the application itself, so treat a trailing main.py
+    # argument as a request to start this executable in service/tray mode.
+    sys.argv[:] = [
+        arg for index, arg in enumerate(sys.argv)
+        if index == 0 or Path(arg).name.lower() != 'main.py'
+    ]
+
+    if len(sys.argv) == 1:
+        sys.argv.append('--tray')
 
 
 def main():
@@ -14,10 +32,7 @@ def main():
         app.mainloop()
         return
 
-    # A normal double-click on the packaged executable should leave the user
-    # with a visible tray control instead of starting a silent background process.
-    if getattr(sys, 'frozen', False) and len(sys.argv) == 1:
-        sys.argv.append('--tray')
+    _normalize_packaged_args()
 
     from main import main as service_main
     service_main()
