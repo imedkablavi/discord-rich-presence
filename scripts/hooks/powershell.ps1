@@ -1,5 +1,9 @@
 # Dot-source this file from your PowerShell profile.
-$drpCacheDir = Join-Path ($env:LOCALAPPDATA ?? (Join-Path $HOME 'AppData\Local')) 'discord-rich-presence\cache'
+$drpBase = $env:LOCALAPPDATA
+if ([string]::IsNullOrWhiteSpace($drpBase)) {
+    $drpBase = Join-Path $HOME 'AppData\Local'
+}
+$drpCacheDir = Join-Path $drpBase 'discord-rich-presence\cache'
 New-Item -ItemType Directory -Force -Path $drpCacheDir | Out-Null
 $drpCommandFile = Join-Path $drpCacheDir 'rp_last_cmd.txt'
 
