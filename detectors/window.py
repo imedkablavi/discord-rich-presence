@@ -128,19 +128,16 @@ class WindowDetector:
             return None
 
     def _get_kde_window(self) -> Optional[Dict[str, Any]]:
-        """Read the active KDE Plasma window through KWin's scripting API via kdotool."""
-        script = (
-            "var w=workspace.activeWindow;"
-            "if(w){output_result(JSON.stringify({"
-            "window_id:String(w.internalId),"
-            "app_name:String(w.resourceClass||w.desktopFileName||w.resourceName||'Unknown'),"
-            "title:String(w.caption||''),"
-            "pid:Number(w.pid||0)"
-            "}));}"
-        )
+        """Read the active KDE Plasma window using kdotool's stable query commands."""
         try:
             result = subprocess.run(
-                ['kdotool', 'kwinscript', '--inline', script],
+                [
+                    'kdotool',
+                    'getactivewindow',
+                    'getwindowclassname',
+                    'getwindowname',
+                    'getwindowpid',
+                ],
                 capture_output=True,
                 text=True,
                 timeout=3,
@@ -149,25 +146,26 @@ class WindowDetector:
             if result.returncode != 0:
                 self.logger.debug('kdotool failed: %s', result.stderr.strip())
                 return None
-            output = result.stdout.strip()
-            if not output:
+
+            lines = result.stdout.splitlines()
+            if len(lines) < 3:
+                self.logger.debug('Unexpected kdotool output: %r', result.stdout)
                 return None
-            payload = json.loads(output.splitlines()[-1])
-            pid = payload.get('pid')
+
+            app_name = lines[0].strip() or 'Unknown'
+            title = '\n'.join(lines[1:-1]).strip()
             try:
-                pid = int(pid) if pid else None
-            except (TypeError, ValueError):
+                pid = int(lines[-1].strip()) if lines[-1].strip() else None
+            except ValueError:
                 pid = None
+
             return {
-                'window_id': str(payload.get('window_id') or ''),
-                'app_name': str(payload.get('app_name') or 'Unknown'),
-                'title': str(payload.get('title') or ''),
+                'app_name': app_name,
+                'title': title,
                 'pid': pid,
             }
         except subprocess.TimeoutExpired:
             self.logger.debug('kdotool timed out while reading the active window')
-        except (json.JSONDecodeError, TypeError, ValueError) as e:
-            self.logger.debug('Could not parse kdotool active-window output: %s', e)
         except Exception as e:
             self.logger.debug('KDE Plasma detection failed: %s', e)
         return None
