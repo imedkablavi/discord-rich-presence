@@ -18,7 +18,7 @@ class MediaDetector:
     )
 
     SERVICE_URL_MARKERS = {
-        'YouTube': ('youtube.com', 'youtu.be'),
+        'YouTube': ('youtube.com', 'youtu.be', 'ytimg.com', 'googlevideo.com'),
         'Netflix': ('netflix.com',),
         'Prime Video': ('primevideo.com', 'amazon.com/gp/video', 'amazon.com/video'),
         'Disney+': ('disneyplus.com',),
@@ -115,7 +115,7 @@ class MediaDetector:
         separator = '\x1f'
         fmt = separator.join((
             '{{playerName}}', '{{status}}', '{{artist}}', '{{title}}',
-            '{{position}}', '{{mpris:length}}', '{{xesam:url}}',
+            '{{position}}', '{{mpris:length}}', '{{xesam:url}}', '{{mpris:artUrl}}',
         ))
         try:
             result = subprocess.run(
@@ -131,9 +131,12 @@ class MediaDetector:
             paused = None
             for line in result.stdout.splitlines():
                 parts = line.split(separator)
-                if len(parts) != 7:
+                if len(parts) != 8:
                     continue
-                player, status, artist, title, position_raw, duration_raw, media_url = parts
+                (
+                    player, status, artist, title,
+                    position_raw, duration_raw, media_url, art_url,
+                ) = parts
                 status = status.strip()
                 if status not in {'Playing', 'Paused'}:
                     continue
@@ -144,6 +147,7 @@ class MediaDetector:
                 title = title.strip() or 'Unknown'
                 artist = artist.strip()
                 media_url = media_url.strip()
+                art_url = art_url.strip()
                 full_title = f'{artist} - {title}' if artist and artist != title else title
                 activity = {
                     'type': 'media',
@@ -153,7 +157,7 @@ class MediaDetector:
                     'position': position,
                     'duration': duration,
                 }
-                service = self._detect_service(media_url, title, full_title)
+                service = self._detect_service(media_url, art_url, title, full_title)
                 if service:
                     activity['service'] = service
                 if activity['is_playing']:
@@ -274,6 +278,7 @@ class MediaDetector:
                 artist = artist[0] if artist else ''
             artist = str(artist or '')
             media_url = str(metadata.get('xesam:url', '') or '')
+            art_url = str(metadata.get('mpris:artUrl', '') or '')
 
             try:
                 position = max(0, int(player.Position // 1_000_000))
@@ -296,7 +301,7 @@ class MediaDetector:
                 'position': position,
                 'duration': duration,
             }
-            service = self._detect_service(media_url, title, full_title)
+            service = self._detect_service(media_url, art_url, title, full_title)
             if service:
                 activity['service'] = service
             return activity
