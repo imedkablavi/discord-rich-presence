@@ -92,7 +92,7 @@ def test_reverse_domain_kde_app_id_is_displayed_cleanly(tmp_path: Path):
     })
     assert payload['details'] == 'Dolphin active'
     assert payload['large_text'] == 'Dolphin'
-    assert payload['large_image'] == 'https://cdn.simpleicons.org/kdeplasma'
+    assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=kde.org&sz=256'
 
 
 def test_browser_large_artwork_represents_browser_and_service_is_secondary(tmp_path: Path):
@@ -104,9 +104,9 @@ def test_browser_large_artwork_represents_browser_and_service_is_secondary(tmp_p
         'service': 'YouTube',
         'url': 'https://www.youtube.com/results?search_query=Example%20video',
     })
-    assert payload['large_image'] == 'https://cdn.simpleicons.org/brave'
+    assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=brave.com&sz=256'
     assert payload['large_text'] == 'Brave'
-    assert payload['small_image'] == 'https://cdn.simpleicons.org/youtube'
+    assert payload['small_image'] == 'https://www.google.com/s2/favicons?domain=youtube.com&sz=256'
     assert payload['small_text'] == 'YouTube'
 
 
@@ -119,7 +119,7 @@ def test_browser_media_uses_actual_browser_icon(tmp_path: Path):
         'position': 10,
         'duration': 321,
     })
-    assert payload['large_image'] == 'https://cdn.simpleicons.org/brave'
+    assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=brave.com&sz=256'
     assert payload['large_text'] == 'Brave'
     assert payload['state'] == 'Brave'
 
@@ -132,7 +132,7 @@ def test_coding_large_artwork_represents_editor(tmp_path: Path):
         'language': 'python',
         'project': 'demo',
     })
-    assert payload['large_image'] == 'https://cdn.simpleicons.org/visualstudiocode'
+    assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=code.visualstudio.com&sz=256'
     assert payload['large_text'] == 'VS Code'
     assert payload['small_image'] == 'py'
 
@@ -145,7 +145,7 @@ def test_terminal_large_artwork_represents_terminal_app(tmp_path: Path):
         'command': '',
         'directory': '',
     })
-    assert payload['large_image'] == 'https://cdn.simpleicons.org/kdeplasma'
+    assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=kde.org&sz=256'
     assert payload['large_text'] == 'Konsole'
 
 
