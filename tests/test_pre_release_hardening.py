@@ -41,7 +41,7 @@ def test_playerctl_backend_reads_playing_track_in_one_process(tmp_path: Path, mo
     def fake_run(args, **kwargs):
         calls.append(args)
         sep = '\x1f'
-        line = sep.join(('spotify', 'Playing', 'Artist', 'Track', '42000000', '240000000', ''))
+        line = sep.join(('spotify', 'Playing', 'Artist', 'Track', '42000000', '240000000', '', ''))
         return subprocess.CompletedProcess(args, 0, stdout=line + '\n', stderr='')
 
     monkeypatch.setattr(subprocess, 'run', fake_run)
@@ -66,7 +66,7 @@ def test_browser_mpris_media_inherits_foreground_youtube_service(tmp_path: Path,
 
     def fake_run(args, **kwargs):
         sep = '\x1f'
-        line = sep.join(('brave.instance2', 'Playing', 'Artist', 'Track', '10000000', '240000000', ''))
+        line = sep.join(('brave.instance2', 'Playing', 'Artist', 'Track', '10000000', '240000000', '', ''))
         return subprocess.CompletedProcess(args, 0, stdout=line + '\n', stderr='')
 
     monkeypatch.setattr(subprocess, 'run', fake_run)
@@ -90,7 +90,7 @@ def test_browser_mpris_media_detects_youtube_from_xesam_url(tmp_path: Path, monk
         sep = '\x1f'
         line = sep.join((
             'brave.instance2', 'Playing', 'Channel', 'Arabic video title',
-            '10000000', '240000000', 'https://www.youtube.com/watch?v=abc123',
+            '10000000', '240000000', 'https://www.youtube.com/watch?v=abc123', '',
         ))
         return subprocess.CompletedProcess(args, 0, stdout=line + '\n', stderr='')
 
@@ -99,6 +99,31 @@ def test_browser_mpris_media_detects_youtube_from_xesam_url(tmp_path: Path, monk
     activity = detector.detect({
         'app_name': 'com.brave.Browser',
         'title': 'Arabic video title — Brave',
+    })
+
+    assert activity is not None
+    assert activity['player'] == 'Brave'
+    assert activity['service'] == 'YouTube'
+    assert activity['is_playing'] is True
+
+
+def test_browser_mpris_media_detects_youtube_from_art_url(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr('platform.system', lambda: 'Linux')
+    monkeypatch.setattr('shutil.which', lambda command: '/usr/bin/playerctl' if command == 'playerctl' else None)
+
+    def fake_run(args, **kwargs):
+        sep = '\x1f'
+        line = sep.join((
+            'brave.instance2', 'Playing', 'Channel', 'Arabic title without service name',
+            '10000000', '240000000', '', 'https://i.ytimg.com/vi/abc123/hqdefault.jpg',
+        ))
+        return subprocess.CompletedProcess(args, 0, stdout=line + '\n', stderr='')
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    detector = MediaDetector(Config(tmp_path / 'config.yaml'))
+    activity = detector.detect({
+        'app_name': 'com.brave.Browser',
+        'title': 'Arabic title — Brave',
     })
 
     assert activity is not None
