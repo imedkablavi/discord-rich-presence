@@ -25,13 +25,21 @@ jobs:
         run: python -m compileall -q .
       - name: Ruff critical checks
         run: ruff check . --select E9,F63,F7,F82
-      - name: Validate shell hooks
-        if: runner.os == 'Linux'
+      - name: Run tests
+        run: pytest -q
+
+  shell-hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+      - name: Validate Bash and Zsh hooks
         run: |
           bash -n scripts/hooks/bash.sh
           zsh -n scripts/hooks/zsh.zsh
-      - name: Run tests
-        run: pytest -q
 
   package-windows:
     runs-on: windows-latest
