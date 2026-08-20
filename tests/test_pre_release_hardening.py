@@ -132,6 +132,66 @@ def test_browser_mpris_media_detects_youtube_from_art_url(tmp_path: Path, monkey
     assert activity['is_playing'] is True
 
 
+def test_verified_browser_service_survives_window_switch_for_same_media(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr('platform.system', lambda: 'Linux')
+    monkeypatch.setattr('shutil.which', lambda command: '/usr/bin/playerctl' if command == 'playerctl' else None)
+
+    sep = '\x1f'
+    line = sep.join((
+        'brave.instance2', 'Playing', 'Channel', 'Same Track',
+        '10000000', '240000000', '', 'file:///tmp/.org.chromium.Chromium.cover',
+    ))
+    monkeypatch.setattr(
+        subprocess,
+        'run',
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=line + '\n', stderr=''),
+    )
+
+    detector = MediaDetector(Config(tmp_path / 'config.yaml'))
+    foreground = detector.detect({
+        'app_name': 'com.brave.Browser',
+        'title': 'Same Track - YouTube — Brave',
+    })
+    background = detector.detect({
+        'app_name': 'org.kde.konsole',
+        'title': 'discord-rich-presence : bash — Konsole',
+    })
+
+    assert foreground is not None
+    assert foreground['service'] == 'YouTube'
+    assert background is not None
+    assert background['service'] == 'YouTube'
+
+
+def test_service_cache_does_not_guess_for_different_media_title(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr('platform.system', lambda: 'Linux')
+    monkeypatch.setattr('shutil.which', lambda command: '/usr/bin/playerctl' if command == 'playerctl' else None)
+
+    sep = '\x1f'
+    responses = iter((
+        sep.join(('brave.instance2', 'Playing', 'Channel', 'Track One', '10000000', '240000000', '', '')),
+        sep.join(('brave.instance2', 'Playing', 'Other', 'Track Two', '10000000', '240000000', '', '')),
+    ))
+
+    def fake_run(args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout=next(responses) + '\n', stderr='')
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    detector = MediaDetector(Config(tmp_path / 'config.yaml'))
+    first = detector.detect({
+        'app_name': 'com.brave.Browser',
+        'title': 'Track One - YouTube — Brave',
+    })
+    second = detector.detect({
+        'app_name': 'org.kde.konsole',
+        'title': 'Konsole',
+    })
+
+    assert first is not None and first['service'] == 'YouTube'
+    assert second is not None
+    assert 'service' not in second
+
+
 def test_git_helper_parses_branch_status_with_two_queries(tmp_path: Path, monkeypatch):
     helper = GitHelper()
     calls = []
