@@ -37,6 +37,7 @@ def test_runtime_state_updates_and_releases(tmp_path):
     assert runtime.read_active() is None
     assert not runtime.lock_path.exists()
     assert not runtime.status_path.exists()
+    assert not runtime.stop_path.exists()
 
 
 def test_runtime_state_recovers_stale_lock(tmp_path):
@@ -80,3 +81,17 @@ def test_runtime_status_has_fresh_heartbeat(tmp_path):
         assert status['updated_at'] >= before
     finally:
         runtime.release()
+
+
+def test_stop_request_targets_exact_live_instance(tmp_path):
+    service_runtime = RuntimeState(tmp_path)
+    controller = RuntimeState(tmp_path)
+    assert service_runtime.acquire() is True
+    try:
+        assert controller.request_stop() is True
+        assert service_runtime.stop_requested() is True
+        request = json.loads(service_runtime.stop_path.read_text(encoding='utf-8'))
+        assert request['pid'] == os.getpid()
+        assert abs(request['create_time'] - service_runtime.create_time) < 1.0
+    finally:
+        service_runtime.release()
