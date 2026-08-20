@@ -26,6 +26,32 @@ Browser detection uses the foreground window title. It does not have access to t
 
 For exact URL integration, a browser extension or native browser integration is required.
 
+## Rich Presence keeps showing a generic image
+
+Known applications use application-specific external artwork by default. Run a dry-run and inspect `large_image`:
+
+```bash
+python main.py --dry-run --once --verbose
+```
+
+For a known app such as Brave, the payload should contain an application-specific image URL rather than only `app`, `browser`, or `video`. If you prefer assets uploaded in the Discord Developer Portal, set:
+
+```yaml
+images:
+  use_external_app_icons: false
+```
+
+To force one application's artwork, use an asset key or direct image URL:
+
+```yaml
+images:
+  icon_overrides:
+    brave: "my-brave-asset"
+    trae: "https://example.com/trae.png"
+```
+
+Unknown applications intentionally fall back to the configured category/Developer Portal image. External artwork also depends on the Discord client being able to fetch the referenced URL.
+
 ## Terminal commands do not appear
 
 Terminal command tracking needs one of the supplied shell hooks.
