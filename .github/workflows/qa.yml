@@ -64,7 +64,7 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "Packaged executable exited with code $($process.ExitCode)"
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: DiscordRichPresence-windows
           path: dist/DiscordRichPresence.exe
