@@ -1,4 +1,4 @@
-# Runtime dependencies. Python 3.9+ is required by pypresence 4.6.2.
+# Runtime dependencies. This project targets Python 3.10+.
 pypresence==4.6.2
 PyYAML>=6.0,<7
 customtkinter>=5.2,<6
