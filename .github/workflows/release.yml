@@ -22,6 +22,27 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Build Windows executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Verify and smoke-test executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/DiscordRichPresence.exe")) {
+            throw "Packaged executable was not created"
+          }
+          $size = (Get-Item "dist/DiscordRichPresence.exe").Length
+          if ($size -lt 1000000) {
+            throw "Packaged executable is unexpectedly small"
+          }
+          $process = Start-Process `
+            -FilePath "dist/DiscordRichPresence.exe" `
+            -ArgumentList "--dry-run", "--once" `
+            -PassThru
+          if (-not $process.WaitForExit(20000)) {
+            $process.Kill()
+            throw "Packaged executable did not exit after a one-cycle dry run"
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged executable exited with code $($process.ExitCode)"
+          }
       - name: Generate SHA-256 checksum
         shell: pwsh
         run: |
