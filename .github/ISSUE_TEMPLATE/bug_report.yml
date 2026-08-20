@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible problem with the service, GUI, detector, or packaged build.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove tokens, private paths, terminal secrets, and other personal data before posting logs or screenshots.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options:
+        - Windows 10
+        - Windows 11
+        - Linux X11
+        - Linux Wayland / Sway
+        - Linux Wayland / other compositor
+        - Other / unsupported
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v2.x.x or commit SHA
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation type
+      options:
+        - Packaged Windows executable
+        - run.bat / source on Windows
+        - Source on Linux
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the behavior and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start ...
+        2. Focus ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste only the lines needed to understand the problem. Redact private data first.
+      render: text

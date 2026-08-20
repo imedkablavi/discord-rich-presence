@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Build Windows executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash "dist/DiscordRichPresence.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  DiscordRichPresence.exe" | Set-Content -Encoding ascii "dist/DiscordRichPresence.exe.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiscordRichPresence-windows
+          path: |
+            dist/DiscordRichPresence.exe
+            dist/DiscordRichPresence.exe.sha256
+          if-no-files-found: error
+      - name: Publish GitHub release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "dist/DiscordRichPresence.exe" `
+            "dist/DiscordRichPresence.exe.sha256" `
+            --generate-notes `
+            --title "Discord Rich Presence ${{ github.ref_name }}"
