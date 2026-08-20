@@ -31,6 +31,8 @@ Keeps detected activity details with no project-side redaction. Use this only if
 
 Keeps useful context while applying configured redaction patterns and reducing path exposure. This is the default mode.
 
+For terminal commands, values following common sensitive flags such as token, password, authorization, API-key, access-key, and private-key arguments are redacted in addition to the configured regex rules. For browsers, an inferred link is removed if its source window title had to be redacted; this prevents the original value from surviving only in percent-encoded URL form.
+
 ### `strict`
 
 Uses generic descriptions and removes identifying browser URLs and buttons.
