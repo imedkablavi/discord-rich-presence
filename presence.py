@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 from pypresence.types import ActivityType
 
 from config import Config
+from icon_resolver import IconResolver
 from privacy import PrivacyRedactor
 
 
@@ -25,6 +26,7 @@ class PresenceBuilder:
     def __init__(self, config: Config):
         self.config = config
         self.redactor = PrivacyRedactor(config)
+        self.icons = IconResolver(config)
         self.activity_start_times: Dict[str, int] = {}
         self.media_timelines: Dict[str, Dict[str, int]] = {}
 
@@ -51,6 +53,7 @@ class PresenceBuilder:
     def _build_media(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         title = str(activity.get('title', 'Unknown'))
         player = str(activity.get('player', 'Media Player'))
+        player_display = self._display_app_name(player)
         is_playing = bool(activity.get('is_playing', False))
         position = max(0, int(activity.get('position', 0) or 0))
         duration = max(0, int(activity.get('duration', 0) or 0))
@@ -59,16 +62,16 @@ class PresenceBuilder:
             f"{'Listening' if player.lower() == 'spotify' else 'Watching'} · {title}"
             if is_playing else f"Paused · {title}"
         )
-        state = player
+        state = player_display
         if not is_playing and duration > 0:
-            state = f"{player} · {self._format_time(position)}/{self._format_time(duration)}"
+            state = f"{player_display} · {self._format_time(position)}/{self._format_time(duration)}"
 
         payload: Dict[str, Any] = {
             'activity_type': ActivityType.LISTENING if player.lower() == 'spotify' else ActivityType.WATCHING,
             'details': details[:128],
             'state': state[:128],
-            'large_image': self._resolve_media_image(player),
-            'large_text': player[:128],
+            'large_image': self._resolve_media_image(player, player_display),
+            'large_text': player_display[:128],
         }
 
         if is_playing:
@@ -119,13 +122,20 @@ class PresenceBuilder:
     def _build_terminal(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         command = str(activity.get('command', ''))
         shell = str(activity.get('shell', 'Terminal'))
+        terminal_name = str(activity.get('terminal_name') or shell or 'Terminal')
         directory = str(activity.get('directory', '') or '')
+        configured = self._configured_app_image(terminal_name, shell)
         payload = {
             'activity_type': ActivityType.PLAYING,
             'details': (f"Terminal · {command}" if command else "Terminal")[:128],
             'state': (f"{shell} · {directory}" if directory else shell)[:128],
-            'large_image': self.config.get('images.terminal', 'terminal'),
-            'large_text': shell[:128],
+            'large_image': self.icons.resolve(
+                terminal_name,
+                shell,
+                configured=configured,
+                fallback=self.config.get('images.terminal', 'terminal'),
+            ),
+            'large_text': terminal_name[:128],
             'start': self._get_activity_start('terminal', command or 'idle'),
         }
         self._add_buttons(payload)
@@ -140,7 +150,11 @@ class PresenceBuilder:
             'activity_type': ActivityType.PLAYING,
             'details': (f"Coding · {filename}" if filename else "Coding")[:128],
             'state': (f"{editor} · {project}" if project else editor)[:128],
-            'large_image': self.config.get('images.code', 'code'),
+            'large_image': self.icons.resolve(
+                editor,
+                configured=self._configured_app_image(editor),
+                fallback=self.config.get('images.code', 'code'),
+            ),
             'large_text': editor[:128],
             'start': self._get_activity_start('coding', project or filename or editor),
         }
@@ -165,10 +179,21 @@ class PresenceBuilder:
             'activity_type': ActivityType.WATCHING if service in {'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu', 'Twitch'} else ActivityType.PLAYING,
             'details': details[:128],
             'state': state[:128],
-            'large_image': self._resolve_browser_image(service or page_title),
-            'large_text': (service or browser_name)[:128],
+            # The large icon represents the application in use. Service/site art,
+            # when available, is shown as the smaller overlay instead.
+            'large_image': self.icons.resolve(
+                browser_name,
+                configured=self._configured_app_image(browser_name),
+                fallback=self.config.get('images.browser', 'browser'),
+            ),
+            'large_text': browser_name[:128],
             'start': self._get_activity_start('browser', service or browser_name),
         }
+        if service:
+            site_image = self._resolve_service_image(service)
+            if site_image:
+                payload['small_image'] = site_image
+                payload['small_text'] = service[:128]
         if url and not is_private and self.config.get('privacy.mode', 'balanced') != 'strict':
             payload['details_url'] = url
             payload['large_url'] = url
@@ -179,17 +204,17 @@ class PresenceBuilder:
         raw_app_name = str(activity.get('app_name', 'Application'))
         app_name = self._display_app_name(raw_app_name)
         window_title = str(activity.get('window_title', '') or '')
-        apps_map = self.config.get('images.apps', {}) or {}
-        image_key = (
-            apps_map.get(raw_app_name.lower())
-            or apps_map.get(app_name.lower())
-            or self.config.get('images.app', 'app')
+        image = self.icons.resolve(
+            raw_app_name,
+            app_name,
+            configured=self._configured_app_image(raw_app_name, app_name),
+            fallback=self.config.get('images.app', 'app'),
         )
         payload = {
             'activity_type': ActivityType.PLAYING,
             'details': f"{app_name} active"[:128],
             'state': (window_title if window_title else app_name)[:128],
-            'large_image': image_key,
+            'large_image': image,
             'large_text': app_name[:128],
             'start': self._get_activity_start('app', raw_app_name),
         }
@@ -199,10 +224,15 @@ class PresenceBuilder:
     def _build_gaming(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         game_name = str(activity.get('game_name') or activity.get('launcher') or 'Game')
         launcher = str(activity.get('launcher') or 'Gaming')
-        key = (
-            self.config.get(f"images.apps.{game_name.lower()}")
+        configured = (
+            self._configured_app_image(game_name, launcher)
             or self.config.get(f"images.games.{game_name.lower()}")
-            or self.config.get('images.app', 'app')
+        )
+        key = self.icons.resolve(
+            game_name,
+            launcher,
+            configured=configured,
+            fallback=self.config.get('images.app', 'app'),
         )
         payload = {
             'activity_type': ActivityType.PLAYING,
@@ -225,6 +255,45 @@ class PresenceBuilder:
             raw = raw.rsplit('.', 1)[-1]
         cleaned = raw.replace('_', ' ').replace('-', ' ').strip()
         return cleaned.title() if cleaned and cleaned.islower() else (cleaned or 'Application')
+
+    def _configured_app_image(self, *names: object) -> Optional[str]:
+        apps = self.config.get('images.apps', {}) or {}
+        if not isinstance(apps, dict):
+            return None
+        normalized = {str(key).strip().lower(): str(value).strip() for key, value in apps.items()}
+        for name in names:
+            raw = str(name or '').strip().lower()
+            if raw in normalized and normalized[raw]:
+                return normalized[raw]
+        return None
+
+    def _resolve_media_image(self, player: str, player_display: str) -> str:
+        players = self.config.get('images.players', {}) or {}
+        configured = None
+        if isinstance(players, dict):
+            configured = players.get(str(player).lower()) or players.get(str(player_display).lower())
+        configured = configured or self._configured_app_image(player, player_display)
+        return self.icons.resolve(
+            player,
+            player_display,
+            configured=str(configured or ''),
+            fallback=self.config.get('images.video', 'video'),
+        )
+
+    def _resolve_service_image(self, service: str) -> Optional[str]:
+        sites = self.config.get('images.sites', {}) or {}
+        configured = None
+        if isinstance(sites, dict):
+            configured = sites.get(str(service).lower())
+        # Only known/configured services get a small overlay. Avoid inserting a
+        # generic fallback because the large image already represents the app.
+        external = self.icons.BUILTIN_EXTERNAL_ICONS.get(self.icons._normalize(service))
+        custom = self.icons._custom_override(self.icons._names((service,)))
+        if custom:
+            return custom
+        if self.config.get('images.use_external_app_icons', True) and external:
+            return external
+        return str(configured).strip() if configured else None
 
     def _add_buttons(self, payload: Dict[str, Any], url: Optional[str] = None, service: str = ''):
         if self.config.get('privacy.mode', 'balanced') == 'strict':
@@ -279,15 +348,3 @@ class PresenceBuilder:
         minutes = (seconds % 3600) // 60
         secs = seconds % 60
         return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
-
-    def _resolve_media_image(self, player: str) -> str:
-        key = self.config.get(f'images.players.{str(player).lower()}') if player else None
-        return key or self.config.get('images.video', 'video')
-
-    def _resolve_browser_image(self, title_or_service: str) -> str:
-        sites = self.config.get('images.sites', {}) or {}
-        value = str(title_or_service).lower()
-        for key, image in sites.items():
-            if key and str(key).lower() in value:
-                return image
-        return self.config.get('images.browser', 'browser')
