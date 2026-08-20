@@ -3,8 +3,12 @@
 # Linux: ~/.config/discord-rich-presence/config.yaml
 
 discord:
-  # Discord Developer Application ID (numeric)
-  client_id: "1437867564762923028"
+  # Normal users do not need a Discord Developer Portal application. The app
+  # ships with the CYBREX Discord Application ID and connects to the running
+  # Discord Desktop client automatically.
+  # Advanced only: set a custom Application ID if you intentionally maintain
+  # your own Discord application/assets. Leave empty for the built-in identity.
+  application_id_override: ""
   # Optional buttons: maximum 2, label 1-32 chars, URL max 512 chars.
   buttons: []
 
