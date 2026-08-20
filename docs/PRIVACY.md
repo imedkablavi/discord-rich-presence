@@ -17,7 +17,9 @@ The browser detector does not read the exact browser tab URL. Links shown in Ric
 
 ## What reaches Discord
 
-Only the Rich Presence payload produced after detector rules and privacy filtering is sent through Discord Desktop RPC. That payload can contain activity text, image keys, timestamps, buttons, and configured URLs.
+Only the Rich Presence payload produced after detector rules and privacy filtering is sent through Discord Desktop RPC. That payload can contain activity text, image keys or external image URLs, timestamps, buttons, and configured URLs.
+
+By default, known applications can use external artwork URLs from the Simple Icons CDN so the Rich Presence image follows the application actually in use. The service itself does not download those images; the URL is included in the Discord activity payload. Set `images.use_external_app_icons: false` to use only Discord Developer Portal asset keys, or use `images.icon_overrides` to select your own asset key or image URL for a specific application.
 
 If you do not want a category published, disable its detector. `rules.enabled_detectors.application` controls the generic fallback for applications that do not match a specialized detector.
 
