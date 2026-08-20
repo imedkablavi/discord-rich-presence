@@ -69,3 +69,24 @@ def test_wait_honors_runtime_graceful_stop_request():
 
     assert service._wait(10) is True
     assert service._stop_event.is_set()
+
+
+def test_windows_lock_app_is_detected():
+    assert DiscordRichPresenceService._is_lock_screen_window({
+        'app_name': 'LockApp.exe',
+        'title': 'Windows Default Lock Screen',
+    }) is True
+
+
+def test_linux_screen_locker_is_detected():
+    assert DiscordRichPresenceService._is_lock_screen_window({
+        'app_name': 'kscreenlocker_greet',
+        'title': '',
+    }) is True
+
+
+def test_normal_application_is_not_treated_as_lock_screen():
+    assert DiscordRichPresenceService._is_lock_screen_window({
+        'app_name': 'code',
+        'title': 'main.py - Visual Studio Code',
+    }) is False
