@@ -1,11 +1,13 @@
-"""Terminal activity detection using optional shell hooks."""
+"""Terminal activity detection using optional per-shell command hooks."""
 
 import os
 import platform
 import time
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Iterable
+
+import psutil
 
 from config import Config
 
@@ -25,11 +27,13 @@ class TerminalDetector:
         self.platform_name = platform.system().lower()
         if self.platform_name == 'windows':
             base = os.environ.get('LOCALAPPDATA')
-            cache_dir = (Path(base) if base else Path.home() / 'AppData' / 'Local') / 'discord-rich-presence' / 'cache'
-            self.cmd_file = cache_dir / 'rp_last_cmd.txt'
+            self.cache_dir = (Path(base) if base else Path.home() / 'AppData' / 'Local') / 'discord-rich-presence' / 'cache'
+            self.cmd_file = self.cache_dir / 'rp_last_cmd.txt'
         else:
-            self.cmd_file = Path.home() / '.cache' / 'discord-rich-presence' / 'rp_last_cmd'
-        self.cmd_file.parent.mkdir(parents=True, exist_ok=True)
+            self.cache_dir = Path.home() / '.cache' / 'discord-rich-presence'
+            self.cmd_file = self.cache_dir / 'rp_last_cmd'
+        self.command_dir = self.cache_dir / 'commands'
+        self.command_dir.mkdir(parents=True, exist_ok=True)
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not window_info or not self.config.get('rules.enabled_detectors.terminal', True):
@@ -45,7 +49,7 @@ class TerminalDetector:
         if not terminal_name:
             return None
 
-        command = self._get_last_command()
+        command = self._get_last_command(window_info.get('pid'))
         shell, directory = self._parse_terminal_title(title)
         return {
             'type': 'terminal', 'terminal_name': terminal_name,
@@ -53,23 +57,107 @@ class TerminalDetector:
             'directory': directory or '', 'has_command': bool(command)
         }
 
-    def _get_last_command(self) -> str:
+    def _ttl(self) -> int:
         try:
-            if not self.cmd_file.exists():
+            return max(0, int(self.config.get('rules.terminal_command_ttl_secs', 21600) or 21600))
+        except (TypeError, ValueError):
+            return 21600
+
+    def _is_fresh(self, path: Path) -> bool:
+        ttl = self._ttl()
+        try:
+            return ttl <= 0 or time.time() - path.stat().st_mtime <= ttl
+        except OSError:
+            return False
+
+    @staticmethod
+    def _read_command(path: Path) -> str:
+        try:
+            command = path.read_text(encoding='utf-8', errors='replace').strip()
+        except OSError:
+            return ''
+        if len(command) <= 1:
+            return ''
+        if 'rp_last_cmd' in command or '__drp_' in command or 'Write-DrpCommandCache' in command:
+            return ''
+        return command[:2048]
+
+    def _candidate_process_ids(self, window_pid: Any) -> set[int]:
+        try:
+            pid = int(window_pid)
+        except (TypeError, ValueError):
+            return set()
+        if pid <= 0:
+            return set()
+
+        candidates = {pid}
+        try:
+            process = psutil.Process(pid)
+            for child in process.children(recursive=True):
+                candidates.add(int(child.pid))
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+        return candidates
+
+    def _matching_command_files(self, process_ids: Iterable[int]) -> list[Path]:
+        files = []
+        for pid in process_ids:
+            path = self.command_dir / f'{int(pid)}.txt'
+            if path.exists() and self._is_fresh(path):
+                files.append(path)
+        try:
+            files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        except OSError:
+            pass
+        return files
+
+    def _fresh_pid_command_files(self) -> list[Path]:
+        try:
+            return [path for path in self.command_dir.glob('*.txt') if self._is_fresh(path)]
+        except OSError:
+            return []
+
+    def _cleanup_command_cache(self):
+        """Bound stale per-shell cache files without touching fresh active entries."""
+        try:
+            files = list(self.command_dir.glob('*.txt'))
+            stale = [path for path in files if not self._is_fresh(path)]
+            for path in stale:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+            remaining = [path for path in files if path.exists()]
+            if len(remaining) > 100:
+                remaining.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+                for path in remaining[100:]:
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
+    def _get_last_command(self, window_pid: Any = None) -> str:
+        try:
+            self._cleanup_command_cache()
+            candidates = self._candidate_process_ids(window_pid)
+            for path in self._matching_command_files(candidates):
+                command = self._read_command(path)
+                if command:
+                    return command
+
+            # If new PID-scoped hooks are active but none match this focused terminal,
+            # returning the global cache could leak a command from another terminal.
+            # Only use the old global cache when there are no fresh PID-scoped files.
+            if self._fresh_pid_command_files():
                 return ''
-            ttl = int(self.config.get('rules.terminal_command_ttl_secs', 21600) or 21600)
-            if ttl > 0 and time.time() - self.cmd_file.stat().st_mtime > ttl:
-                return ''
-            command = self.cmd_file.read_text(encoding='utf-8', errors='replace').strip()
-            if len(command) <= 1:
-                return ''
-            # Avoid recursively publishing the hook implementation itself.
-            if 'rp_last_cmd' in command or '__drp_' in command:
-                return ''
-            return command[:2048]
+
+            if self.cmd_file.exists() and self._is_fresh(self.cmd_file):
+                return self._read_command(self.cmd_file)
         except (OSError, ValueError) as e:
             self.logger.debug('Failed to read terminal command cache: %s', e)
-            return ''
+        return ''
 
     def _parse_terminal_title(self, title: str) -> tuple[Optional[str], Optional[str]]:
         if not title:

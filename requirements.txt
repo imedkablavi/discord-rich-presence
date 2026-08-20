@@ -4,11 +4,11 @@ PyYAML>=6.0,<7
 customtkinter>=5.2,<6
 pystray>=0.19.5,<1
 Pillow>=10,<12
+psutil>=5.9,<8
 
 # Linux media integration
 pydbus>=0.6,<1; sys_platform == 'linux'
 
 # Windows integrations
 pywin32>=305; sys_platform == 'win32'
-psutil>=5.9,<8; sys_platform == 'win32'
 winsdk>=1.0.0b10; sys_platform == 'win32'

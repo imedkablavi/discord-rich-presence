@@ -16,19 +16,29 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if not exist ".venv\Scripts\python.exe" (
-    echo [INFO] Creating virtual environment...
-    python -m venv .venv
-    if errorlevel 1 goto :install_error
-)
+if not exist ".venv\Scripts\python.exe" goto :create_venv
 
+REM Existing clones may contain a venv created with an older Python.
+.venv\Scripts\python.exe -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Existing virtual environment uses an unsupported Python. Recreating it...
+    rmdir /s /q .venv
+    goto :create_venv
+)
+goto :activate_venv
+
+:create_venv
+echo [INFO] Creating virtual environment...
+python -m venv .venv
+if errorlevel 1 goto :install_error
+
+:activate_venv
 call .venv\Scripts\activate.bat
 
-REM Only install when runtime imports are unavailable. This avoids a network/pip
-REM operation on every normal launch while still self-healing incomplete environments.
-python -c "import pypresence, yaml, customtkinter, pystray, PIL" >nul 2>&1
+REM Validate both imports and the pypresence version whose URL/timestamp API we use.
+python -c "import importlib.metadata as m; import yaml, customtkinter, pystray, PIL, psutil, win32gui; import winsdk.windows.media.control; assert m.version('pypresence') == '4.6.2'" >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Installing runtime dependencies...
+    echo [INFO] Repairing runtime dependencies...
     python -m pip install -r requirements.txt
     if errorlevel 1 goto :install_error
 )
