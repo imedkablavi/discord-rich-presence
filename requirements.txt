@@ -1,6 +1,6 @@
 # Runtime dependencies. This project targets Python 3.10+.
 pypresence==4.6.2
-PyYAML>=6.0,<7
+PyYAML>=6.0.3,<7
 customtkinter>=5.2,<6
 pystray>=0.19.5,<1
 Pillow>=10,<12
