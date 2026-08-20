@@ -1,69 +1,51 @@
 # Discord Rich Presence Service Configuration
-# نسخ هذا الملف إلى ~/.config/discord-rich-presence/config.yaml
+# Windows: %APPDATA%\discord-rich-presence\config.yaml
+# Linux: ~/.config/discord-rich-presence/config.yaml
 
-# إعدادات Discord
 discord:
-  # معرف تطبيق Discord الخاص بك
-  # احصل عليه من: https://discord.com/developers/applications
-  client_id: "123456789"
-  
-  # أزرار (حتى 2)
-  buttons:
-    - label: "Website"
-      url: "https://imedkablavi.info"
-    - label: "GitHub"
-      url: "https://github.com/imedkablavi"
+  # Discord Developer Application ID (numeric)
+  client_id: "1437867564762923028"
+  # Optional buttons: maximum 2, label 1-32 chars, URL max 512 chars.
+  buttons: []
 
-# إعدادات الخصوصية
 privacy:
-  # وضع الخصوصية: off | balanced | strict
-  # off: عرض كل التفاصيل
-  # balanced: إخفاء المسارات الكاملة، عرض أسماء المشاريع والامتدادات فقط
-  # strict: عرض أوصاف عامة فقط
+  # off: no activity redaction
+  # balanced: redact configured secrets and reduce path exposure
+  # strict: generic descriptions only; browser URLs/buttons are removed
   mode: balanced
-  
-  # أنماط regex للبيانات الحساسة
   redactions:
     - regex: '(?i)(password|token|secret|key|api[_-]?key)\S*'
-    - regex: '([A-Fa-f0-9]{32,})'  # سلاسل hex طويلة
-  
-  # إخفاء مسارات المنزل (/home/user)
+    - regex: '([A-Fa-f0-9]{32,})'
   hide_home_paths: true
 
-# فترة التحديث بالثواني
-update_interval_secs: 7
+# Valid range: 1-3600 seconds
+update_interval_secs: 5
 
-# إعدادات النظام
 system:
-  # بدء التطبيق مصغرًا في علبة النظام
   start_minimized: false
-  # تشغيل تلقائي مع بدء النظام (Windows: يستخدم السجل)
   auto_start: false
 
-# أسماء الصور (يجب أن تطابق Art Assets في Discord)
 images:
   browser: "browser"
   video: "video"
   terminal: "terminal"
   code: "code"
   app: "app"
-  # خرائط أيقونات التطبيقات (يجب رفع Art Assets بهذه الأسماء)
   apps:
     explorer: "explorer"
     chrome: "chrome"
+    msedge: "edge"
     edge: "edge"
     firefox: "firefox"
     brave: "brave"
     opera: "opera"
     vivaldi: "vivaldi"
-    vscode: "vscode"
     code: "vscode"
+    vs code: "vscode"
     pycharm: "pycharm"
     trae: "trae"
     powershell: "powershell"
     cmd: "cmd"
-  
-  # أيقونات اللغات
   langs:
     python: "py"
     javascript: "js"
@@ -83,8 +65,6 @@ images:
     json: "json"
     yaml: "yaml"
     markdown: "md"
-  
-  # أيقونات مشغلات الوسائط
   players:
     spotify: "spotify"
     vlc: "vlc"
@@ -92,70 +72,61 @@ images:
     edge: "edge"
     firefox: "firefox"
     mpv: "mpv"
-  
-  # أيقونات المواقع
+    windows media player: "wmp"
   sites:
     youtube: "youtube"
     netflix: "netflix"
     hulu: "hulu"
     prime video: "prime"
-  
-  # أيقونات الألعاب
   games:
     league of legends: "lol"
     valorant: "valorant"
     minecraft: "minecraft"
+    rocket league: "rocketleague"
     fortnite: "fortnite"
     apex legends: "apex"
+    grand theft auto v: "gtav"
+    dota 2: "dota2"
 
-# قواعد الكشف
 rules:
-  # نطاقات YouTube
   youtube_domains:
     - "YouTube"
     - "youtu.be"
-  
-  # علامات التصفح الخاص
   private_markers:
     - "Incognito"
     - "Private Browsing"
     - "InPrivate"
-  
-  # تفعيل/تعطيل الكاشفات
   enabled_detectors:
     media: true
     terminal: true
     coding: true
     browser: true
-    # تعطيل كشف الألعاب افتراضياً (فعّله إذا كنت لاعباً)
-    gaming: false
-  
-  # قائمة السماح (فارغة = السماح للكل)
+    gaming: true
+  # Ignore terminal hook cache entries older than this. 0 disables expiration.
+  terminal_command_ttl_secs: 21600
   whitelist:
     apps: []
     sites: []
     games: []
-  
-  # قائمة الحظر
   blacklist:
     apps: []
     sites: []
     games: []
 
-# تجاوز يدوي للحالة (Override)
-# فعّل هذا لتعيين حالة ثابتة وتجاهل الكشف التلقائي
 override:
   enabled: false
-  details: "العمل على مشروع رائع"
-  state: "مشغول جداً"
+  details: ""
+  state: ""
   use_start_timestamp: false
   large_image_key: ""
   large_text: ""
   small_image_key: ""
   small_text: ""
-  # أزرار مخصصة للتجاوز (حتى 2)
-  buttons: []
-  # معلومات الحفلة (Party)
+  details_url: ""
+  state_url: ""
+  large_url: ""
+  small_url: ""
   party_id: ""
   party_current: 0
   party_max: 0
+  buttons: []
