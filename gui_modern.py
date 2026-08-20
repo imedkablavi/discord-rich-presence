@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 import tkinter as tk
@@ -13,6 +14,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from config import Config, DEFAULT_CONFIG
+from runtime_state import RuntimeState
 
 try:
     import winreg
@@ -29,6 +31,7 @@ class ModernControlPanel(ctk.CTk):
     def __init__(self, config: Config):
         super().__init__()
         self.config = config
+        self.runtime = RuntimeState()
         self.service_process: subprocess.Popen | None = None
         self.title('Discord Rich Presence Manager')
         self.geometry('1000x720')
@@ -40,7 +43,7 @@ class ModernControlPanel(ctk.CTk):
         self._build_sidebar()
         self._build_pages()
         self.select_page('dashboard')
-        self.after(1000, self._poll_service)
+        self.after(500, self._poll_service)
 
     def _build_sidebar(self):
         sidebar = ctk.CTkFrame(self, width=210, corner_radius=0)
@@ -79,15 +82,20 @@ class ModernControlPanel(ctk.CTk):
         page = self._page('dashboard', 'Service Dashboard')
         card = ctk.CTkFrame(page)
         card.pack(fill='x', padx=30, pady=10)
-        self.status_label = ctk.CTkLabel(card, text='● Not managed by this panel', font=ctk.CTkFont(size=16, weight='bold'))
-        self.status_label.pack(anchor='w', padx=20, pady=(20, 10))
-        ctk.CTkLabel(card, text='The panel only reports services it starts itself; it no longer claims Running by default.', text_color='gray').pack(anchor='w', padx=20, pady=(0, 15))
+        self.status_label = ctk.CTkLabel(card, text='● Service stopped', font=ctk.CTkFont(size=16, weight='bold'))
+        self.status_label.pack(anchor='w', padx=20, pady=(20, 5))
+        self.rpc_label = ctk.CTkLabel(card, text='Discord RPC: —')
+        self.rpc_label.pack(anchor='w', padx=20, pady=3)
+        self.activity_label = ctk.CTkLabel(card, text='Activity: —', justify='left', wraplength=780)
+        self.activity_label.pack(anchor='w', padx=20, pady=3)
+        self.heartbeat_label = ctk.CTkLabel(card, text='Heartbeat: —', text_color='gray')
+        self.heartbeat_label.pack(anchor='w', padx=20, pady=(3, 15))
 
         controls = ctk.CTkFrame(card, fg_color='transparent')
         controls.pack(fill='x', padx=15, pady=(0, 20))
         self.start_button = ctk.CTkButton(controls, text='Start Service', command=self.start_service)
         self.start_button.pack(side='left', padx=5)
-        self.stop_button = ctk.CTkButton(controls, text='Stop Managed Service', command=self.stop_service)
+        self.stop_button = ctk.CTkButton(controls, text='Stop Service', command=self.stop_service)
         self.stop_button.pack(side='left', padx=5)
         ctk.CTkButton(controls, text='Test Discord RPC', command=self.test_rpc).pack(side='left', padx=5)
         ctk.CTkButton(controls, text='Open Logs', command=self.open_logs).pack(side='left', padx=5)
@@ -188,7 +196,7 @@ class ModernControlPanel(ctk.CTk):
             self.config.save()
             if _WINREG_AVAILABLE:
                 self._set_registry_autostart(self.autostart.get())
-            messagebox.showinfo('Saved', 'Settings saved and validated.')
+            messagebox.showinfo('Saved', 'Settings saved and validated. The service will hot-reload the file.')
         except Exception as e:
             messagebox.showerror('Validation Error', str(e))
 
@@ -203,7 +211,9 @@ class ModernControlPanel(ctk.CTk):
             messagebox.showerror('Reset Error', str(e))
 
     def start_service(self):
-        if self.service_process and self.service_process.poll() is None:
+        active = self.runtime.read_active()
+        if active:
+            messagebox.showinfo('Service', f"Service is already running (PID {active.get('pid', '?')}).")
             return
         try:
             script = Path(__file__).with_name('main.py')
@@ -217,22 +227,53 @@ class ModernControlPanel(ctk.CTk):
             messagebox.showerror('Start Error', str(e))
 
     def stop_service(self):
-        if self.service_process and self.service_process.poll() is None:
-            self.service_process.terminate()
-            try:
-                self.service_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.service_process.kill()
+        active = self.runtime.read_active()
+        if not active:
+            messagebox.showinfo('Service', 'No running service instance was found.')
+            return
+        if not self.runtime.terminate_active(timeout=5):
+            messagebox.showerror('Stop Error', 'The service could not be stopped. Check permissions or the log file.')
         self.service_process = None
 
     def _poll_service(self):
-        if self.service_process and self.service_process.poll() is None:
-            self.status_label.configure(text='● Running (managed by this panel)', text_color='#2ecc71')
-        elif self.service_process:
-            code = self.service_process.poll()
-            self.status_label.configure(text=f'● Stopped (exit code {code})', text_color='#e74c3c')
+        active = self.runtime.read_active()
+        if not active:
+            self.status_label.configure(text='● Service stopped', text_color='gray')
+            self.rpc_label.configure(text='Discord RPC: —')
+            self.activity_label.configure(text='Activity: —')
+            self.heartbeat_label.configure(text='Heartbeat: —')
+            self.start_button.configure(state='normal')
+            self.stop_button.configure(state='disabled')
         else:
-            self.status_label.configure(text='● External status unknown / not managed', text_color='gray')
+            state = str(active.get('state') or 'running')
+            pid = active.get('pid', '?')
+            connected = bool(active.get('connected', False))
+            presence_active = bool(active.get('presence_active', False))
+            activity = active.get('activity') or ('No publishable activity' if not presence_active else 'Active')
+            updated = float(active.get('updated_at') or 0)
+            age = max(0.0, time.time() - updated) if updated else 0.0
+            stale = bool(updated and age > max(15.0, float(self.config.get('update_interval_secs', 5)) * 3))
+
+            if stale:
+                self.status_label.configure(text=f'● Service heartbeat stale (PID {pid})', text_color='#f39c12')
+            elif state in {'rpc_error', 'loop_error', 'configuration_error'}:
+                self.status_label.configure(text=f'● Service running with error (PID {pid})', text_color='#e74c3c')
+            else:
+                self.status_label.configure(text=f'● Service running (PID {pid})', text_color='#2ecc71')
+
+            if state == 'dry_run':
+                rpc_text = 'Discord RPC: dry-run mode'
+            else:
+                rpc_text = 'Discord RPC: connected' if connected else 'Discord RPC: disconnected'
+            last_error = str(active.get('last_error') or '').strip()
+            if last_error:
+                rpc_text += f' — {last_error[:150]}'
+            self.rpc_label.configure(text=rpc_text)
+            self.activity_label.configure(text=f'Activity: {activity}')
+            self.heartbeat_label.configure(text=f'Heartbeat: {age:.1f}s ago · state={state}')
+            self.start_button.configure(state='disabled')
+            self.stop_button.configure(state='normal')
+
         self.after(1000, self._poll_service)
 
     def test_rpc(self):
