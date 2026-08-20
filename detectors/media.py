@@ -2,6 +2,8 @@
 
 import logging
 import platform
+import shutil
+import subprocess
 from typing import Optional, Dict, Any
 
 from config import Config
@@ -15,6 +17,7 @@ class MediaDetector:
         self.logger = logging.getLogger(__name__)
         self.platform_name = platform.system().lower()
         self.dbus_available = False
+        self.playerctl_available = False
         self.windows_media_available = False
         self.bus = None
         self.windows_detector = None
@@ -29,15 +32,23 @@ class MediaDetector:
             except ImportError as e:
                 self.logger.warning('Windows media detection unavailable: %s', e)
         elif self.platform_name == 'linux':
+            self.playerctl_available = shutil.which('playerctl') is not None
+            if self.playerctl_available:
+                self.logger.info('playerctl/MPRIS support enabled')
             try:
                 import pydbus
                 self.bus = pydbus.SessionBus()
                 self.dbus_available = True
-                self.logger.info('D-Bus/MPRIS support enabled')
+                if not self.playerctl_available:
+                    self.logger.info('D-Bus/MPRIS support enabled')
             except ImportError:
-                self.logger.warning('pydbus unavailable; Linux media detection disabled')
+                if not self.playerctl_available:
+                    self.logger.warning(
+                        'Linux media detection unavailable; install playerctl or PyGObject/pydbus'
+                    )
             except Exception as e:
-                self.logger.warning('Failed to initialize D-Bus/MPRIS: %s', e)
+                if not self.playerctl_available:
+                    self.logger.warning('Failed to initialize D-Bus/MPRIS: %s', e)
         else:
             self.logger.debug('Media session detection is unsupported on %s', self.platform_name)
 
@@ -50,7 +61,15 @@ class MediaDetector:
                 return self.windows_detector.detect(window_info)
             return None
 
-        if self.platform_name != 'linux' or not self.dbus_available:
+        if self.platform_name != 'linux':
+            return None
+
+        if self.playerctl_available:
+            activity = self._detect_playerctl()
+            if activity:
+                return activity
+
+        if not self.dbus_available:
             return None
 
         try:
@@ -71,6 +90,80 @@ class MediaDetector:
         except Exception as e:
             self.logger.debug('Error detecting MPRIS media: %s', e)
             return None
+
+    def _detect_playerctl(self) -> Optional[Dict[str, Any]]:
+        """Read all MPRIS players with one playerctl process and prefer active playback."""
+        separator = '\x1f'
+        fmt = separator.join((
+            '{{playerName}}', '{{status}}', '{{artist}}', '{{title}}',
+            '{{position}}', '{{mpris:length}}',
+        ))
+        try:
+            result = subprocess.run(
+                ['playerctl', '--all-players', 'metadata', '--format', fmt],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode != 0 and not result.stdout.strip():
+                return None
+
+            paused = None
+            for line in result.stdout.splitlines():
+                parts = line.split(separator)
+                if len(parts) != 6:
+                    continue
+                player, status, artist, title, position_raw, duration_raw = parts
+                status = status.strip()
+                if status not in {'Playing', 'Paused'}:
+                    continue
+
+                position = self._microseconds_to_seconds(position_raw)
+                duration = self._microseconds_to_seconds(duration_raw)
+                display_name = self._display_player_name(player)
+                title = title.strip() or 'Unknown'
+                artist = artist.strip()
+                full_title = f'{artist} - {title}' if artist and artist != title else title
+                activity = {
+                    'type': 'media',
+                    'player': display_name,
+                    'title': full_title,
+                    'is_playing': status == 'Playing',
+                    'position': position,
+                    'duration': duration,
+                }
+                if activity['is_playing']:
+                    return activity
+                if paused is None:
+                    paused = activity
+            return paused
+        except subprocess.TimeoutExpired:
+            self.logger.debug('playerctl timed out')
+        except Exception as e:
+            self.logger.debug('playerctl media detection failed: %s', e)
+        return None
+
+    @staticmethod
+    def _microseconds_to_seconds(value: Any) -> int:
+        try:
+            return max(0, int(float(str(value).strip() or '0') / 1_000_000))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _display_player_name(player_name: str) -> str:
+        raw = str(player_name or 'Media Player').strip()
+        lower_name = raw.lower()
+        player_names = {
+            'vlc': 'VLC', 'spotify': 'Spotify', 'chromium': 'Chromium',
+            'chrome': 'Chrome', 'firefox': 'Firefox', 'mpv': 'MPV',
+            'rhythmbox': 'Rhythmbox', 'clementine': 'Clementine',
+        }
+        for key, name in player_names.items():
+            if key in lower_name:
+                return name
+        return raw or 'Media Player'
 
     def _get_mpris_players(self) -> list[str]:
         try:
@@ -108,18 +201,9 @@ class MediaDetector:
             except (TypeError, ValueError):
                 duration = 0
 
-            player_display_name = player_name.replace('org.mpris.MediaPlayer2.', '')
-            player_names = {
-                'vlc': 'VLC', 'spotify': 'Spotify', 'chromium': 'Chromium',
-                'firefox': 'Firefox', 'mpv': 'MPV', 'rhythmbox': 'Rhythmbox',
-                'clementine': 'Clementine',
-            }
-            lower_name = player_display_name.lower()
-            for key, name in player_names.items():
-                if key in lower_name:
-                    player_display_name = name
-                    break
-
+            player_display_name = self._display_player_name(
+                player_name.replace('org.mpris.MediaPlayer2.', '')
+            )
             full_title = f'{artist} - {title}' if artist and artist != title else title
             return {
                 'type': 'media',
