@@ -34,6 +34,44 @@ def test_spotify_uses_listening_activity_type(tmp_path: Path):
     assert payload['end'] > payload['start']
 
 
+def test_media_timeline_stays_stable_during_normal_playback(tmp_path: Path, monkeypatch):
+    builder = _builder(tmp_path)
+    clock = {'now': 1_800_000_000}
+    monkeypatch.setattr('presence.time.time', lambda: clock['now'])
+
+    first = builder.build({
+        'type': 'media', 'player': 'Spotify', 'title': 'Track',
+        'is_playing': True, 'position': 10, 'duration': 100,
+    })
+    clock['now'] += 5
+    second = builder.build({
+        'type': 'media', 'player': 'Spotify', 'title': 'Track',
+        'is_playing': True, 'position': 15, 'duration': 100,
+    })
+
+    assert second['start'] == first['start']
+    assert second['end'] == first['end']
+
+
+def test_media_timeline_resets_after_seek(tmp_path: Path, monkeypatch):
+    builder = _builder(tmp_path)
+    clock = {'now': 1_800_000_000}
+    monkeypatch.setattr('presence.time.time', lambda: clock['now'])
+
+    first = builder.build({
+        'type': 'media', 'player': 'Spotify', 'title': 'Track',
+        'is_playing': True, 'position': 10, 'duration': 100,
+    })
+    clock['now'] += 5
+    sought = builder.build({
+        'type': 'media', 'player': 'Spotify', 'title': 'Track',
+        'is_playing': True, 'position': 50, 'duration': 100,
+    })
+
+    assert sought['start'] != first['start']
+    assert sought['end'] != first['end']
+
+
 def test_browser_url_reaches_clickable_payload_and_button(tmp_path: Path):
     payload = _builder(tmp_path).build({
         'type': 'browser',
