@@ -50,6 +50,20 @@ jobs:
           if ($size -lt 1000000) {
             throw "Packaged executable is unexpectedly small"
           }
+      - name: Smoke-test packaged executable
+        shell: pwsh
+        run: |
+          $process = Start-Process `
+            -FilePath "dist/DiscordRichPresence.exe" `
+            -ArgumentList "--dry-run", "--once" `
+            -PassThru
+          if (-not $process.WaitForExit(20000)) {
+            $process.Kill()
+            throw "Packaged executable did not exit after a one-cycle dry run"
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged executable exited with code $($process.ExitCode)"
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: DiscordRichPresence-windows
