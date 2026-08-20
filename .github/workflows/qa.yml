@@ -27,3 +27,31 @@ jobs:
         run: ruff check . --select E9,F63,F7,F82
       - name: Run tests
         run: pytest -q
+
+  package-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Build executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Verify executable exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/DiscordRichPresence.exe")) {
+            throw "Packaged executable was not created"
+          }
+          $size = (Get-Item "dist/DiscordRichPresence.exe").Length
+          if ($size -lt 1000000) {
+            throw "Packaged executable is unexpectedly small"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiscordRichPresence-windows
+          path: dist/DiscordRichPresence.exe
+          if-no-files-found: error
