@@ -213,7 +213,6 @@ class ModernControlPanel(ctk.CTk):
                 if os.path.exists(pythonw):
                     python = pythonw
             self.service_process = subprocess.Popen([python, str(script)], cwd=str(script.parent))
-            self._poll_service()
         except Exception as e:
             messagebox.showerror('Start Error', str(e))
 
@@ -225,7 +224,6 @@ class ModernControlPanel(ctk.CTk):
             except subprocess.TimeoutExpired:
                 self.service_process.kill()
         self.service_process = None
-        self._poll_service()
 
     def _poll_service(self):
         if self.service_process and self.service_process.poll() is None:
@@ -239,6 +237,7 @@ class ModernControlPanel(ctk.CTk):
 
     def test_rpc(self):
         client_id = self.client_id.get().strip()
+
         def worker():
             try:
                 from pypresence import Presence
@@ -247,7 +246,9 @@ class ModernControlPanel(ctk.CTk):
                 rpc.close()
                 self.after(0, lambda: messagebox.showinfo('Discord RPC', 'RPC connection succeeded.'))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror('Discord RPC', f'Connection failed: {e}'))
+                error_message = str(e)
+                self.after(0, lambda msg=error_message: messagebox.showerror('Discord RPC', f'Connection failed: {msg}'))
+
         threading.Thread(target=worker, daemon=True).start()
 
     def open_logs(self):
