@@ -14,6 +14,8 @@
 - Add KDE Plasma Wayland foreground-window detection through `kdotool` and keep Sway support through `swaymsg`.
 - Reduce the default activity detection interval from 5 seconds to 2 seconds while continuing to send RPC updates only when the payload changes.
 - Normalize reverse-domain application IDs such as KDE app IDs into readable Rich Presence labels.
+- Use application-specific Rich Presence artwork for known browsers, editors, terminals, media players, and desktop applications, with service/language artwork as secondary overlays when available.
+- Allow application artwork to use Discord-supported external image URLs, with per-app overrides and a switch to fall back to Developer Portal assets only.
 - Isolate terminal command caches per shell PID and avoid cross-terminal command leakage.
 - Improve editor-title parsing for hyphenated filenames and Windows paths.
 - Reduce Git enrichment to two bounded Git subprocesses per lookup.
@@ -26,7 +28,7 @@
 - Make `off`, `balanced`, and `strict` privacy behavior consistent with the UI and documentation.
 - Redact values following sensitive terminal flags such as token/password/authorization arguments in Balanced mode.
 - Drop inferred browser links when their source title required privacy redaction, preventing encoded values from surviving in generated URLs.
-- Validate privacy regexes, detector flags, button/override URLs, terminal cache TTL, and party values.
+- Validate privacy regexes, icon overrides, detector flags, button/override URLs, terminal cache TTL, and party values.
 - Add lock-screen suppression and a separate toggle for generic application activity.
 - Make GUI settings changes transactional when validation fails.
 
