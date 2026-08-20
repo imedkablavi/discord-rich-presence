@@ -29,6 +29,12 @@ from detectors.gaming import GamingDetector
 class DiscordRichPresenceService:
     """Detect activity and keep Discord RPC synchronized with the current state."""
 
+    LOCK_SCREEN_APPS = {
+        'lockapp', 'logonui', 'credentialuibroker',
+        'kscreenlocker_greet', 'swaylock', 'i3lock', 'xsecurelock',
+        'light-locker', 'xscreensaver',
+    }
+
     def __init__(
         self,
         config: Config,
@@ -94,6 +100,17 @@ class DiscordRichPresenceService:
         if details and state:
             return f"{details} — {state}"[:240]
         return details or state or None
+
+    @classmethod
+    def _is_lock_screen_window(cls, window_info: Dict[str, Any]) -> bool:
+        app_name = str(window_info.get('app_name', '')).lower().replace('.exe', '').strip()
+        compact = app_name.replace(' ', '').replace('_', '').replace('-', '')
+        if any(name.replace('_', '').replace('-', '') in compact for name in cls.LOCK_SCREEN_APPS):
+            return True
+        title = str(window_info.get('title', '')).lower()
+        return any(marker in title for marker in (
+            'windows default lock screen', 'lock screen', 'screen locked'
+        ))
 
     def connect_discord(self) -> bool:
         try:
@@ -262,6 +279,9 @@ class DiscordRichPresenceService:
         window_info = self.window_detector.get_active_window()
         if not window_info:
             return None
+        if self.config.get('rules.clear_on_lock_screen', True) and self._is_lock_screen_window(window_info):
+            self.logger.debug('Lock screen detected; suppressing presence')
+            return None
 
         app_name = str(window_info.get('app_name', '')).lower()
         if not self._is_app_allowed(app_name):
@@ -293,6 +313,8 @@ class DiscordRichPresenceService:
                 return None
             return self.presence_builder.build(browser)
 
+        if not self.config.get('rules.enabled_detectors.application', True):
+            return None
         generic = {
             'type': 'application',
             'app_name': window_info.get('app_name', 'Unknown'),
