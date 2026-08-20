@@ -167,14 +167,21 @@ class ModernControlPanel(ctk.CTk):
         box = ctk.CTkFrame(page)
         box.pack(fill='x', padx=30, pady=10)
 
-        ctk.CTkLabel(box, text='Discord Client ID').pack(anchor='w', padx=20, pady=(20, 5))
-        self.client_id = tk.StringVar(value=str(self.config.get('discord.client_id', '')))
-        ctk.CTkEntry(box, textvariable=self.client_id, width=380).pack(
-            anchor='w', padx=20, pady=(0, 15)
-        )
+        ctk.CTkLabel(
+            box,
+            text='Discord connection',
+            font=ctk.CTkFont(size=16, weight='bold'),
+        ).pack(anchor='w', padx=20, pady=(20, 5))
+        ctk.CTkLabel(
+            box,
+            text='Automatic — uses the CYBREX application identity and the Discord Desktop account currently running on this computer.',
+            text_color='gray',
+            justify='left',
+            wraplength=760,
+        ).pack(anchor='w', padx=20, pady=(0, 15))
 
         ctk.CTkLabel(box, text='Update interval (seconds)').pack(anchor='w', padx=20, pady=(5, 5))
-        self.update_interval = tk.StringVar(value=str(self.config.get('update_interval_secs', 5)))
+        self.update_interval = tk.StringVar(value=str(self.config.get('update_interval_secs', 2)))
         ctk.CTkEntry(box, textvariable=self.update_interval, width=150).pack(
             anchor='w', padx=20, pady=(0, 15)
         )
@@ -231,7 +238,6 @@ class ModernControlPanel(ctk.CTk):
     def save_settings(self):
         snapshot = copy.deepcopy(self.config.data)
         try:
-            self.config.set('discord.client_id', self.client_id.get().strip())
             self.config.set('privacy.mode', self.privacy_mode.get())
             self.config.set('privacy.hide_home_paths', self.hide_home.get())
             self.config.set('rules.clear_on_lock_screen', self.clear_on_lock.get())
@@ -255,8 +261,6 @@ class ModernControlPanel(ctk.CTk):
                 'Saved', 'Settings saved and validated. The service will hot-reload the file.'
             )
         except Exception as e:
-            # GUI edits are transactional: a failed validation must not poison the
-            # in-memory Config object used by the rest of this panel.
             self.config.data = snapshot
             messagebox.showerror('Validation Error', str(e))
 
@@ -320,7 +324,7 @@ class ModernControlPanel(ctk.CTk):
             age = max(0.0, time.time() - updated) if updated else 0.0
             stale = bool(
                 updated
-                and age > max(15.0, float(self.config.get('update_interval_secs', 5)) * 3)
+                and age > max(15.0, float(self.config.get('update_interval_secs', 2)) * 3)
             )
 
             if stale:
@@ -352,7 +356,9 @@ class ModernControlPanel(ctk.CTk):
         self.after(1000, self._poll_service)
 
     def test_rpc(self):
-        client_id = self.client_id.get().strip()
+        # The public CYBREX application identity is built into Config. Normal
+        # users do not need to create a Discord Developer Portal application.
+        client_id = str(self.config.get('discord.client_id', '')).strip()
 
         def worker():
             try:
