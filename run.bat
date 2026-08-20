@@ -4,14 +4,14 @@ cd /d "%~dp0"
 
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python 3.9+ is required and was not found in PATH.
+    echo [ERROR] Python 3.10+ is required and was not found in PATH.
     pause
     exit /b 1
 )
 
-python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,9) else 1)" >nul 2>&1
+python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python 3.9 or newer is required.
+    echo [ERROR] Python 3.10 or newer is required.
     pause
     exit /b 1
 )
@@ -24,7 +24,7 @@ if not exist ".venv\Scripts\python.exe" (
 
 call .venv\Scripts\activate.bat
 
-REM Only install when the runtime imports are unavailable. This avoids a network/pip
+REM Only install when runtime imports are unavailable. This avoids a network/pip
 REM operation on every normal launch while still self-healing incomplete environments.
 python -c "import pypresence, yaml, customtkinter, pystray, PIL" >nul 2>&1
 if errorlevel 1 (
