@@ -16,9 +16,17 @@ except Exception:
     import json
 
 
+# Public Discord Application ID shipped with CYBREX Discord Rich Presence.
+# This is not a secret and lets normal users connect to the running Discord
+# desktop client without creating their own Developer Portal application.
+BUILTIN_DISCORD_APPLICATION_ID = '1437867564762923028'
+
+
 DEFAULT_CONFIG = {
     'discord': {
-        'client_id': '1437867564762923028',
+        # Optional advanced override. Normal users should leave this empty and
+        # use the built-in application identity above.
+        'application_id_override': '',
         'buttons': []
     },
     'privacy': {
@@ -100,6 +108,17 @@ DEFAULT_CONFIG = {
 }
 
 
+def resolve_discord_application_id(config: 'Config') -> str:
+    """Return the application ID used for local Discord RPC.
+
+    Normal installations use the public built-in application ID. Advanced users
+    may set ``discord.application_id_override``. Older configuration files that
+    used ``discord.client_id`` are migrated by :meth:`Config.load`.
+    """
+    override = str(config.get('discord.application_id_override', '') or '').strip()
+    return override or BUILTIN_DISCORD_APPLICATION_ID
+
+
 class Config:
     """Configuration manager with nested key access and safe hot reloads."""
 
@@ -127,6 +146,19 @@ class Config:
 
             new_data = copy.deepcopy(DEFAULT_CONFIG)
             self._deep_update(new_data, user_config)
+
+            # Backward-compatible migration from the old user-facing client_id.
+            discord = new_data.get('discord', {})
+            if isinstance(discord, dict):
+                legacy_id = str(discord.pop('client_id', '') or '').strip()
+                current_override = str(discord.get('application_id_override', '') or '').strip()
+                if (
+                    legacy_id
+                    and legacy_id != BUILTIN_DISCORD_APPLICATION_ID
+                    and not current_override
+                ):
+                    discord['application_id_override'] = legacy_id
+
             self._validate(new_data)
             self.data = new_data
             self.config_path = path
@@ -263,9 +295,9 @@ class Config:
         discord = data.get('discord', {})
         if not isinstance(discord, dict):
             raise ValueError('discord must be an object')
-        client_id = str(discord.get('client_id', '')).strip()
-        if not client_id or not client_id.isdigit():
-            raise ValueError('discord.client_id must be a numeric Discord application ID')
+        application_id_override = str(discord.get('application_id_override', '') or '').strip()
+        if application_id_override and not application_id_override.isdigit():
+            raise ValueError('discord.application_id_override must be an empty value or numeric Discord application ID')
         Config._validate_buttons(discord.get('buttons', []), 'discord.buttons')
 
         rules = data.get('rules', {})
