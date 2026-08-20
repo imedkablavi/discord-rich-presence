@@ -16,16 +16,15 @@ except Exception:
     import json
 
 
-# Public Discord Application ID shipped with CYBREX Discord Rich Presence.
-# This is not a secret and lets normal users connect to the running Discord
-# desktop client without creating their own Developer Portal application.
+# Public application identifier shipped with CYBREX Discord Rich Presence.
+# Discord Application IDs are public identifiers, not credentials/secrets.
 BUILTIN_DISCORD_APPLICATION_ID = '1437867564762923028'
 
 
 DEFAULT_CONFIG = {
     'discord': {
-        # Optional advanced override. Normal users should leave this empty and
-        # use the built-in application identity above.
+        # Optional advanced override. Normal users do not need a Developer
+        # Portal application or an ID of their own.
         'application_id_override': '',
         'buttons': []
     },
@@ -37,19 +36,13 @@ DEFAULT_CONFIG = {
         ],
         'hide_home_paths': True
     },
-    # Two seconds keeps window switching responsive without continuously
-    # hammering compositor/media APIs. RPC is only updated when payload changes.
     'update_interval_secs': 2,
     'system': {
         'start_minimized': False,
         'auto_start': False
     },
     'images': {
-        # Prefer application-specific external artwork for known apps. Set false
-        # to rely only on Discord Developer Portal asset keys below.
         'use_external_app_icons': True,
-        # Optional per-app overrides. Values can be Discord asset keys or direct
-        # http(s) image URLs accepted by Discord Rich Presence.
         'icon_overrides': {},
         'browser': 'browser',
         'video': 'video',
@@ -109,12 +102,7 @@ DEFAULT_CONFIG = {
 
 
 def resolve_discord_application_id(config: 'Config') -> str:
-    """Return the application ID used for local Discord RPC.
-
-    Normal installations use the public built-in application ID. Advanced users
-    may set ``discord.application_id_override``. Older configuration files that
-    used ``discord.client_id`` are migrated by :meth:`Config.load`.
-    """
+    """Return the application ID used for local Discord RPC."""
     override = str(config.get('discord.application_id_override', '') or '').strip()
     return override or BUILTIN_DISCORD_APPLICATION_ID
 
@@ -147,7 +135,9 @@ class Config:
             new_data = copy.deepcopy(DEFAULT_CONFIG)
             self._deep_update(new_data, user_config)
 
-            # Backward-compatible migration from the old user-facing client_id.
+            # Migrate the former user-facing client_id. The old built-in value is
+            # discarded; a genuinely custom value is preserved as an advanced
+            # override so existing custom setups keep working.
             discord = new_data.get('discord', {})
             if isinstance(discord, dict):
                 legacy_id = str(discord.pop('client_id', '') or '').strip()
@@ -187,9 +177,19 @@ class Config:
                     tmp_path.unlink()
             except OSError:
                 pass
-            raise ValueError(f"Failed to save config to {save_path}: {e}") from e
+            raise ValueError(f'Failed to save config to {save_path}: {e}') from e
 
     def get(self, key: str, default: Any = None) -> Any:
+        # Runtime compatibility for older code paths while the public config no
+        # longer exposes client_id. They transparently receive the built-in ID or
+        # the optional advanced override.
+        if key == 'discord.client_id':
+            discord = self.data.get('discord', {})
+            if isinstance(discord, dict):
+                override = str(discord.get('application_id_override', '') or '').strip()
+                return override or BUILTIN_DISCORD_APPLICATION_ID
+            return BUILTIN_DISCORD_APPLICATION_ID
+
         value: Any = self.data
         for part in key.split('.'):
             if isinstance(value, dict) and part in value:
@@ -297,7 +297,9 @@ class Config:
             raise ValueError('discord must be an object')
         application_id_override = str(discord.get('application_id_override', '') or '').strip()
         if application_id_override and not application_id_override.isdigit():
-            raise ValueError('discord.application_id_override must be an empty value or numeric Discord application ID')
+            raise ValueError(
+                'discord.application_id_override must be empty or a numeric Discord application ID'
+            )
         Config._validate_buttons(discord.get('buttons', []), 'discord.buttons')
 
         rules = data.get('rules', {})
