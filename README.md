@@ -6,7 +6,7 @@ A local Discord Rich Presence service that derives activity from the foreground 
 
 This project currently targets **Windows and Linux**. macOS is not advertised as supported until a native foreground-window implementation is added.
 
-**Requirements:** Python 3.9+ and Discord Desktop.
+**Requirements:** Python 3.10+ and Discord Desktop.
 
 ## Features
 
@@ -148,7 +148,7 @@ pytest -q
 ruff check . --select E9,F63,F7,F82
 ```
 
-GitHub Actions runs the regression suite on Windows and Ubuntu with Python 3.9 and 3.12.
+GitHub Actions runs the regression suite on Windows and Ubuntu with Python 3.10 and 3.12.
 
 ## Known limitations
 
