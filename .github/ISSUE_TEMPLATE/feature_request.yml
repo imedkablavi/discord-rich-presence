@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a detector, integration, UI improvement, or release feature.
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: What problem would this solve for you?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the result you would expect from the application.
+    validations:
+      required: true
+
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy or platform considerations
+      description: If the feature reads new local data or is platform-specific, describe that here.
