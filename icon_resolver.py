@@ -105,13 +105,12 @@ class IconResolver:
                 return value
         return None
 
-    def resolve(
+    def resolve_optional(
         self,
         *values: object,
         configured: Optional[str] = None,
-        fallback: str = 'app',
-    ) -> str:
-        """Resolve artwork for one or more aliases, in priority order."""
+    ) -> Optional[str]:
+        """Return matching artwork, or None when no specific artwork exists."""
         names = self._names(values)
 
         custom = self._custom_override(names)
@@ -125,6 +124,13 @@ class IconResolver:
                     return external
 
         configured_value = str(configured or '').strip()
-        if configured_value:
-            return configured_value
-        return str(fallback or 'app')
+        return configured_value or None
+
+    def resolve(
+        self,
+        *values: object,
+        configured: Optional[str] = None,
+        fallback: str = 'app',
+    ) -> str:
+        """Resolve artwork for one or more aliases, in priority order."""
+        return self.resolve_optional(*values, configured=configured) or str(fallback or 'app')
