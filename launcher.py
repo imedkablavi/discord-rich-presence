@@ -2,7 +2,14 @@
 """Entry point used by packaged builds."""
 
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+
+
+def _argument_name(value: str) -> str:
+    """Return a path basename without depending on the runner operating system."""
+    if '\\' in value:
+        return PureWindowsPath(value).name.lower()
+    return Path(value).name.lower()
 
 
 def _normalize_packaged_args():
@@ -15,7 +22,7 @@ def _normalize_packaged_args():
     # argument as a request to start this executable in service/tray mode.
     sys.argv[:] = [
         arg for index, arg in enumerate(sys.argv)
-        if index == 0 or Path(arg).name.lower() != 'main.py'
+        if index == 0 or _argument_name(arg) != 'main.py'
     ]
 
     if len(sys.argv) == 1:
