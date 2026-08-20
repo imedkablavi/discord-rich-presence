@@ -1,39 +1,43 @@
 @echo off
-setlocal EnableDelayedExpansion
-
+setlocal
 cd /d "%~dp0"
 
-REM --- Check Python ---
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Python is not installed or not in PATH.
-    echo Please install Python 3.10+ from python.org
+if errorlevel 1 (
+    echo [ERROR] Python 3.9+ is required and was not found in PATH.
     pause
     exit /b 1
 )
 
-REM --- Virtual Environment Setup ---
-if not exist ".venv" (
+python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,9) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Python 3.9 or newer is required.
+    pause
+    exit /b 1
+)
+
+if not exist ".venv\Scripts\python.exe" (
     echo [INFO] Creating virtual environment...
     python -m venv .venv
+    if errorlevel 1 goto :install_error
 )
 
-REM --- Activate Venv ---
 call .venv\Scripts\activate.bat
 
-REM --- Dependencies ---
-echo [INFO] Checking dependencies...
-pip install -r requirements.txt >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [WARNING] Failed to install some dependencies. Trying to proceed...
+REM Only install when the runtime imports are unavailable. This avoids a network/pip
+REM operation on every normal launch while still self-healing incomplete environments.
+python -c "import pypresence, yaml, customtkinter, pystray, PIL" >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Installing runtime dependencies...
+    python -m pip install -r requirements.txt
+    if errorlevel 1 goto :install_error
 )
 
-REM --- Run Application ---
-echo [INFO] Starting Discord Rich Presence Manager...
-echo [INFO] The application will run in the background if configured.
-echo [INFO] Check the system tray icon to open settings.
+echo [INFO] Starting Discord Rich Presence...
+start "" /min .venv\Scripts\pythonw.exe main.py --tray
+exit /b 0
 
-REM Run in background (start w/o console window if possible in future exe, here we minimize)
-start /min pythonw main.py --tray
-
-exit
+:install_error
+echo [ERROR] Setup failed. Run: .venv\Scripts\python.exe -m pip install -r requirements.txt
+pause
+exit /b 1
