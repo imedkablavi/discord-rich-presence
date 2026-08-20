@@ -27,6 +27,17 @@ system:
   auto_start: false
 
 images:
+  # Known applications use external brand artwork by default so the large Rich
+  # Presence image follows the app actually in use. Set false to use only the
+  # Discord Developer Portal asset keys configured below.
+  use_external_app_icons: true
+  # Optional overrides take priority over built-in external artwork. A value can
+  # be a Developer Portal asset key or a direct http(s) image URL.
+  icon_overrides: {}
+  # Example:
+  # icon_overrides:
+  #   trae: "https://example.com/trae.png"
+  #   konsole: "my-konsole-asset"
   browser: "browser"
   video: "video"
   terminal: "terminal"
