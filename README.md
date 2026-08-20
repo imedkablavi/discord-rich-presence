@@ -124,7 +124,7 @@ rules:
     application: true
 ```
 
-`update_interval_secs` controls how often local activity is checked, not how often Discord is updated. The service only sends a new RPC payload when the resulting activity changes. The default is 2 seconds; values down to 0.5 seconds are accepted when faster switching is preferred.
+`update_interval_secs` controls how often local activity is checked, not how often Discord is updated. The service only sends a new RPC payload when the resulting activity changes. The default is 2 seconds; values down to 1 second are accepted when faster switching is preferred.
 
 Set `application: false` if you only want recognized activity categories and do not want generic foreground-window titles published.
 
