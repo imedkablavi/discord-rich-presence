@@ -28,6 +28,7 @@ class RuntimeState:
         self.runtime_dir = Path(runtime_dir) if runtime_dir else default_runtime_dir()
         self.lock_path = self.runtime_dir / 'instance.lock'
         self.status_path = self.runtime_dir / 'status.json'
+        self.stop_path = self.runtime_dir / 'stop.request'
         self.pid = os.getpid()
         self.create_time = float(psutil.Process(self.pid).create_time())
         self.acquired = False
@@ -57,8 +58,6 @@ class RuntimeState:
         except (psutil.NoSuchProcess, psutil.ZombieProcess):
             return False
         except psutil.AccessDenied:
-            # Same-user services should normally be queryable. If the OS denies access,
-            # prefer treating the PID as live rather than starting a competing instance.
             return True
 
     def _identity(self) -> Dict[str, Any]:
@@ -94,6 +93,12 @@ class RuntimeState:
                 os.write(fd, json.dumps(identity).encode('utf-8'))
             finally:
                 os.close(fd)
+            try:
+                self.stop_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
             self.acquired = True
             now = time.time()
             self._write_atomic(self.status_path, {
@@ -122,12 +127,46 @@ class RuntimeState:
         current['updated_at'] = time.time()
         self._write_atomic(self.status_path, current)
 
+    def stop_requested(self) -> bool:
+        """Return True only for a stop request targeting this exact service process."""
+        if not self.acquired:
+            return False
+        request = self._read_json(self.stop_path)
+        if not request:
+            return False
+        try:
+            return (
+                int(request.get('pid', -1)) == self.pid
+                and abs(float(request.get('create_time', -1)) - self.create_time) < 1.0
+            )
+        except (TypeError, ValueError):
+            return False
+
+    def request_stop(self) -> bool:
+        """Ask the active service to perform a graceful shutdown."""
+        record = self.read_active()
+        if not record:
+            return False
+        try:
+            request = {
+                'pid': int(record['pid']),
+                'create_time': float(record['create_time']),
+                'requested_at': time.time(),
+            }
+        except (KeyError, TypeError, ValueError):
+            return False
+        try:
+            self._write_atomic(self.stop_path, request)
+            return True
+        except OSError:
+            return False
+
     def release(self):
-        """Remove status/lock files only when they still belong to this process."""
+        """Remove status/lock/stop files only when they belong to this process."""
         if not self.acquired:
             return
         self.acquired = False
-        for path in (self.status_path, self.lock_path):
+        for path in (self.status_path, self.lock_path, self.stop_path):
             record = self._read_json(path)
             if record and int(record.get('pid', -1)) != self.pid:
                 continue
@@ -149,7 +188,7 @@ class RuntimeState:
         return status
 
     def terminate_active(self, timeout: float = 5.0) -> bool:
-        """Terminate the live service identified by the lock file."""
+        """Request graceful shutdown, then terminate only if the service does not exit."""
         record = self.read_active()
         if not record:
             return False
@@ -159,15 +198,22 @@ class RuntimeState:
             return False
         if pid == os.getpid():
             return False
+
         try:
             process = psutil.Process(pid)
-            process.terminate()
+            self.request_stop()
             try:
-                process.wait(timeout=timeout)
+                process.wait(timeout=max(0.5, timeout))
+                return True
+            except psutil.TimeoutExpired:
+                process.terminate()
+            try:
+                process.wait(timeout=2.0)
+                return True
             except psutil.TimeoutExpired:
                 process.kill()
-                process.wait(timeout=timeout)
-            return True
+                process.wait(timeout=2.0)
+                return True
         except (psutil.NoSuchProcess, psutil.ZombieProcess):
             return True
         except (psutil.AccessDenied, psutil.TimeoutExpired):
