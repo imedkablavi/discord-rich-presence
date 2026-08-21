@@ -1,13 +1,14 @@
-"""Conservative foreground-game detection."""
+"""Conservative foreground-game detection with optional CS2 GSI enrichment."""
 
 import logging
 from typing import Optional, Dict, Any
 
 from config import Config
+from cs2_gsi import get_cs2_gsi
 
 
 class GamingDetector:
-    """Detect known games and launchers without treating launchers as games."""
+    """Detect known games and enrich Counter-Strike 2 through official GSI."""
 
     GAME_LAUNCHERS = {
         'steam': 'Steam', 'steamwebhelper': 'Steam',
@@ -49,9 +50,40 @@ class GamingDetector:
         'deadcells': 'Dead Cells',
     }
 
+    CS2_MODE_NAMES = {
+        'competitive': 'Competitive',
+        'casual': 'Casual',
+        'deathmatch': 'Deathmatch',
+        'scrimcomp2v2': 'Wingman',
+        'scrimpcomp2v2': 'Wingman',
+        'wingman': 'Wingman',
+        'gungameprogressive': 'Arms Race',
+        'gungametrbomb': 'Demolition',
+        'demolition': 'Demolition',
+        'survival': 'Danger Zone',
+        'training': 'Training',
+        'custom': 'Custom',
+    }
+
+    CS2_MAP_NAMES = {
+        'de_mirage': 'Mirage',
+        'de_dust2': 'Dust II',
+        'de_inferno': 'Inferno',
+        'de_nuke': 'Nuke',
+        'de_ancient': 'Ancient',
+        'de_anubis': 'Anubis',
+        'de_overpass': 'Overpass',
+        'de_train': 'Train',
+        'de_vertigo': 'Vertigo',
+        'cs_office': 'Office',
+    }
+
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
+        # GSI is an official, read-only game-state feed. Starting the loopback
+        # listener is harmless even before its one-time CS2 cfg is installed.
+        self.cs2_gsi = get_cs2_gsi(config, start=True)
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not window_info or not self.config.get('rules.enabled_detectors.gaming', False):
@@ -63,10 +95,24 @@ class GamingDetector:
         game_name = self._match(app_name, self.KNOWN_GAMES)
         launcher_name = self._match(app_name, self.GAME_LAUNCHERS)
         if game_name:
-            return {
+            activity: Dict[str, Any] = {
                 'type': 'gaming', 'game_name': game_name,
                 'launcher': launcher_name, 'is_game': True
             }
+            if game_name == 'Counter-Strike 2':
+                self._enrich_cs2(activity)
+            return activity
+
+        # Some Linux compositors expose a slightly different CS2 app/class
+        # string. A fresh authenticated GSI snapshot is enough to disambiguate
+        # only when the foreground name still clearly contains Counter-Strike.
+        if self.cs2_gsi and ('counter-strike' in app_name or 'counter strike' in app_name):
+            activity = {
+                'type': 'gaming', 'game_name': 'Counter-Strike 2',
+                'launcher': launcher_name or 'Steam', 'is_game': True,
+            }
+            self._enrich_cs2(activity)
+            return activity
 
         # A launcher is useful context, but it is not itself a game. The service
         # deliberately ignores is_game=False for Rich Presence.
@@ -82,6 +128,54 @@ class GamingDetector:
                 'launcher': launcher_name, 'is_game': False
             }
         return None
+
+    def _enrich_cs2(self, activity: Dict[str, Any]) -> None:
+        if not self.cs2_gsi:
+            return
+        snapshot = self.cs2_gsi.latest()
+        if not snapshot:
+            return
+
+        map_key = str(snapshot.get('map', '') or '').lower()
+        mode_key = str(snapshot.get('mode', '') or '').lower()
+        team = str(snapshot.get('team', '') or '').upper()
+        activity.update({
+            'gsi': True,
+            'map': self._friendly_map(map_key),
+            'map_key': map_key,
+            'mode': self.CS2_MODE_NAMES.get(mode_key, self._friendly_label(mode_key)),
+            'mode_key': mode_key,
+            'team': team,
+            'team_name': 'Counter-Terrorists' if team == 'CT' else ('Terrorists' if team == 'T' else ''),
+            'ct_score': int(snapshot.get('ct_score', 0) or 0),
+            't_score': int(snapshot.get('t_score', 0) or 0),
+            'round': int(snapshot.get('round', 0) or 0),
+            'phase': str(
+                snapshot.get('round_phase')
+                or snapshot.get('countdown_phase')
+                or snapshot.get('map_phase')
+                or ''
+            ),
+            'player_activity': str(snapshot.get('player_activity', '') or ''),
+        })
+
+    @classmethod
+    def _friendly_map(cls, map_key: str) -> str:
+        if not map_key:
+            return ''
+        if map_key in cls.CS2_MAP_NAMES:
+            return cls.CS2_MAP_NAMES[map_key]
+        raw = map_key
+        for prefix in ('de_', 'cs_', 'workshop_'):
+            if raw.startswith(prefix):
+                raw = raw[len(prefix):]
+                break
+        return cls._friendly_label(raw)
+
+    @staticmethod
+    def _friendly_label(value: str) -> str:
+        text = str(value or '').replace('_', ' ').replace('-', ' ').strip()
+        return text.title() if text else ''
 
     @staticmethod
     def _match(process_name: str, mapping: Dict[str, str]) -> Optional[str]:
