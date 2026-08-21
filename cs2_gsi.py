@@ -7,6 +7,7 @@ only the fields needed for Rich Presence and discards the raw payload.
 
 from __future__ import annotations
 
+import atexit
 import hmac
 import json
 import logging
@@ -27,6 +28,7 @@ from config import Config
 LOGGER = logging.getLogger(__name__)
 _MAX_BODY_BYTES = 64 * 1024
 _CLIENT_TIMEOUT_SECS = 3.0
+_MAX_CONCURRENT_REQUESTS = 8
 _DEFAULT_PORT = 32192
 _DEFAULT_TTL_SECS = 30.0
 _APP_ID = 730
@@ -38,6 +40,32 @@ class _CS2HTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 8
     block_on_close = False
+
+    def __init__(self, server_address, request_handler_class):
+        super().__init__(server_address, request_handler_class)
+        self._request_slots = threading.BoundedSemaphore(_MAX_CONCURRENT_REQUESTS)
+
+    def process_request(self, request, client_address) -> None:
+        # ThreadingMixIn otherwise creates one thread per accepted connection.
+        # Bound that work even on loopback so a buggy or hostile local process
+        # cannot cause unbounded request-thread growth.
+        if not self._request_slots.acquire(blocking=False):
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
 
 
 class CS2GSIBridge:
@@ -72,6 +100,7 @@ class CS2GSIBridge:
                     pass
 
             def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+                # Request bodies/auth tokens are never logged.
                 LOGGER.debug('CS2 GSI: ' + format, *args)
 
             def _send(self, status: int, payload: Dict[str, Any]) -> None:
@@ -193,20 +222,18 @@ class CS2GSIBridge:
 
         game_map = payload.get('map') if isinstance(payload.get('map'), dict) else {}
         player = payload.get('player') if isinstance(payload.get('player'), dict) else {}
-        round_info = payload.get('round') if isinstance(payload.get('round'), dict) else {}
-        countdown = payload.get('phase_countdowns') if isinstance(payload.get('phase_countdowns'), dict) else {}
         team_ct = game_map.get('team_ct') if isinstance(game_map.get('team_ct'), dict) else {}
         team_t = game_map.get('team_t') if isinstance(game_map.get('team_t'), dict) else {}
 
         # Never retain Steam IDs, player names, positions, weapons, health or the
         # rest of the raw GSI document. Rich Presence only needs these fields.
+        # Map already carries mode, phase, round number and team scores; a
+        # separate round/phase-countdowns subscription is unnecessary.
         snapshot = {
             'map': _clean_text(game_map.get('name'), 80),
             'mode': _clean_text(game_map.get('mode'), 48),
             'map_phase': _clean_text(game_map.get('phase'), 32),
             'round': _clean_int(game_map.get('round'), maximum=200),
-            'round_phase': _clean_text(round_info.get('phase'), 32),
-            'countdown_phase': _clean_text(countdown.get('phase'), 32),
             'team': _clean_team(player.get('team')),
             'player_activity': _clean_text(player.get('activity'), 24),
             'ct_score': _clean_int(team_ct.get('score'), maximum=99),
@@ -226,6 +253,9 @@ class CS2GSIBridge:
             return dict(self._snapshot)
 
     def status(self) -> Dict[str, Any]:
+        # Keep unauthenticated loopback diagnostics metadata-only. In particular,
+        # strict privacy mode must not be bypassed by another local OS user or a
+        # browser/process querying this endpoint.
         now = time.monotonic()
         with self._lock:
             active = bool(self._snapshot and now - self._seen_at <= self.ttl_secs)
@@ -234,9 +264,14 @@ class CS2GSIBridge:
                 'ok': True,
                 'connected': active,
                 'age_ms': max(0, int((now - self._seen_at) * 1000)) if active else None,
-                'map': (snapshot or {}).get('map') or '',
-                'mode': (snapshot or {}).get('mode') or '',
-                'team': (snapshot or {}).get('team') or '',
+                'has_match_context': bool(
+                    snapshot
+                    and (
+                        snapshot.get('map')
+                        or snapshot.get('mode')
+                        or snapshot.get('team')
+                    )
+                ),
             }
 
 
@@ -428,9 +463,7 @@ def render_gsi_config(port: int, token: str) -> str:
     {{
         "provider" "1"
         "map" "1"
-        "round" "1"
         "player_id" "1"
-        "phase_countdowns" "1"
     }}
 }}
 '''
@@ -505,7 +538,8 @@ _BRIDGES_LOCK = threading.Lock()
 
 
 def get_cs2_gsi(config: Config, start: bool = True) -> Optional[CS2GSIBridge]:
-    if not bool(config.get('cs2_gsi.enabled', True)):
+    enabled = config.get('cs2_gsi.enabled', True)
+    if not isinstance(enabled, bool) or not enabled:
         return None
     port = _configured_port(config)
     with _BRIDGES_LOCK:
@@ -527,3 +561,6 @@ def stop_cs2_gsi() -> None:
             bridge.stop()
         except Exception as exc:
             LOGGER.debug('Could not stop CS2 GSI cleanly: %s', exc)
+
+
+atexit.register(stop_cs2_gsi)
