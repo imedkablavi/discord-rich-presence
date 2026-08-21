@@ -50,7 +50,7 @@ jobs:
       - name: Audit runtime dependencies for known vulnerabilities
         run: pip-audit -r requirements.txt
       - name: Scan Python for high-severity security issues
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && always()
         run: bandit -q -r . -x ./tests,./build,./dist -lll
 
   browser-extension:
