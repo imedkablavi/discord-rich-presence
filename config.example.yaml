@@ -138,7 +138,8 @@ rules:
       - media
       - application
   clear_on_lock_screen: true
-  terminal_command_ttl_secs: 21600
+  # Raw shell commands can contain arguments, so the default cache lifetime is short.
+  terminal_command_ttl_secs: 900
   whitelist:
     apps: []
     sites: []
