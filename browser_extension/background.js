@@ -1,6 +1,33 @@
 const api = globalThis.browser || globalThis.chrome;
-const ENDPOINT = 'http://127.0.0.1:32191/v1/activity';
+const DEFAULT_PORT = 32191;
 const REQUEST_TIMEOUT_MS = 3000;
+let bridgePort = DEFAULT_PORT;
+
+function validPort(value) {
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1024 && port <= 65535;
+}
+
+async function loadBridgePort() {
+  try {
+    const stored = await api.storage.local.get('bridgePort');
+    if (validPort(stored.bridgePort)) bridgePort = Number(stored.bridgePort);
+  } catch (_) {
+    bridgePort = DEFAULT_PORT;
+  }
+}
+
+const portReady = loadBridgePort();
+
+api.storage?.onChanged?.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes.bridgePort) return;
+  const next = changes.bridgePort.newValue;
+  bridgePort = validPort(next) ? Number(next) : DEFAULT_PORT;
+});
+
+function endpoint(path = '/v1/activity') {
+  return `http://127.0.0.1:${bridgePort}${path}`;
+}
 
 async function setConnectionBadge(connected) {
   try {
@@ -14,8 +41,8 @@ async function setConnectionBadge(connected) {
     if (api.action.setTitle) {
       await api.action.setTitle({
         title: connected
-          ? 'CYBREX Rich Presence Companion — connected'
-          : 'CYBREX Rich Presence Companion — desktop service unavailable',
+          ? `CYBREX Rich Presence Companion — connected on port ${bridgePort}`
+          : `CYBREX Rich Presence Companion — desktop service unavailable on port ${bridgePort}`,
       });
     }
   } catch (_) {
@@ -24,10 +51,11 @@ async function setConnectionBadge(connected) {
 }
 
 async function postPayload(payload) {
+  await portReady;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(ENDPOINT, {
+    const response = await fetch(endpoint(), {
       method: 'POST',
       cache: 'no-store',
       signal: controller.signal,
