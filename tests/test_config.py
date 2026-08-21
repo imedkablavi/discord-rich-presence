@@ -1,3 +1,5 @@
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -128,3 +130,43 @@ def test_party_current_cannot_exceed_party_max(tmp_path: Path):
     )
     with pytest.raises(ValueError, match='party_current'):
         Config(path)
+
+
+def test_custom_domain_services_are_bounded_and_validated(tmp_path: Path):
+    invalid = tmp_path / 'invalid-domain.yaml'
+    invalid.write_text(
+        'browser_companion:\n  domain_services:\n    "https://example.com/path": "Bad"\n',
+        encoding='utf-8',
+    )
+    with pytest.raises(ValueError, match='domain pattern'):
+        Config(invalid)
+
+    valid = tmp_path / 'valid-domain.yaml'
+    valid.write_text(
+        'browser_companion:\n'
+        '  domain_services:\n'
+        '    "media.home.example": "Jellyfin"\n'
+        '    "*.corp.example": "Company Portal"\n',
+        encoding='utf-8',
+    )
+    cfg = Config(valid)
+    assert cfg.get('browser_companion.domain_services')['*.corp.example'] == 'Company Portal'
+
+
+def test_config_size_is_bounded(tmp_path: Path):
+    path = tmp_path / 'huge.yaml'
+    path.write_bytes(b'#' * (2 * 1024 * 1024 + 1))
+    with pytest.raises(ValueError, match='exceeds'):
+        Config(path)
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX mode bits do not represent Windows ACLs')
+def test_saved_config_is_private_even_with_open_umask(tmp_path: Path):
+    path = tmp_path / 'config.yaml'
+    cfg = Config(path)
+    previous_umask = os.umask(0)
+    try:
+        cfg.save()
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600

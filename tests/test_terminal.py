@@ -39,15 +39,20 @@ def test_does_not_leak_global_command_when_other_pid_hook_is_active(tmp_path):
     assert detector._get_last_command(99999999) == ''
 
 
-def test_stale_command_cache_is_not_published(tmp_path):
+def test_stale_command_cache_is_not_published_and_is_deleted(tmp_path):
     detector = _detector(tmp_path)
     detector.config.set('rules.terminal_command_ttl_secs', 2)
     pid_file = detector.command_dir / f'{os.getpid()}.txt'
     pid_file.write_text('old-command\n', encoding='utf-8')
+    detector.cmd_file.parent.mkdir(parents=True, exist_ok=True)
+    detector.cmd_file.write_text('old-global-command\n', encoding='utf-8')
     old = time.time() - 10
     os.utime(pid_file, (old, old))
+    os.utime(detector.cmd_file, (old, old))
 
     assert detector._get_last_command(os.getpid()) == ''
+    assert not pid_file.exists()
+    assert not detector.cmd_file.exists()
 
 
 def test_hook_internal_commands_are_filtered(tmp_path):
@@ -56,3 +61,8 @@ def test_hook_internal_commands_are_filtered(tmp_path):
     pid_file.write_text('Write-DrpCommandCache secret\n', encoding='utf-8')
 
     assert detector._get_last_command(os.getpid()) == ''
+
+
+def test_default_terminal_command_ttl_is_short_lived(tmp_path):
+    detector = _detector(tmp_path)
+    assert detector._ttl() == 900
