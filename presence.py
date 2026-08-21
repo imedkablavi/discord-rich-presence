@@ -23,6 +23,14 @@ class PresenceBuilder:
         'org.kde.systemsettings': 'System Settings',
     }
 
+    TOOLTIP_ALIASES = {
+        # Discord requires asset tooltip text to contain at least two characters.
+        # Keep the user-facing service/language name short while publishing a
+        # valid tooltip to the RPC payload.
+        'x': 'X.com',
+        'c': 'C language',
+    }
+
     def __init__(self, config: Config):
         self.config = config
         self.redactor = PrivacyRedactor(config)
@@ -39,16 +47,39 @@ class PresenceBuilder:
         activity = self.redactor.redact_activity(activity)
 
         if activity_type == 'media':
-            return self._build_media(activity)
-        if activity_type == 'terminal':
-            return self._build_terminal(activity)
-        if activity_type == 'coding':
-            return self._build_coding(activity)
-        if activity_type == 'browser':
-            return self._build_browser(activity)
-        if activity_type == 'gaming':
-            return self._build_gaming(activity)
-        return self._build_application(activity)
+            payload = self._build_media(activity)
+        elif activity_type == 'terminal':
+            payload = self._build_terminal(activity)
+        elif activity_type == 'coding':
+            payload = self._build_coding(activity)
+        elif activity_type == 'browser':
+            payload = self._build_browser(activity)
+        elif activity_type == 'gaming':
+            payload = self._build_gaming(activity)
+        else:
+            payload = self._build_application(activity)
+        return self._sanitize_discord_fields(payload)
+
+    @classmethod
+    def _sanitize_discord_fields(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Keep detector output inside Discord RPC's text-field contract.
+
+        A malformed optional tooltip must never tear down the whole RPC session.
+        Discord currently rejects asset tooltip strings shorter than two
+        characters; details/state are treated conservatively the same way.
+        """
+        result = {key: value for key, value in payload.items() if value is not None}
+        for key in ('details', 'state', 'large_text', 'small_text'):
+            if key not in result:
+                continue
+            text = str(result[key]).strip()
+            if key in {'large_text', 'small_text'}:
+                text = cls.TOOLTIP_ALIASES.get(text.lower(), text)
+            if len(text) < 2:
+                result.pop(key, None)
+                continue
+            result[key] = text[:128]
+        return result
 
     def _build_media(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         title = str(activity.get('title', 'Unknown'))
