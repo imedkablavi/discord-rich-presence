@@ -130,11 +130,13 @@ Auto-setup is enabled by default when CS2 is found in a Steam library. Manual so
 python scripts/install-cs2-gsi.py
 ```
 
-Packaged Windows/Linux repair:
+Packaged repair command:
 
 ```text
 DiscordRichPresence.exe --install-cs2-gsi
 ```
+
+On the packaged Linux build, use the packaged binary name with the same `--install-cs2-gsi` argument.
 
 Restart CS2 after creating or changing its GSI configuration. See `docs/COUNTER_STRIKE_2.md` and `docs/ANTI_CHEAT.md`.
 
