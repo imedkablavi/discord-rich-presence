@@ -64,12 +64,18 @@ class IconResolver:
 
         # Services / launchers useful as secondary artwork too
         'youtube': 'youtube.com',
+        'youtube music': 'music.youtube.com',
         'netflix': 'netflix.com',
+        'prime video': 'primevideo.com',
         'twitch': 'twitch.tv',
         'github': 'github.com',
         'soundcloud': 'soundcloud.com',
         'hulu': 'hulu.com',
         'disney+': 'disneyplus.com',
+        'reddit': 'reddit.com',
+        'chatgpt': 'chatgpt.com',
+        'x': 'x.com',
+        'x.com': 'x.com',
         'steam': 'steampowered.com',
         'discord': 'discord.com',
     }
