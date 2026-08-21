@@ -49,6 +49,26 @@ def test_smart_policy_recognizes_browser_backed_foreground_media(tmp_path: Path)
     assert selected is candidates['media']
 
 
+def test_smart_policy_uses_exact_companion_tab_focus(tmp_path: Path):
+    engine = ActivityPriorityEngine(Config(tmp_path / 'config.yaml'))
+    candidates = {
+        'media': {
+            'type': 'media', 'player': 'Brave', 'service': 'YouTube',
+            'is_playing': True, 'source': 'companion', 'tab_focused': False,
+        },
+        'browser': {
+            'type': 'browser', 'browser_name': 'Brave', 'service': 'GitHub',
+            'page_title': 'Repository', 'source': 'companion',
+        },
+    }
+    selected = engine.choose({'app_name': 'com.brave.Browser'}, candidates)
+    assert selected is candidates['browser']
+
+    candidates['media']['tab_focused'] = True
+    selected = engine.choose({'app_name': 'com.brave.Browser'}, candidates)
+    assert selected is candidates['media']
+
+
 def test_media_first_policy_can_restore_old_behavior(tmp_path: Path):
     cfg = Config(tmp_path / 'config.yaml')
     cfg.set('rules.activity_priority.policy', 'media_first')
