@@ -40,6 +40,15 @@ browser_companion:
   #   media.home.example: "Jellyfin"
   #   "*.corp.example": "Company Portal"
 
+cs2_gsi:
+  # Official, read-only Counter-Strike 2 Game State Integration. When CS2 is
+  # found in a Steam library, the service prepares its local GSI cfg automatically.
+  enabled: true
+  auto_install: true
+  port: 32192
+  # A stale snapshot expires quickly when the game closes or stops reporting.
+  ttl_secs: 30
+
 images:
   use_external_app_icons: true
   icon_overrides: {}
@@ -100,6 +109,7 @@ images:
     hulu: "hulu"
     prime video: "prime"
   games:
+    counter-strike 2: "cs2"
     league of legends: "lol"
     valorant: "valorant"
     minecraft: "minecraft"
