@@ -62,7 +62,10 @@ class IconResolver:
         'okular': 'okular.kde.org',
         'kde plasma': 'kde.org',
 
-        # Services / launchers useful as secondary artwork too
+        # Games / services / launchers useful as secondary artwork too
+        'counter strike 2': 'counter-strike.net',
+        'counter-strike 2': 'counter-strike.net',
+        'cs2': 'counter-strike.net',
         'youtube': 'youtube.com',
         'youtube music': 'music.youtube.com',
         'netflix': 'netflix.com',
