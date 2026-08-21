@@ -39,7 +39,7 @@ class ActivityPriorityEngine:
             return self._first(available, tuple(order))
 
         # Smart is the product default. Games remain strongest. Foreground media
-        # wins when the media player is the app the user is actually looking at;
+        # wins when the media player/tab is what the user is actually looking at;
         # otherwise coding/terminal/browser activity beats background playback.
         if 'gaming' in available:
             return available['gaming']
@@ -61,6 +61,12 @@ class ActivityPriorityEngine:
 
     @classmethod
     def _media_matches_foreground(cls, media: Dict[str, Any], window_info: Dict[str, Any]) -> bool:
+        # The browser companion knows exact tab focus. If it says the playing tab
+        # is not focused, do not let background YouTube override the active GitHub
+        # tab merely because both live inside Brave/Firefox/Chrome.
+        if str(media.get('source', '')).lower() == 'companion' and 'tab_focused' in media:
+            return bool(media.get('tab_focused'))
+
         player = cls._tokens(media.get('player', ''))
         app = cls._tokens(window_info.get('app_name', ''))
         if not player or not app:
