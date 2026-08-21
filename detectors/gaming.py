@@ -100,9 +100,29 @@ class GamingDetector:
                 if bool(config.get('cs2_gsi.auto_install', True)):
                     self._auto_configure_cs2_gsi()
             elif candidate is not None:
+                if bool(config.get('cs2_gsi.auto_install', True)):
+                    self._remove_auto_gsi_config_after_bind_failure()
                 self.logger.warning(
                     'CS2 GSI listener is unavailable; automatic game configuration '
-                    'was skipped to avoid sending game state to an unverified local port'
+                    'was disabled to avoid sending game state to an unverified local port. '
+                    'Restart CS2 if it was already running.'
+                )
+
+    def _remove_auto_gsi_config_after_bind_failure(self) -> None:
+        """Remove our auto-managed cfg when its loopback port is not ours."""
+        try:
+            locations = discover_cs2_cfg_dirs()
+        except OSError:
+            return
+        for cfg_dir in locations:
+            target = cfg_dir / 'gamestate_integration_cybrex.cfg'
+            try:
+                target.unlink(missing_ok=True)
+            except OSError as exc:
+                self.logger.warning(
+                    'Could not remove stale CS2 GSI configuration %s: %s',
+                    target,
+                    exc,
                 )
 
     def _auto_configure_cs2_gsi(self) -> None:
