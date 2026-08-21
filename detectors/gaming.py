@@ -1,14 +1,16 @@
-"""Conservative foreground-game detection with optional CS2 GSI enrichment."""
+"""Conservative foreground-game detection with Steam catalog and CS2 GSI enrichment."""
 
 import logging
+import re
 from typing import Optional, Dict, Any
 
 from config import Config
 from cs2_gsi import discover_cs2_cfg_dirs, get_cs2_gsi, install_gsi_config
+from steam_catalog import SteamGame, SteamGameCatalog
 
 
 class GamingDetector:
-    """Detect known games and enrich Counter-Strike 2 through official GSI."""
+    """Detect foreground games and enrich Counter-Strike 2 through official GSI."""
 
     GAME_LAUNCHERS = {
         'steam': 'Steam', 'steamwebhelper': 'Steam',
@@ -21,34 +23,61 @@ class GamingDetector:
         'xboxapp': 'Xbox',
     }
 
+    # Fallback aliases for non-Steam games or platforms where executable metadata
+    # is all that is available. Steam games are resolved from local manifests first.
     KNOWN_GAMES = {
         'leagueoflegends': 'League of Legends',
+        'league of legends': 'League of Legends',
         'valorant': 'VALORANT',
-        'csgo': 'Counter-Strike: Global Offensive',
+        'csgo': 'Counter-Strike 2',
         'cs2': 'Counter-Strike 2',
         'steam_app_730': 'Counter-Strike 2',
         'dota2': 'Dota 2',
-        'overwatch': 'Overwatch',
+        'overwatch': 'Overwatch 2',
         'minecraft': 'Minecraft',
         'terraria': 'Terraria',
         'rocketleague': 'Rocket League',
         'fortnite': 'Fortnite',
         'apex': 'Apex Legends',
+        'r5apex': 'Apex Legends',
         'gta5': 'Grand Theft Auto V',
+        'gta5_enhanced': 'Grand Theft Auto V Enhanced',
         'gtav': 'Grand Theft Auto V',
-        'witcher3': 'The Witcher 3',
-        'skyrim': 'Skyrim',
+        'witcher3': 'The Witcher 3: Wild Hunt',
+        'skyrim': 'The Elder Scrolls V: Skyrim',
         'fallout4': 'Fallout 4',
         'cyberpunk2077': 'Cyberpunk 2077',
         'eldenring': 'Elden Ring',
         'darksouls': 'Dark Souls',
-        'sekiro': 'Sekiro',
+        'sekiro': 'Sekiro: Shadows Die Twice',
         'amongus': 'Among Us',
         'stardewvalley': 'Stardew Valley',
         'hollowknight': 'Hollow Knight',
         'celeste': 'Celeste',
         'hades': 'Hades',
         'deadcells': 'Dead Cells',
+        'helldivers2': 'HELLDIVERS 2',
+        'marvelrivals': 'Marvel Rivals',
+        'rainbowsix': 'Tom Clancy’s Rainbow Six Siege',
+        'rainbow six': 'Tom Clancy’s Rainbow Six Siege',
+        'destiny2': 'Destiny 2',
+        'warframe': 'Warframe',
+        'war thunder': 'War Thunder',
+        'pathofexile': 'Path of Exile',
+        'poe2': 'Path of Exile 2',
+        'ffxiv': 'FINAL FANTASY XIV Online',
+        'ffxiv_dx11': 'FINAL FANTASY XIV Online',
+        'wow': 'World of Warcraft',
+        'diablo iv': 'Diablo IV',
+        'diablo4': 'Diablo IV',
+    }
+
+    TITLE_GAME_ALIASES = {
+        'cs go': 'Counter-Strike 2',
+        'cs:go': 'Counter-Strike 2',
+        'counter strike 2': 'Counter-Strike 2',
+        'counter-strike 2': 'Counter-Strike 2',
+        'counter-strike: global offensive': 'Counter-Strike 2',
     }
 
     CS2_MODE_NAMES = {
@@ -87,6 +116,7 @@ class GamingDetector:
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.steam_catalog = SteamGameCatalog()
         gaming_enabled = bool(config.get('rules.enabled_detectors.gaming', True))
         gsi_enabled = self._strict_bool_setting(config, 'cs2_gsi.enabled', True)
         auto_install = self._strict_bool_setting(config, 'cs2_gsi.auto_install', True)
@@ -113,13 +143,9 @@ class GamingDetector:
     @staticmethod
     def _strict_bool_setting(config: Config, key: str, default: bool) -> bool:
         value = config.get(key, default)
-        # YAML booleans are expected. Strings such as "false" are deliberately
-        # not coerced because a malformed security-sensitive setting must not
-        # unexpectedly enable GSI or automatic writes to the game directory.
         return value if isinstance(value, bool) else False
 
     def _remove_auto_gsi_config_after_bind_failure(self) -> None:
-        """Remove our auto-managed cfg when its loopback port is not ours."""
         try:
             locations = discover_cs2_cfg_dirs()
         except OSError:
@@ -136,7 +162,6 @@ class GamingDetector:
                 )
 
     def _auto_configure_cs2_gsi(self) -> None:
-        """Make packaged/source installs zero-setup when CS2 is discoverable."""
         try:
             locations = discover_cs2_cfg_dirs()
             if not locations:
@@ -144,8 +169,6 @@ class GamingDetector:
             install_gsi_config(self.config, locations[0])
             self.logger.info('Counter-Strike 2 GSI integration is configured')
         except (OSError, ValueError):
-            # Never break generic game detection because the Steam install is
-            # read-only or unusual. The standalone installer supports --cfg-dir.
             self.logger.warning(
                 'Counter-Strike 2 GSI auto-setup could not write the game config; '
                 'use scripts/install-cs2-gsi.py for manual setup'
@@ -158,14 +181,33 @@ class GamingDetector:
         app_name = str(window_info.get('app_name', '')).lower().replace('.exe', '')
         title = str(window_info.get('title', '')).strip()
 
+        # Steam is authoritative when possible: appmanifest files provide the
+        # actual installed title instead of leaking process/class strings such as
+        # ``csgo``, ``steam_app_730`` or ``CS GO Steam`` into Discord.
+        steam_game = self.steam_catalog.resolve(window_info)
+        if steam_game:
+            activity = self._steam_activity(steam_game)
+            if steam_game.appid == 730 or self._is_cs2_name(steam_game.name):
+                activity['game_name'] = 'Counter-Strike 2'
+                self._enrich_cs2(activity)
+            return activity
+
         game_name = self._match(app_name, self.KNOWN_GAMES)
         launcher_name = self._match(app_name, self.GAME_LAUNCHERS)
         if game_name:
             activity: Dict[str, Any] = {
-                'type': 'gaming', 'game_name': game_name,
-                'launcher': launcher_name, 'is_game': True
+                'type': 'gaming',
+                'game_name': game_name,
+                'launcher': launcher_name or ('Steam' if game_name == 'Counter-Strike 2' else 'Gaming'),
+                'is_game': True,
             }
             if game_name == 'Counter-Strike 2':
+                activity.update({
+                    'steam_appid': 730,
+                    'game_source': 'Steam',
+                    'artwork_url': self._steam_artwork_url(730),
+                    'store_url': 'https://store.steampowered.com/app/730/',
+                })
                 self._enrich_cs2(activity)
             return activity
 
@@ -176,12 +218,16 @@ class GamingDetector:
             activity = {
                 'type': 'gaming', 'game_name': 'Counter-Strike 2',
                 'launcher': launcher_name or 'Steam', 'is_game': True,
+                'steam_appid': 730, 'game_source': 'Steam',
+                'artwork_url': self._steam_artwork_url(730),
+                'store_url': 'https://store.steampowered.com/app/730/',
             }
             self._enrich_cs2(activity)
             return activity
 
-        # A launcher is useful context, but it is not itself a game. The service
-        # deliberately ignores is_game=False for Rich Presence.
+        # A launcher is useful context, but it is not itself a game. Only use a
+        # title fallback when it contains a plausible game title, never generic
+        # Steam/Store/Library text.
         if launcher_name:
             title_game = self._extract_game_from_title(title)
             if title_game:
@@ -194,6 +240,31 @@ class GamingDetector:
                 'launcher': launcher_name, 'is_game': False
             }
         return None
+
+    @classmethod
+    def _steam_activity(cls, game: SteamGame) -> Dict[str, Any]:
+        return {
+            'type': 'gaming',
+            'game_name': game.name,
+            'launcher': 'Steam',
+            'is_game': True,
+            'steam_appid': game.appid,
+            'game_source': 'Steam',
+            'artwork_url': game.artwork_url,
+            'store_url': f'https://store.steampowered.com/app/{game.appid}/',
+        }
+
+    @staticmethod
+    def _steam_artwork_url(appid: int) -> str:
+        return (
+            'https://shared.cloudflare.steamstatic.com/store_item_assets/'
+            f'steam/apps/{int(appid)}/header.jpg'
+        )
+
+    @staticmethod
+    def _is_cs2_name(name: str) -> bool:
+        normalized = re.sub(r'[^a-z0-9]+', '', str(name or '').lower())
+        return normalized in {'counterstrike2', 'counterstrikeglobaloffensive'}
 
     def _enrich_cs2(self, activity: Dict[str, Any]) -> None:
         if not self.cs2_gsi:
@@ -218,8 +289,6 @@ class GamingDetector:
 
         activity.update({
             'gsi': True,
-            # PresenceBuilder already uses launcher as the gaming state line.
-            # For CS2 this becomes the live, user-facing match summary.
             'launcher': ' · '.join(state_parts) or activity.get('launcher') or 'Steam',
             'map': map_name,
             'map_key': map_key,
@@ -259,7 +328,6 @@ class GamingDetector:
 
     @staticmethod
     def _match(process_name: str, mapping: Dict[str, str]) -> Optional[str]:
-        # Prefer exact matches; then allow known executable stems as substrings.
         if process_name in mapping:
             return mapping[process_name]
         for key in sorted(mapping, key=len, reverse=True):
@@ -267,12 +335,30 @@ class GamingDetector:
                 return mapping[key]
         return None
 
-    @staticmethod
-    def _extract_game_from_title(title: str) -> Optional[str]:
+    @classmethod
+    def _extract_game_from_title(cls, title: str) -> Optional[str]:
         if not title:
             return None
-        for suffix in (' - Steam', ' - Epic Games', ' - Origin', ' - Battle.net'):
-            if title.endswith(suffix):
-                candidate = title[:-len(suffix)].strip()
-                return candidate or None
-        return None
+        candidate = title.strip()
+        for suffix in (
+            ' - Steam', ' — Steam', ' – Steam', ' | Steam',
+            ' - Epic Games', ' — Epic Games', ' - Origin', ' - Battle.net',
+        ):
+            if candidate.lower().endswith(suffix.lower()):
+                candidate = candidate[:-len(suffix)].strip()
+                break
+        else:
+            # Handle low-quality titles such as "CS GO Steam" without allowing
+            # generic Steam pages to masquerade as games.
+            if candidate.lower().endswith(' steam'):
+                candidate = candidate[:-6].strip()
+
+        lowered = candidate.lower().strip(' -—–|')
+        if not lowered or lowered in {
+            'steam', 'store', 'library', 'community', 'friends', 'downloads',
+            'epic games', 'origin', 'battle.net',
+        }:
+            return None
+        if lowered in cls.TITLE_GAME_ALIASES:
+            return cls.TITLE_GAME_ALIASES[lowered]
+        return candidate[:160] or None
