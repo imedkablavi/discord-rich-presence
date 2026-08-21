@@ -3,9 +3,9 @@
   "name": "CYBREX Rich Presence Companion",
   "version": "0.2.0",
   "description": "Shares active web-tab and media metadata with the local CYBREX Discord Rich Presence service.",
-  "permissions": ["tabs"],
+  "permissions": ["tabs", "storage"],
   "host_permissions": [
-    "http://127.0.0.1:32191/*"
+    "http://127.0.0.1/*"
   ],
   "background": {
     "scripts": ["background.js"],
@@ -22,6 +22,10 @@
       "all_frames": false
     }
   ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
   "action": {
     "default_title": "CYBREX Rich Presence Companion"
   },
