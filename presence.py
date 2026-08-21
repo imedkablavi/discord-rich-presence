@@ -64,22 +64,40 @@ class PresenceBuilder:
     def _sanitize_discord_fields(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Keep detector output inside Discord RPC's text-field contract.
 
-        A malformed optional tooltip must never tear down the whole RPC session.
-        Discord currently rejects asset tooltip strings shorter than two
-        characters; details/state are treated conservatively the same way.
+        A malformed optional text field must never tear down the whole RPC
+        session. Discord currently rejects some activity/asset strings shorter
+        than two characters, so use the same conservative contract for the
+        dynamic activity name and text/tooltip fields.
         """
         result = {key: value for key, value in payload.items() if value is not None}
-        for key in ('details', 'state', 'large_text', 'small_text'):
+        for key in ('name', 'details', 'state', 'large_text', 'small_text'):
             if key not in result:
                 continue
             text = str(result[key]).strip()
-            if key in {'large_text', 'small_text'}:
+            if key in {'name', 'large_text', 'small_text'}:
                 text = cls.TOOLTIP_ALIASES.get(text.lower(), text)
             if len(text) < 2:
                 result.pop(key, None)
                 continue
             result[key] = text[:128]
         return result
+
+    @classmethod
+    def _rpc_activity_name(cls, primary: object, fallback: object) -> str:
+        """Return a safe user-facing Discord activity name.
+
+        pypresence 4.6.x supports the RPC ``name`` field, allowing one shared
+        Discord Application ID to display the actual game/app/service instead
+        of the CYBREX application name. Keep a fallback for one-character custom
+        labels so a bad display name can never invalidate the whole presence.
+        """
+        primary_text = str(primary or '').strip()
+        primary_text = cls.TOOLTIP_ALIASES.get(primary_text.lower(), primary_text)
+        if len(primary_text) >= 2:
+            return primary_text[:128]
+        fallback_text = str(fallback or 'Activity').strip()
+        fallback_text = cls.TOOLTIP_ALIASES.get(fallback_text.lower(), fallback_text)
+        return (fallback_text if len(fallback_text) >= 2 else 'Activity')[:128]
 
     def _build_media(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         title = str(activity.get('title', 'Unknown'))
@@ -103,6 +121,7 @@ class PresenceBuilder:
         player_image = self._resolve_media_image(player, player_display)
         payload: Dict[str, Any] = {
             'activity_type': ActivityType.LISTENING if listening else ActivityType.WATCHING,
+            'name': self._rpc_activity_name(service, player_display),
             'details': details[:128],
             'state': state[:128],
             'large_image': service_image or player_image,
@@ -173,6 +192,7 @@ class PresenceBuilder:
         configured = self._configured_app_image(terminal_name, shell)
         payload = {
             'activity_type': ActivityType.PLAYING,
+            'name': self._rpc_activity_name(terminal_name, shell),
             'details': (f"Terminal · {command}" if command else "Terminal")[:128],
             'state': (f"{shell} · {directory}" if directory else shell)[:128],
             'large_image': self.icons.resolve(
@@ -194,6 +214,7 @@ class PresenceBuilder:
         project = str(activity.get('project', '') or '')
         payload = {
             'activity_type': ActivityType.PLAYING,
+            'name': self._rpc_activity_name(editor, 'Code Editor'),
             'details': (f"Coding · {filename}" if filename else "Coding")[:128],
             'state': (f"{editor} · {project}" if project else editor)[:128],
             'large_image': self.icons.resolve(
@@ -230,6 +251,7 @@ class PresenceBuilder:
 
         payload: Dict[str, Any] = {
             'activity_type': ActivityType.WATCHING if service in {'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu', 'Twitch'} else ActivityType.PLAYING,
+            'name': self._rpc_activity_name(service, browser_name),
             'details': details[:128],
             'state': state[:128],
             'large_image': service_image or browser_image,
@@ -264,6 +286,7 @@ class PresenceBuilder:
         )
         payload = {
             'activity_type': ActivityType.PLAYING,
+            'name': self._rpc_activity_name(app_name, 'Application'),
             'details': f"{app_name} active"[:128],
             'state': (window_title if window_title else app_name)[:128],
             'large_image': image,
@@ -288,6 +311,7 @@ class PresenceBuilder:
         )
         payload = {
             'activity_type': ActivityType.PLAYING,
+            'name': self._rpc_activity_name(game_name, 'Game'),
             'details': f"Playing · {game_name}"[:128],
             'state': launcher[:128],
             'large_image': key,
