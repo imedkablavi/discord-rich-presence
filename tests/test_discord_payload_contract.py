@@ -2,9 +2,10 @@ from pathlib import Path
 
 from config import Config
 from presence import PresenceBuilder
+from rpc_contract import sanitize_rpc_payload
 
 
-def test_x_service_uses_valid_asset_tooltip_and_activity_name(tmp_path: Path):
+def test_x_service_uses_valid_asset_tooltip(tmp_path: Path):
     payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
         'type': 'browser',
         'browser_name': 'Brave',
@@ -14,13 +15,13 @@ def test_x_service_uses_valid_asset_tooltip_and_activity_name(tmp_path: Path):
         'url': 'https://x.com/home',
     })
 
-    assert payload['name'] == 'X.com'
+    assert 'name' not in payload
     assert payload['state'] == 'X · Brave'
     assert payload['large_text'] == 'X.com'
     assert payload['large_image'] == 'https://www.google.com/s2/favicons?domain=x.com&sz=256'
 
 
-def test_one_character_custom_service_falls_back_to_browser_activity_name(tmp_path: Path):
+def test_one_character_custom_service_cannot_break_rpc_tooltip(tmp_path: Path):
     payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
         'type': 'browser',
         'browser_name': 'Firefox',
@@ -30,7 +31,6 @@ def test_one_character_custom_service_falls_back_to_browser_activity_name(tmp_pa
         'url': 'https://q.example.test/',
     })
 
-    assert payload['name'] == 'Firefox'
     assert payload['state'] == 'Q · Firefox'
     assert 'large_text' not in payload
 
@@ -44,28 +44,47 @@ def test_c_language_uses_valid_small_asset_tooltip(tmp_path: Path):
         'project': 'demo',
     })
 
-    assert payload['name'] == 'VS Code'
     assert payload['small_image'] == 'c'
     assert payload['small_text'] == 'C language'
 
 
-def test_game_name_replaces_builtin_application_name(tmp_path: Path):
-    payload = PresenceBuilder(Config(tmp_path / 'config.yaml')).build({
+def test_legacy_rpc_drops_dynamic_name_instead_of_promising_app_name_override():
+    payload = sanitize_rpc_payload({
+        'name': 'Counter-Strike 2',
+        'details': 'Counter-Strike 2',
+        'state': 'Mirage',
+    })
+
+    assert 'name' not in payload
+    assert payload['details'] == 'Counter-Strike 2'
+    assert payload['state'] == 'Mirage'
+
+
+def test_steam_game_card_prefers_game_artwork_and_store_button(tmp_path: Path):
+    config = Config(tmp_path / 'config.yaml')
+    payload = PresenceBuilder(config).build({
         'type': 'gaming',
-        'game_name': 'Counter-Strike 2',
-        'launcher': 'Competitive · Mirage · Counter-Terrorists · CT 8–6 T',
+        'game_name': 'Example Steam Game',
+        'launcher': 'Steam',
+        'game_source': 'Steam',
+        'steam_appid': 12345,
+        'artwork_url': 'https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/12345/header.jpg',
+        'store_url': 'https://store.steampowered.com/app/12345/',
         'is_game': True,
     })
 
-    assert payload['name'] == 'Counter-Strike 2'
-    assert payload['details'] == 'Playing · Counter-Strike 2'
-    assert payload['state'] == 'Competitive · Mirage · Counter-Terrorists · CT 8–6 T'
+    assert payload['details'] == 'Example Steam Game'
+    assert payload['state'] == 'Steam'
+    assert payload['large_image'].endswith('/steam/apps/12345/header.jpg')
+    assert payload['small_text'] == 'Steam'
+    assert payload['buttons'] == [
+        {'label': 'View on Steam', 'url': 'https://store.steampowered.com/app/12345/'}
+    ]
 
 
 def test_one_character_optional_text_is_dropped_instead_of_rejected(tmp_path: Path):
     builder = PresenceBuilder(Config(tmp_path / 'config.yaml'))
     payload = builder._sanitize_discord_fields({
-        'name': 'A',
         'details': 'A',
         'state': 'B',
         'large_text': 'Q',
@@ -73,7 +92,6 @@ def test_one_character_optional_text_is_dropped_instead_of_rejected(tmp_path: Pa
         'large_image': 'app',
     })
 
-    assert 'name' not in payload
     assert 'details' not in payload
     assert 'state' not in payload
     assert 'large_text' not in payload
