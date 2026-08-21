@@ -18,10 +18,11 @@ It does not connect to Discord itself. It sends short-lived activity snapshots o
 
 The extension runs its content script only on normal `http://` and `https://` pages. It does not request access to `file://` pages.
 
-It requests:
+The only ordinary extension permission is:
 
-- `tabs` so the background component can follow active-tab/window changes and request fresh snapshots;
-- `storage` to save only the local bridge port selected in the Options page.
+- `storage` — saves only the local bridge port selected in the Options page.
+
+The extension deliberately does **not** request the broad `tabs` permission. Active tab/window IDs and extension messaging are sufficient for this integration; page URL/title data is read by the content script on the web page that already matches the declared HTTP/HTTPS content-script scope.
 
 Its only explicit network host permission is:
 
