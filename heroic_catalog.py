@@ -67,14 +67,17 @@ class HeroicGameCatalog:
             reverse=True,
         )
         by_exe: Dict[str, HeroicGame] = {}
+        ambiguous: set[str] = set()
         for game in self._games:
             stem = _normalize_process_name(game.executable_stem)
-            if len(stem) >= 4 and stem not in _GENERIC_EXE_STEMS:
-                # Ambiguous executable stems are removed instead of guessing.
-                if stem in by_exe and by_exe[stem] != game:
-                    by_exe.pop(stem, None)
-                else:
-                    by_exe[stem] = game
+            if len(stem) < 4 or stem in _GENERIC_EXE_STEMS or stem in ambiguous:
+                continue
+            existing = by_exe.get(stem)
+            if existing is not None and existing != game:
+                by_exe.pop(stem, None)
+                ambiguous.add(stem)
+                continue
+            by_exe[stem] = game
         self._by_exe = by_exe
 
     def resolve(self, window_info: dict) -> Optional[HeroicGame]:
@@ -106,10 +109,11 @@ class HeroicGameCatalog:
                 cmdline = ''
             if cmdline:
                 normalized_cmd = os.path.normcase(cmdline.replace('\\', '/'))
+                lowered_cmd = normalized_cmd.lower()
                 for game in self._games:
                     install = os.path.normcase(str(game.install_path).replace('\\', '/'))
                     exe = game.executable.replace('\\', '/').lower()
-                    if (install and install in normalized_cmd) or (exe and exe in normalized_cmd.lower()):
+                    if (install and install in normalized_cmd) or (exe and exe in lowered_cmd):
                         return game
             try:
                 parent = proc.parent()
