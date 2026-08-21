@@ -13,11 +13,11 @@ The CS2 integration does **not**:
 - use `ReadProcessMemory`, `WriteProcessMemory`, `ptrace`, remote threads, hooks, or `LD_PRELOAD`;
 - automate keyboard/mouse input;
 - auto-accept matches, auto-buy, aim, recoil, movement, or other gameplay actions;
-- launch CS2 with `-insecure` or weaken anti-cheat/trusted-mode settings;
+- launch CS2 with `-insecure` or `-allow_third_party_software`, or weaken anti-cheat/trusted-mode settings;
 - use packet interception, Game Coordinator manipulation, or undocumented lobby scraping;
-- request GSI `allplayers`, positions, weapons, health, money, or grenade state for Rich Presence.
+- request GSI `allplayers`, positions, weapons, health, money, grenade state, player state, round events, or phase countdowns for Rich Presence.
 
-The generated GSI configuration requests only the minimum match context currently required for the feature: `provider`, `map`, `round`, `player_id`, and `phase_countdowns`. `player_id` is needed to determine the current local/observed CT/T side; identifiers received as part of that GSI component are discarded immediately and are not retained or sent to Discord.
+The generated GSI configuration requests only three game-state components: `provider`, `map`, and `player_id`. `map` already supplies the map/mode/round-score context required for Rich Presence. `player_id` is needed to determine the current local/observed CT/T side; identity fields received as part of that GSI component are not retained or sent to Discord.
 
 ## VAC statement
 
@@ -38,10 +38,14 @@ The CS2 GSI bridge:
 - binds only to IPv4 loopback (`127.0.0.1`);
 - uses a random per-user authentication token for GSI POSTs;
 - validates Counter-Strike App ID `730`;
-- limits request size and request time;
-- bounds the listener queue and expires stale state;
+- limits request body size and request time;
+- caps concurrent request workers and bounds the listener queue;
+- expires and removes stale match state;
+- refuses automatic CS2 configuration until its own listener has successfully bound the configured port;
+- removes an auto-managed stale GSI cfg where possible if that port cannot be owned;
 - discards raw GSI payloads after parsing;
 - does not persist Steam IDs, player names, health, money, weapons, positions, or all-player state;
+- exposes only metadata-level connection diagnostics on the unauthenticated `/v1/status` endpoint, not map/mode/team/player details;
 - keeps token-bearing files private on POSIX where supported.
 
 The automated QA suite also contains an anti-cheat boundary regression test. CI fails if the CS2 runtime starts using known process-memory/injection/input-automation primitives or adds common memory/automation packages.
