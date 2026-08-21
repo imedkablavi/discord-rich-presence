@@ -65,9 +65,6 @@ class BrowserDetector:
         if not browser_name:
             return None
 
-        # Never reuse a normal-tab companion snapshot while a private window is
-        # foreground. Browser extensions are normally disabled in private mode,
-        # so the window marker remains the conservative source of truth here.
         if self._is_private_browsing(raw_title):
             return self._private_activity(browser_name)
 
@@ -101,7 +98,12 @@ class BrowserDetector:
 
         raw_title = str(snapshot.get('title', '') or '')
         exact_url = snapshot.get('url')
-        service = str(snapshot.get('service', '') or '') or self._detect_service(exact_url, raw_title)
+        service = (
+            str(snapshot.get('service', '') or '')
+            or self._configured_service(exact_url)
+            or self._detect_service(exact_url, raw_title)
+            or ''
+        )
         page_title = self._extract_page_title(raw_title, browser_name, service or None)
         media = snapshot.get('media') if isinstance(snapshot.get('media'), dict) else {}
 
@@ -129,6 +131,34 @@ class BrowserDetector:
             'url_is_exact': False,
             'source': 'private',
         }
+
+    def _configured_service(self, raw_url: Any) -> Optional[str]:
+        """Map exact or wildcard custom domains to a local service label."""
+        url = str(raw_url or '').strip()
+        if not url:
+            return None
+        try:
+            hostname = (urllib.parse.urlsplit(url).hostname or '').lower().rstrip('.')
+        except ValueError:
+            return None
+        if not hostname:
+            return None
+
+        configured = self.config.get('browser_companion.domain_services', {}) or {}
+        if not isinstance(configured, dict):
+            return None
+        for pattern, label in configured.items():
+            domain = str(pattern or '').strip().lower().rstrip('.')
+            name = str(label or '').strip()
+            if not domain or not name:
+                continue
+            if domain.startswith('*.'):
+                suffix = domain[2:]
+                if hostname == suffix or hostname.endswith('.' + suffix):
+                    return name
+            elif hostname == domain:
+                return name
+        return None
 
     def _detect_service(self, *values: Any) -> Optional[str]:
         combined = ' '.join(str(value or '') for value in values).lower()
