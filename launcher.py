@@ -29,7 +29,37 @@ def _normalize_packaged_args():
         sys.argv.append('--tray')
 
 
+def _handle_cs2_setup_command() -> bool:
+    """Allow packaged users to repair/install CS2 GSI without a source checkout."""
+    if '--install-cs2-gsi' not in sys.argv:
+        return False
+
+    index = sys.argv.index('--install-cs2-gsi')
+    cfg_dir = None
+    if index + 1 < len(sys.argv):
+        candidate = sys.argv[index + 1]
+        if candidate and not candidate.startswith('--'):
+            cfg_dir = Path(candidate)
+
+    from config import Config
+    from cs2_gsi import install_gsi_config
+
+    try:
+        target = install_gsi_config(Config(), cfg_dir)
+    except Exception as exc:
+        print(f'Counter-Strike 2 GSI installation failed: {exc}', file=sys.stderr)
+        return True
+
+    print('Counter-Strike 2 GSI installed successfully.')
+    print(f'Configuration: {target}')
+    print('Restart Counter-Strike 2 if it is already running.')
+    return True
+
+
 def main():
+    if _handle_cs2_setup_command():
+        return
+
     if '--gui' in sys.argv:
         sys.argv.remove('--gui')
         from config import Config
