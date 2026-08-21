@@ -5,7 +5,12 @@ import re
 from typing import Optional, Dict, Any
 
 from config import Config
-from cs2_gsi import discover_cs2_cfg_dirs, get_cs2_gsi, install_gsi_config
+from cs2_gsi import (
+    discover_cs2_cfg_dirs,
+    get_cs2_gsi,
+    install_gsi_config,
+    stop_cs2_gsi,
+)
 from epic_catalog import EpicGame, EpicGameCatalog
 from heroic_catalog import HeroicGame, HeroicGameCatalog
 from steam_catalog import SteamGame, SteamGameCatalog
@@ -122,35 +127,71 @@ class GamingDetector:
         self.steam_catalog = SteamGameCatalog()
         self.epic_catalog = EpicGameCatalog()
         self.heroic_catalog = HeroicGameCatalog()
-        gaming_enabled = bool(config.get('rules.enabled_detectors.gaming', True))
-        gsi_enabled = self._strict_bool_setting(config, 'cs2_gsi.enabled', True)
-        auto_install = self._strict_bool_setting(config, 'cs2_gsi.auto_install', True)
         self.cs2_gsi = None
-
-        # Fail closed: never point CS2 at a port unless our own loopback listener
-        # successfully owns that port first. Otherwise an unrelated local process
-        # could receive GSI metadata if it happened to bind the configured port.
-        if gaming_enabled and gsi_enabled:
-            candidate = get_cs2_gsi(config, start=False)
-            if candidate is not None and candidate.start():
-                self.cs2_gsi = candidate
-                if auto_install:
-                    self._auto_configure_cs2_gsi()
-            elif candidate is not None:
-                if auto_install:
-                    self._remove_auto_gsi_config_after_bind_failure()
-                self.logger.warning(
-                    'CS2 GSI listener is unavailable; automatic game configuration '
-                    'was disabled to avoid sending game state to an unverified local port. '
-                    'Restart CS2 if it was already running.'
-                )
+        self._last_gsi_signature: Optional[tuple[bool, bool, bool, int, float]] = None
+        self._sync_cs2_gsi(force=True)
 
     @staticmethod
     def _strict_bool_setting(config: Config, key: str, default: bool) -> bool:
         value = config.get(key, default)
         return value if isinstance(value, bool) else False
 
-    def _remove_auto_gsi_config_after_bind_failure(self) -> None:
+    def _gsi_signature(self) -> tuple[bool, bool, bool, int, float]:
+        gaming_enabled = bool(self.config.get('rules.enabled_detectors.gaming', True))
+        gsi_enabled = self._strict_bool_setting(self.config, 'cs2_gsi.enabled', True)
+        auto_install = self._strict_bool_setting(self.config, 'cs2_gsi.auto_install', True)
+        try:
+            port = int(self.config.get('cs2_gsi.port', 32192) or 32192)
+        except (TypeError, ValueError):
+            port = 32192
+        try:
+            ttl = float(self.config.get('cs2_gsi.ttl_secs', 30) or 30)
+        except (TypeError, ValueError):
+            ttl = 30.0
+        return gaming_enabled, gsi_enabled, auto_install, port, ttl
+
+    def _sync_cs2_gsi(self, *, force: bool = False) -> None:
+        """Apply hot-reloaded GSI settings without leaving stale listeners behind."""
+        signature = self._gsi_signature()
+        if not force and signature == self._last_gsi_signature:
+            return
+
+        previous = self._last_gsi_signature
+        self._last_gsi_signature = signature
+        if previous is not None:
+            stop_cs2_gsi()
+            self.cs2_gsi = None
+
+        gaming_enabled, gsi_enabled, auto_install, _port, _ttl = signature
+        if not gaming_enabled or not gsi_enabled:
+            # Disabling the integration should also prevent future CS2 launches
+            # from continuing to POST to the CYBREX endpoint. A currently running
+            # game may retain its already-loaded cfg until it restarts.
+            self._remove_cybrex_gsi_config()
+            return
+
+        # Fail closed: never point CS2 at a port unless our own loopback listener
+        # successfully owns that port first. Otherwise an unrelated local process
+        # could receive GSI metadata if it happened to bind the configured port.
+        candidate = get_cs2_gsi(self.config, start=False)
+        if candidate is not None and candidate.start():
+            self.cs2_gsi = candidate
+            if auto_install:
+                self._auto_configure_cs2_gsi()
+            if previous is not None:
+                self.logger.info('Counter-Strike 2 GSI configuration reloaded')
+            return
+
+        self.cs2_gsi = None
+        if candidate is not None and auto_install:
+            self._remove_cybrex_gsi_config()
+        self.logger.warning(
+            'CS2 GSI listener is unavailable; automatic game configuration '
+            'was disabled to avoid sending game state to an unverified local port. '
+            'Restart CS2 if it was already running.'
+        )
+
+    def _remove_cybrex_gsi_config(self) -> None:
         try:
             locations = discover_cs2_cfg_dirs()
         except OSError:
@@ -161,7 +202,7 @@ class GamingDetector:
                 target.unlink(missing_ok=True)
             except OSError as exc:
                 self.logger.warning(
-                    'Could not remove stale CS2 GSI configuration %s: %s',
+                    'Could not remove CYBREX CS2 GSI configuration %s: %s',
                     target,
                     exc,
                 )
@@ -180,6 +221,7 @@ class GamingDetector:
             )
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        self._sync_cs2_gsi()
         if not window_info or not self.config.get('rules.enabled_detectors.gaming', False):
             return None
 
