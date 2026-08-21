@@ -4,6 +4,7 @@
 import argparse
 import logging
 import os
+import signal
 import sys
 import threading
 import time
@@ -15,6 +16,7 @@ from typing import Any, Dict, Optional
 from pypresence import DiscordNotFound, InvalidID, InvalidPipe, Presence
 
 from activity_priority import ActivityPriorityEngine
+from browser_companion import get_browser_companion, stop_browser_companions
 from config import Config
 from detectors.browser import BrowserDetector
 from detectors.coding import CodingDetector
@@ -23,6 +25,7 @@ from detectors.media import MediaDetector
 from detectors.terminal import TerminalDetector
 from detectors.window import WindowDetector
 from presence import PresenceBuilder
+from rpc_contract import sanitize_rpc_payload
 from runtime_state import RuntimeState
 from tray_icon import run_with_tray
 
@@ -67,6 +70,7 @@ class DiscordRichPresenceService:
         self.gaming_detector = GamingDetector(config)
         self.priority_engine = ActivityPriorityEngine(config)
         self.presence_builder = PresenceBuilder(config)
+        self._last_companion_signature = self._companion_signature()
 
     def _runtime_update(self, **fields: Any):
         runtime = getattr(self, 'runtime', None)
@@ -154,19 +158,38 @@ class DiscordRichPresenceService:
         return False
 
     def disconnect_discord(self):
-        if self.rpc and self.connected:
-            try:
-                self.rpc.close()
-            except Exception as e:
-                self.logger.debug('Error while closing Discord RPC: %s', e)
+        rpc = self.rpc
         self.connected = False
         self.rpc = None
+        if rpc is not None:
+            try:
+                rpc.close()
+            except Exception as e:
+                self.logger.debug('Error while closing Discord RPC: %s', e)
         self._runtime_update(connected=False)
 
+    @staticmethod
+    def _payload_log_metadata(payload: Dict[str, Any]) -> tuple[Any, str]:
+        activity_type = payload.get('activity_type')
+        fields = ','.join(sorted(str(key) for key in payload))
+        return activity_type, fields
+
     def update_presence(self, payload: Dict[str, Any]) -> bool:
-        clean_payload = {key: value for key, value in payload.items() if value is not None}
+        # Final contract guard applies to detector payloads and manual overrides.
+        clean_payload = sanitize_rpc_payload(payload)
+        activity_type, fields = self._payload_log_metadata(clean_payload)
+
         if self.dry_run:
-            self.logger.info('[DRY RUN] update: %s', clean_payload)
+            # The full payload is useful for an explicit interactive dry run, but
+            # it must not be persisted to app.log. Windowed packaged builds may
+            # not have stdout, so keep a non-sensitive logger message as fallback.
+            if sys.stdout is not None:
+                print(f'[DRY RUN] update: {clean_payload}', flush=True)
+            self.logger.info(
+                '[DRY RUN] presence prepared: activity_type=%s fields=%s',
+                activity_type,
+                fields,
+            )
             self.last_payload = clean_payload
             self.presence_active = True
             self._runtime_update(
@@ -185,7 +208,13 @@ class DiscordRichPresenceService:
             self.rpc.update(**clean_payload)
             self.last_payload = clean_payload
             self.presence_active = True
-            self.logger.debug('Updated presence: %s', clean_payload)
+            # Never put page titles, commands, URLs, or buttons into persistent
+            # debug logs. Field names are sufficient for protocol diagnostics.
+            self.logger.debug(
+                'Updated presence: activity_type=%s fields=%s',
+                activity_type,
+                fields,
+            )
             self._runtime_update(
                 connected=True,
                 presence_active=True,
@@ -212,6 +241,8 @@ class DiscordRichPresenceService:
             self._runtime_update(presence_active=False, activity=None)
             return True
         if self.dry_run:
+            if sys.stdout is not None:
+                print('[DRY RUN] clear presence', flush=True)
             self.logger.info('[DRY RUN] clear presence')
             self.last_payload = None
             self.presence_active = False
@@ -248,15 +279,15 @@ class DiscordRichPresenceService:
         if old_client_id == new_client_id:
             return
 
-        self.logger.info('Discord Client ID changed; resetting RPC connection')
+        self.logger.info('Discord application ID changed; resetting RPC connection')
         if self.presence_active:
             if self.dry_run:
-                self.logger.info('[DRY RUN] clear presence for Client ID change')
+                self.logger.info('[DRY RUN] clear presence for application ID change')
             elif self.rpc and self.connected:
                 try:
                     self.rpc.clear()
                 except Exception as e:
-                    self.logger.debug('Could not clear old Client ID presence: %s', e)
+                    self.logger.debug('Could not clear old application presence: %s', e)
 
         self.last_payload = None
         self.presence_active = False
@@ -270,10 +301,34 @@ class DiscordRichPresenceService:
             last_error=None,
         )
 
+    def _companion_signature(self) -> tuple[bool, int, float]:
+        enabled = bool(self.config.get('browser_companion.enabled', True))
+        try:
+            port = int(self.config.get('browser_companion.port', 32191) or 32191)
+        except (TypeError, ValueError):
+            port = 32191
+        try:
+            ttl = float(self.config.get('browser_companion.ttl_secs', 15) or 15)
+        except (TypeError, ValueError):
+            ttl = 15.0
+        return enabled, port, ttl
+
+    def _refresh_browser_companion_if_needed(self) -> None:
+        signature = self._companion_signature()
+        if signature == self._last_companion_signature:
+            return
+        stop_browser_companions()
+        companion = get_browser_companion(self.config, start=True)
+        self.browser_detector.companion = companion
+        self.media_detector.companion = companion
+        self._last_companion_signature = signature
+        self.logger.info('Browser Companion configuration reloaded')
+
     def _reload_config_if_changed(self):
         path = getattr(self.config, 'config_path', None)
         if not path or not path.exists():
             return
+        current_mtime: Optional[float] = None
         try:
             current_mtime = path.stat().st_mtime
             if self._last_config_mtime is None:
@@ -290,10 +345,15 @@ class DiscordRichPresenceService:
 
             self.presence_builder.reload()
             self._reset_rpc_for_client_id_change(old_client_id, new_client_id)
+            self._refresh_browser_companion_if_needed()
             self._last_config_mtime = current_mtime
             self.logger.info('Configuration reloaded')
             self._runtime_update(last_config_reload=time.time(), last_error=None)
         except Exception as e:
+            # Do not emit the same parse/validation error every polling cycle.
+            # A new file mtime will trigger another attempt after the user fixes it.
+            if current_mtime is not None:
+                self._last_config_mtime = current_mtime
             self.logger.error('Config hot reload rejected; keeping previous config: %s', e)
             self._runtime_update(last_error=f'Config reload: {e}'[:300])
 
@@ -422,7 +482,7 @@ class DiscordRichPresenceService:
     def should_update(self, new_payload: Optional[Dict[str, Any]]) -> bool:
         if new_payload is None:
             return False
-        normalized = {key: value for key, value in new_payload.items() if value is not None}
+        normalized = sanitize_rpc_payload(new_payload)
         return not self.presence_active or normalized != (self.last_payload or {})
 
     def _handle_rpc_failure(self):
@@ -481,13 +541,37 @@ class DiscordRichPresenceService:
         finally:
             self._runtime_update(state='stopping')
             try:
-                self.clear_presence()
+                # Never reconnect during shutdown solely to clear Presence. If the
+                # pipe is already gone Discord will clear the activity with it.
+                if self.dry_run:
+                    self.clear_presence()
+                elif self.connected and self.presence_active:
+                    self.clear_presence()
+                else:
+                    self.last_payload = None
+                    self.presence_active = False
             finally:
-                self.disconnect_discord()
+                try:
+                    self.disconnect_discord()
+                finally:
+                    stop_browser_companions()
             self.logger.info('Discord Rich Presence Service stopped')
 
     def stop(self):
         self._stop_event.set()
+
+
+class _PrivateRotatingFileHandler(RotatingFileHandler):
+    """Rotating log handler that keeps each POSIX log file private."""
+
+    def _open(self):
+        stream = super()._open()
+        if os.name == 'posix':
+            try:
+                os.chmod(self.baseFilename, 0o600)
+            except OSError:
+                pass
+        return stream
 
 
 def _default_log_path() -> Path:
@@ -510,27 +594,57 @@ def setup_logging(verbose: bool = False):
         for handler in root.handlers
     ):
         console = logging.StreamHandler()
+        console.setLevel(level)
         console.setFormatter(formatter)
         root.addHandler(console)
 
     try:
         log_path = _default_log_path()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name == 'posix':
+            try:
+                os.chmod(log_path.parent, 0o700)
+            except OSError:
+                pass
         if not any(
             isinstance(handler, RotatingFileHandler)
             and Path(handler.baseFilename) == log_path
             for handler in root.handlers
         ):
-            file_handler = RotatingFileHandler(
+            file_handler = _PrivateRotatingFileHandler(
                 log_path,
                 maxBytes=2 * 1024 * 1024,
                 backupCount=5,
                 encoding='utf-8',
             )
+            # Verbose detector/payload diagnostics are terminal-only. Persistent
+            # logs keep operational INFO/WARNING/ERROR records without activity
+            # payload dumps.
+            file_handler.setLevel(logging.INFO)
             file_handler.setFormatter(formatter)
             root.addHandler(file_handler)
     except Exception:
         root.exception('Could not initialize file logging')
+
+
+def _install_signal_handlers(service: DiscordRichPresenceService) -> None:
+    """Make SIGTERM graceful on Linux/systemd and supported console hosts."""
+    if not hasattr(signal, 'SIGTERM'):
+        return
+
+    def handle_term(signum, _frame):
+        try:
+            name = signal.Signals(signum).name
+        except (ValueError, TypeError):
+            name = str(signum)
+        logging.info('Received stop signal %s', name)
+        service.stop()
+
+    try:
+        signal.signal(signal.SIGTERM, handle_term)
+    except (ValueError, OSError):
+        # Signal registration is only legal in the main interpreter thread.
+        pass
 
 
 def main():
@@ -574,11 +688,13 @@ def main():
             runtime=runtime,
             privacy_override=args.privacy,
         )
+        _install_signal_handlers(service)
         if args.tray or config.get('system.start_minimized', False):
             run_with_tray(service.run, config, service.stop)
         else:
             service.run()
     finally:
+        stop_browser_companions()
         runtime.release()
 
 
