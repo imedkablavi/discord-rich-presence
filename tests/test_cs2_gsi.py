@@ -152,3 +152,25 @@ def test_cs2_gaming_detector_formats_mode_map_team_and_score(tmp_path):
     assert payload['details'] == 'Playing · Counter-Strike 2'
     assert payload['state'] == 'Competitive · Mirage · Counter-Terrorists · CT 8–6 T'
     assert payload['large_text'] == 'Counter-Strike 2'
+
+
+def test_cs2_steam_app_alias_and_deathmatch_omit_fake_round_score(tmp_path):
+    config = _config(tmp_path)
+    detector = GamingDetector(config)
+    detector.cs2_gsi = SimpleNamespace(latest=lambda: {
+        'map': 'de_dust2',
+        'mode': 'deathmatch',
+        'map_phase': 'live',
+        'round': 0,
+        'round_phase': 'live',
+        'countdown_phase': 'live',
+        'team': 'T',
+        'player_activity': 'playing',
+        'ct_score': 0,
+        't_score': 0,
+    })
+
+    activity = detector.detect({'app_name': 'steam_app_730', 'title': 'Counter-Strike 2'})
+    assert activity is not None
+    assert activity['game_name'] == 'Counter-Strike 2'
+    assert activity['launcher'] == 'Deathmatch · Dust II · Terrorists'
