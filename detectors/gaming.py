@@ -26,6 +26,7 @@ class GamingDetector:
         'valorant': 'VALORANT',
         'csgo': 'Counter-Strike: Global Offensive',
         'cs2': 'Counter-Strike 2',
+        'steam_app_730': 'Counter-Strike 2',
         'dota2': 'Dota 2',
         'overwatch': 'Overwatch',
         'minecraft': 'Minecraft',
@@ -63,6 +64,11 @@ class GamingDetector:
         'survival': 'Danger Zone',
         'training': 'Training',
         'custom': 'Custom',
+    }
+
+    CS2_ROUND_SCORE_MODES = {
+        'competitive', 'casual', 'scrimcomp2v2', 'scrimpcomp2v2', 'wingman',
+        'gungametrbomb', 'demolition',
     }
 
     CS2_MAP_NAMES = {
@@ -165,7 +171,8 @@ class GamingDetector:
         t_score = int(snapshot.get('t_score', 0) or 0)
 
         state_parts = [part for part in (mode_name, map_name, team_name) if part]
-        if map_name:
+        score_is_meaningful = mode_key in self.CS2_ROUND_SCORE_MODES or ct_score > 0 or t_score > 0
+        if map_name and score_is_meaningful:
             state_parts.append(f'CT {ct_score}–{t_score} T')
 
         activity.update({
