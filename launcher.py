@@ -3,6 +3,7 @@
 
 import sys
 from pathlib import Path, PureWindowsPath
+from typing import Optional
 
 
 def _argument_name(value: str) -> str:
@@ -29,10 +30,28 @@ def _normalize_packaged_args():
         sys.argv.append('--tray')
 
 
-def _handle_cs2_setup_command() -> bool:
+def _setup_message(message: str, *, error: bool = False) -> None:
+    stream = sys.stderr if error else sys.stdout
+    if stream is not None:
+        print(message, file=stream, flush=True)
+        return
+    # PyInstaller windowed builds have no console streams. Keep the repair
+    # command usable there by falling back to a small native dialog.
+    if getattr(sys, 'frozen', False):
+        try:
+            from tkinter import messagebox
+            if error:
+                messagebox.showerror('CYBREX Rich Presence', message)
+            else:
+                messagebox.showinfo('CYBREX Rich Presence', message)
+        except Exception:
+            pass
+
+
+def _handle_cs2_setup_command() -> Optional[int]:
     """Allow packaged users to repair/install CS2 GSI without a source checkout."""
     if '--install-cs2-gsi' not in sys.argv:
-        return False
+        return None
 
     index = sys.argv.index('--install-cs2-gsi')
     cfg_dir = None
@@ -47,18 +66,21 @@ def _handle_cs2_setup_command() -> bool:
     try:
         target = install_gsi_config(Config(), cfg_dir)
     except Exception as exc:
-        print(f'Counter-Strike 2 GSI installation failed: {exc}', file=sys.stderr)
-        return True
+        _setup_message(f'Counter-Strike 2 GSI installation failed: {exc}', error=True)
+        return 1
 
-    print('Counter-Strike 2 GSI installed successfully.')
-    print(f'Configuration: {target}')
-    print('Restart Counter-Strike 2 if it is already running.')
-    return True
+    _setup_message(
+        'Counter-Strike 2 GSI installed successfully.\n'
+        f'Configuration: {target}\n'
+        'Restart Counter-Strike 2 if it is already running.'
+    )
+    return 0
 
 
-def main():
-    if _handle_cs2_setup_command():
-        return
+def main() -> int:
+    setup_result = _handle_cs2_setup_command()
+    if setup_result is not None:
+        return setup_result
 
     if '--gui' in sys.argv:
         sys.argv.remove('--gui')
@@ -67,13 +89,14 @@ def main():
 
         app = ModernControlPanel(Config())
         app.mainloop()
-        return
+        return 0
 
     _normalize_packaged_args()
 
     from main import main as service_main
     service_main()
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())
