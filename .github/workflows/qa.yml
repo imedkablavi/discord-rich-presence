@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Validate Manifest V3 JSON
+      - name: Validate Manifest V3 JSON and permission scope
         run: |
           python -m json.tool browser_extension/manifest.json >/dev/null
           python - <<'PY'
@@ -68,9 +68,15 @@ jobs:
           assert manifest['manifest_version'] == 3
           assert manifest['background']['service_worker'] == 'background.js'
           assert 'background.js' in manifest['background']['scripts']
-          assert 'http://127.0.0.1:32191/*' in manifest['host_permissions']
-          assert '<all_urls>' in manifest['host_permissions']
+          assert manifest['host_permissions'] == ['http://127.0.0.1:32191/*']
+          matches = set(manifest['content_scripts'][0]['matches'])
+          assert matches == {'http://*/*', 'https://*/*'}
           assert manifest['content_scripts'][0]['all_frames'] is False
+
+          background = Path('browser_extension/background.js').read_text(encoding='utf-8')
+          assert 'REQUEST_TIMEOUT_MS' in background
+          assert 'signal: controller.signal' in background
+          assert 'snapshot.url ||' not in background
           PY
       - name: Validate JavaScript syntax
         run: |
