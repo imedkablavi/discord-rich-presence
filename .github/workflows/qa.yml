@@ -28,6 +28,39 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+  browser-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Manifest V3 JSON
+        run: |
+          python -m json.tool browser_extension/manifest.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('browser_extension/manifest.json').read_text(encoding='utf-8'))
+          assert manifest['manifest_version'] == 3
+          assert manifest['background']['service_worker'] == 'background.js'
+          assert 'background.js' in manifest['background']['scripts']
+          assert 'http://127.0.0.1:32191/*' in manifest['host_permissions']
+          assert '<all_urls>' in manifest['host_permissions']
+          assert manifest['content_scripts'][0]['all_frames'] is False
+          PY
+      - name: Validate JavaScript syntax
+        run: |
+          node --check browser_extension/background.js
+          node --check browser_extension/content.js
+      - name: Package companion extension
+        run: |
+          cd browser_extension
+          zip -r ../CYBREX-Browser-Companion.zip .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: CYBREX-Browser-Companion
+          path: CYBREX-Browser-Companion.zip
+          if-no-files-found: error
+
   shell-hooks:
     runs-on: ubuntu-latest
     steps:
