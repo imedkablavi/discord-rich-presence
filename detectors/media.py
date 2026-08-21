@@ -1,4 +1,4 @@
-"""Media playback detection for Windows Media Control and Linux MPRIS."""
+"""Media playback detection for Windows Media Control, Linux MPRIS, and browser companion."""
 
 import logging
 import platform
@@ -7,18 +7,20 @@ import subprocess
 import time
 from typing import Optional, Dict, Any
 
+from browser_companion import get_browser_companion
 from config import Config
 
 
 class MediaDetector:
-    """Detect active media playback using platform-native session APIs."""
+    """Detect active media playback using the most accurate available source."""
 
     SERVICES = (
-        'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu',
+        'YouTube Music', 'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu',
         'SoundCloud', 'Spotify', 'Twitch', 'GitHub'
     )
 
     SERVICE_URL_MARKERS = {
+        'YouTube Music': ('music.youtube.com',),
         'YouTube': ('youtube.com', 'youtu.be', 'ytimg.com', 'googlevideo.com'),
         'Netflix': ('netflix.com',),
         'Prime Video': ('primevideo.com', 'amazon.com/gp/video', 'amazon.com/video'),
@@ -30,10 +32,6 @@ class MediaDetector:
         'GitHub': ('github.com',),
     }
 
-    # Browser MPRIS sessions such as Brave/Chromium often omit xesam:url and
-    # expose artwork only as a local file:// URL. Once a service is verified
-    # from a foreground browser title or a real metadata URL, retain that
-    # association for the same media title while the user changes windows.
     SERVICE_CACHE_TTL_SECS = 6 * 60 * 60
     SERVICE_CACHE_MAX_ENTRIES = 50
 
@@ -47,6 +45,9 @@ class MediaDetector:
         self.bus = None
         self.windows_detector = None
         self._service_cache: Dict[str, Dict[str, Any]] = {}
+        # BrowserDetector normally starts the shared bridge first. Keeping
+        # start=False here avoids duplicate bind attempts in isolated tests.
+        self.companion = get_browser_companion(config, start=False)
 
         if self.platform_name == 'windows':
             try:
@@ -68,19 +69,25 @@ class MediaDetector:
                 if not self.playerctl_available:
                     self.logger.info('D-Bus/MPRIS support enabled')
             except ImportError:
-                if not self.playerctl_available:
+                if not self.playerctl_available and not self.companion:
                     self.logger.warning(
                         'Linux media detection unavailable; install playerctl or PyGObject/pydbus'
                     )
             except Exception as e:
-                if not self.playerctl_available:
+                if not self.playerctl_available and not self.companion:
                     self.logger.warning('Failed to initialize D-Bus/MPRIS: %s', e)
         else:
-            self.logger.debug('Media session detection is unsupported on %s', self.platform_name)
+            self.logger.debug('Native media session detection is unsupported on %s', self.platform_name)
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not self.config.get('rules.enabled_detectors.media', True):
             return None
+
+        # The companion knows the exact site/tab and HTMLMediaElement timeline,
+        # so it is more precise than browser MPRIS sessions when available.
+        companion_activity = self._detect_companion_media()
+        if companion_activity:
+            return companion_activity
 
         if self.platform_name == 'windows':
             if self.windows_media_available and self.windows_detector:
@@ -118,6 +125,45 @@ class MediaDetector:
         except Exception as e:
             self.logger.debug('Error detecting MPRIS media: %s', e)
             return None
+
+    def _detect_companion_media(self) -> Optional[Dict[str, Any]]:
+        if not self.companion:
+            return None
+        snapshot = self.companion.latest_media()
+        if not snapshot:
+            return None
+        media = snapshot.get('media') if isinstance(snapshot.get('media'), dict) else {}
+        if not bool(media.get('playing')):
+            return None
+
+        player = str(snapshot.get('browser', '') or 'Browser')
+        service = str(snapshot.get('service', '') or '')
+        if not service:
+            service = self._detect_service(snapshot.get('url'), snapshot.get('title')) or ''
+
+        media_title = str(media.get('title', '') or snapshot.get('title', '') or 'Media')
+        artist = str(media.get('artist', '') or '')
+        full_title = f'{artist} - {media_title}' if artist and artist != media_title else media_title
+        try:
+            position = max(0, int(float(media.get('position', 0) or 0)))
+            duration = max(0, int(float(media.get('duration', 0) or 0)))
+        except (TypeError, ValueError):
+            position = duration = 0
+
+        activity: Dict[str, Any] = {
+            'type': 'media',
+            'player': player,
+            'title': full_title,
+            'is_playing': True,
+            'position': position,
+            'duration': duration,
+            'source': 'companion',
+            'tab_focused': bool(snapshot.get('focused')),
+        }
+        if service:
+            activity['service'] = service
+            self._remember_service(activity, service)
+        return activity
 
     def _detect_playerctl(self) -> Optional[Dict[str, Any]]:
         """Read all MPRIS players with one playerctl process and prefer active playback."""
@@ -165,6 +211,7 @@ class MediaDetector:
                     'is_playing': status == 'Playing',
                     'position': position,
                     'duration': duration,
+                    'source': 'mpris',
                 }
                 service = self._detect_service(media_url, art_url, title, full_title)
                 if service:
@@ -359,6 +406,7 @@ class MediaDetector:
                 'is_playing': playback_status == 'Playing',
                 'position': position,
                 'duration': duration,
+                'source': 'mpris',
             }
             service = self._detect_service(media_url, art_url, title, full_title)
             if service:
