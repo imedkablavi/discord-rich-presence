@@ -30,6 +30,7 @@ _CLIENT_TIMEOUT_SECS = 3.0
 _DEFAULT_PORT = 32192
 _DEFAULT_TTL_SECS = 30.0
 _APP_ID = 730
+_TOKEN_PATTERN = re.compile(r'^[A-Za-z0-9_-]{32,128}$')
 
 
 class _CS2HTTPServer(ThreadingHTTPServer):
@@ -45,8 +46,8 @@ class CS2GSIBridge:
     def __init__(self, config: Config):
         self.config = config
         self.host = '127.0.0.1'
-        self.port = int(config.get('cs2_gsi.port', _DEFAULT_PORT) or _DEFAULT_PORT)
-        self.ttl_secs = float(config.get('cs2_gsi.ttl_secs', _DEFAULT_TTL_SECS) or _DEFAULT_TTL_SECS)
+        self.port = _configured_port(config)
+        self.ttl_secs = _configured_ttl(config)
         self.token_path = Path(config.config_path).parent / 'cs2_gsi_token'
         self.token = _load_or_create_token(self.token_path)
         self._snapshot: Optional[Dict[str, Any]] = None
@@ -184,7 +185,10 @@ class CS2GSIBridge:
 
         provider = payload.get('provider') if isinstance(payload.get('provider'), dict) else {}
         appid = _clean_int(provider.get('appid'), maximum=10_000_000)
-        if appid not in {0, _APP_ID}:
+        # The generated integration always requests provider metadata. Requiring
+        # appid 730 prevents an authenticated stale/misrouted Valve payload from
+        # being interpreted as Counter-Strike 2 state.
+        if appid != _APP_ID:
             raise ValueError('unexpected_appid')
 
         game_map = payload.get('map') if isinstance(payload.get('map'), dict) else {}
@@ -236,8 +240,26 @@ class CS2GSIBridge:
             }
 
 
+def _configured_port(config: Config) -> int:
+    try:
+        value = int(config.get('cs2_gsi.port', _DEFAULT_PORT) or _DEFAULT_PORT)
+    except (TypeError, ValueError):
+        return _DEFAULT_PORT
+    return value if 1024 <= value <= 65535 else _DEFAULT_PORT
+
+
+def _configured_ttl(config: Config) -> float:
+    try:
+        value = float(config.get('cs2_gsi.ttl_secs', _DEFAULT_TTL_SECS) or _DEFAULT_TTL_SECS)
+    except (TypeError, ValueError):
+        return _DEFAULT_TTL_SECS
+    return value if 5.0 <= value <= 300.0 else _DEFAULT_TTL_SECS
+
+
 def _clean_text(value: Any, limit: int) -> str:
-    return str(value or '').replace('\x00', '').strip()[:limit]
+    text = str(value or '').replace('\x00', '').strip()
+    text = re.sub(r'[\x01-\x1f\x7f]+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()[:limit]
 
 
 def _clean_int(value: Any, *, maximum: int) -> int:
@@ -264,7 +286,7 @@ def _load_or_create_token(path: Path) -> str:
         token = path.read_text(encoding='utf-8').strip()
     except OSError:
         token = ''
-    if len(token) >= 32:
+    if _TOKEN_PATTERN.fullmatch(token):
         if os.name == 'posix':
             try:
                 os.chmod(path, 0o600)
@@ -276,6 +298,11 @@ def _load_or_create_token(path: Path) -> str:
     fd = os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
     with os.fdopen(fd, 'w', encoding='utf-8') as handle:
         handle.write(token + '\n')
+        handle.flush()
+        try:
+            os.fsync(handle.fileno())
+        except OSError:
+            pass
     if os.name == 'posix':
         try:
             os.chmod(path, 0o600)
@@ -284,10 +311,44 @@ def _load_or_create_token(path: Path) -> str:
     return token
 
 
+def _windows_registry_steam_roots() -> Iterable[Path]:
+    if platform.system().lower() != 'windows':
+        return []
+    try:
+        import winreg
+    except ImportError:
+        return []
+
+    roots: list[Path] = []
+    locations = (
+        (winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam'),
+        (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Valve\Steam'),
+        (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Valve\Steam'),
+    )
+    for hive, key_name in locations:
+        try:
+            with winreg.OpenKey(hive, key_name) as key:
+                for value_name in ('SteamPath', 'InstallPath'):
+                    try:
+                        raw, _ = winreg.QueryValueEx(key, value_name)
+                    except OSError:
+                        continue
+                    if raw:
+                        roots.append(Path(str(raw)))
+                        break
+        except OSError:
+            continue
+    return roots
+
+
 def _steam_roots() -> Iterable[Path]:
     system = platform.system().lower()
     roots: list[Path] = []
     if system == 'windows':
+        steam_env = os.environ.get('STEAM_PATH')
+        if steam_env:
+            roots.append(Path(steam_env))
+        roots.extend(_windows_registry_steam_roots())
         for env_name in ('PROGRAMFILES(X86)', 'PROGRAMFILES'):
             base = os.environ.get(env_name)
             if base:
@@ -302,10 +363,14 @@ def _steam_roots() -> Iterable[Path]:
 
     seen: set[str] = set()
     for root in roots:
-        key = str(root)
+        try:
+            normalized = root.expanduser()
+        except (TypeError, ValueError):
+            continue
+        key = os.path.normcase(str(normalized))
         if key not in seen:
             seen.add(key)
-            yield root
+            yield normalized
 
 
 def _library_roots() -> Iterable[Path]:
@@ -322,7 +387,7 @@ def _library_roots() -> Iterable[Path]:
             raw = match.group(1).replace('\\\\', '\\')
             candidates.append(Path(raw))
         for candidate in candidates:
-            key = str(candidate)
+            key = os.path.normcase(str(candidate))
             if key not in seen:
                 seen.add(key)
                 yield candidate
@@ -330,20 +395,27 @@ def _library_roots() -> Iterable[Path]:
 
 def discover_cs2_cfg_dirs() -> list[Path]:
     found: list[Path] = []
+    seen: set[str] = set()
     for library in _library_roots():
-        cfg = (
-            library / 'steamapps/common/Counter-Strike Global Offensive/game/csgo/cfg'
-        )
+        cfg = library / 'steamapps/common/Counter-Strike Global Offensive/game/csgo/cfg'
         if cfg.is_dir():
-            found.append(cfg)
+            key = os.path.normcase(str(cfg.resolve()))
+            if key not in seen:
+                seen.add(key)
+                found.append(cfg)
     return found
 
 
 def render_gsi_config(port: int, token: str) -> str:
     """Render a least-data CS2 GSI configuration."""
+    if not _TOKEN_PATTERN.fullmatch(str(token or '')):
+        raise ValueError('Invalid CS2 GSI authentication token')
+    port = int(port)
+    if port < 1024 or port > 65535:
+        raise ValueError('CS2 GSI port must be between 1024 and 65535')
     return f'''"CYBREX Discord Rich Presence"
 {{
-    "uri" "http://127.0.0.1:{int(port)}/v1/cs2"
+    "uri" "http://127.0.0.1:{port}/v1/cs2"
     "timeout" "5.0"
     "buffer" "0.1"
     "throttle" "0.2"
@@ -380,9 +452,51 @@ def install_gsi_config(config: Config, cfg_dir: Optional[Path] = None) -> Path:
 
     token_path = Path(config.config_path).parent / 'cs2_gsi_token'
     token = _load_or_create_token(token_path)
-    port = int(config.get('cs2_gsi.port', _DEFAULT_PORT) or _DEFAULT_PORT)
+    port = _configured_port(config)
     target = cfg_dir / 'gamestate_integration_cybrex.cfg'
-    target.write_text(render_gsi_config(port, token), encoding='utf-8')
+    content = render_gsi_config(port, token)
+
+    # Avoid changing the game config mtime on every service start when the
+    # integration is already correct. On POSIX, keep the token-bearing cfg
+    # private even if an older release created it with a permissive umask.
+    try:
+        if target.read_text(encoding='utf-8') == content:
+            if os.name == 'posix':
+                try:
+                    os.chmod(target, 0o600)
+                except OSError:
+                    pass
+            return target
+    except OSError:
+        pass
+
+    tmp = target.with_name(f'.{target.name}.{os.getpid()}.tmp')
+    fd = os.open(tmp, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        if os.name == 'posix':
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+        os.replace(tmp, target)
+        if os.name == 'posix':
+            try:
+                os.chmod(target, 0o600)
+            except OSError:
+                pass
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
     return target
 
 
@@ -393,7 +507,7 @@ _BRIDGES_LOCK = threading.Lock()
 def get_cs2_gsi(config: Config, start: bool = True) -> Optional[CS2GSIBridge]:
     if not bool(config.get('cs2_gsi.enabled', True)):
         return None
-    port = int(config.get('cs2_gsi.port', _DEFAULT_PORT) or _DEFAULT_PORT)
+    port = _configured_port(config)
     with _BRIDGES_LOCK:
         bridge = _BRIDGES.get(port)
         if bridge is None:
