@@ -36,6 +36,27 @@ def test_invalid_urls_buttons_and_timestamps_are_removed():
     assert 'end' not in payload
 
 
+def test_activity_urls_longer_than_discord_limit_are_dropped():
+    long_url = 'https://example.com/search?q=' + ('private-query-' * 30)
+    assert len(long_url) > 256
+
+    payload = sanitize_rpc_payload({
+        'details': 'Browser page',
+        'details_url': long_url,
+        'state_url': long_url,
+        'large_url': long_url,
+        'small_url': long_url,
+        # Button URLs have a separate, larger contract and should remain valid.
+        'buttons': [{'label': 'Open', 'url': long_url}],
+    })
+
+    assert 'details_url' not in payload
+    assert 'state_url' not in payload
+    assert 'large_url' not in payload
+    assert 'small_url' not in payload
+    assert payload['buttons'] == [{'label': 'Open', 'url': long_url}]
+
+
 def test_asset_and_party_bounds_are_enforced():
     payload = sanitize_rpc_payload({
         'large_image': 'a' * 301,
