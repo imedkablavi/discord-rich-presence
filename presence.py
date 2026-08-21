@@ -24,12 +24,11 @@ class PresenceBuilder:
     }
 
     TOOLTIP_ALIASES = {
-        # Discord requires asset tooltip text to contain at least two characters.
-        # Keep the user-facing service/language name short while publishing a
-        # valid tooltip to the RPC payload.
         'x': 'X.com',
         'c': 'C language',
     }
+
+    STEAM_ICON = 'https://www.google.com/s2/favicons?domain=steampowered.com&sz=128'
 
     def __init__(self, config: Config):
         self.config = config
@@ -62,42 +61,19 @@ class PresenceBuilder:
 
     @classmethod
     def _sanitize_discord_fields(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Keep detector output inside Discord RPC's text-field contract.
-
-        A malformed optional text field must never tear down the whole RPC
-        session. Discord currently rejects some activity/asset strings shorter
-        than two characters, so use the same conservative contract for the
-        dynamic activity name and text/tooltip fields.
-        """
+        """Keep detector output inside Discord RPC's text-field contract."""
         result = {key: value for key, value in payload.items() if value is not None}
-        for key in ('name', 'details', 'state', 'large_text', 'small_text'):
+        for key in ('details', 'state', 'large_text', 'small_text'):
             if key not in result:
                 continue
             text = str(result[key]).strip()
-            if key in {'name', 'large_text', 'small_text'}:
+            if key in {'large_text', 'small_text'}:
                 text = cls.TOOLTIP_ALIASES.get(text.lower(), text)
             if len(text) < 2:
                 result.pop(key, None)
                 continue
             result[key] = text[:128]
         return result
-
-    @classmethod
-    def _rpc_activity_name(cls, primary: object, fallback: object) -> str:
-        """Return a safe user-facing Discord activity name.
-
-        pypresence 4.6.x supports the RPC ``name`` field, allowing one shared
-        Discord Application ID to display the actual game/app/service instead
-        of the CYBREX application name. Keep a fallback for one-character custom
-        labels so a bad display name can never invalidate the whole presence.
-        """
-        primary_text = str(primary or '').strip()
-        primary_text = cls.TOOLTIP_ALIASES.get(primary_text.lower(), primary_text)
-        if len(primary_text) >= 2:
-            return primary_text[:128]
-        fallback_text = str(fallback or 'Activity').strip()
-        fallback_text = cls.TOOLTIP_ALIASES.get(fallback_text.lower(), fallback_text)
-        return (fallback_text if len(fallback_text) >= 2 else 'Activity')[:128]
 
     def _build_media(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         title = str(activity.get('title', 'Unknown'))
@@ -121,7 +97,6 @@ class PresenceBuilder:
         player_image = self._resolve_media_image(player, player_display)
         payload: Dict[str, Any] = {
             'activity_type': ActivityType.LISTENING if listening else ActivityType.WATCHING,
-            'name': self._rpc_activity_name(service, player_display),
             'details': details[:128],
             'state': state[:128],
             'large_image': service_image or player_image,
@@ -155,7 +130,6 @@ class PresenceBuilder:
         position: int,
         duration: int,
     ) -> tuple[int, Optional[int]]:
-        """Return a stable timeline, resetting it only for a track change or seek."""
         now_sec = int(time.time())
         key = f"{player}\0{title}\0{duration}"
         timeline = self.media_timelines.get(key)
@@ -192,8 +166,7 @@ class PresenceBuilder:
         configured = self._configured_app_image(terminal_name, shell)
         payload = {
             'activity_type': ActivityType.PLAYING,
-            'name': self._rpc_activity_name(terminal_name, shell),
-            'details': (f"Terminal · {command}" if command else "Terminal")[:128],
+            'details': (f"Terminal · {command}" if command else 'Terminal')[:128],
             'state': (f"{shell} · {directory}" if directory else shell)[:128],
             'large_image': self.icons.resolve(
                 terminal_name,
@@ -214,8 +187,7 @@ class PresenceBuilder:
         project = str(activity.get('project', '') or '')
         payload = {
             'activity_type': ActivityType.PLAYING,
-            'name': self._rpc_activity_name(editor, 'Code Editor'),
-            'details': (f"Coding · {filename}" if filename else "Coding")[:128],
+            'details': (f"Coding · {filename}" if filename else 'Coding')[:128],
             'state': (f"{editor} · {project}" if project else editor)[:128],
             'large_image': self.icons.resolve(
                 editor,
@@ -240,7 +212,7 @@ class PresenceBuilder:
         service = str(activity.get('service', '') or '')
         url = activity.get('url')
 
-        details = "Private browsing" if is_private else (page_title or "Browsing")
+        details = 'Private browsing' if is_private else (page_title or 'Browsing')
         state = browser_name if not service else f"{service} · {browser_name}"
         browser_image = self.icons.resolve(
             browser_name,
@@ -250,8 +222,9 @@ class PresenceBuilder:
         service_image = self._resolve_service_image(service) if service else None
 
         payload: Dict[str, Any] = {
-            'activity_type': ActivityType.WATCHING if service in {'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu', 'Twitch'} else ActivityType.PLAYING,
-            'name': self._rpc_activity_name(service, browser_name),
+            'activity_type': ActivityType.WATCHING if service in {
+                'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu', 'Twitch'
+            } else ActivityType.PLAYING,
             'details': details[:128],
             'state': state[:128],
             'large_image': service_image or browser_image,
@@ -286,7 +259,6 @@ class PresenceBuilder:
         )
         payload = {
             'activity_type': ActivityType.PLAYING,
-            'name': self._rpc_activity_name(app_name, 'Application'),
             'details': f"{app_name} active"[:128],
             'state': (window_title if window_title else app_name)[:128],
             'large_image': image,
@@ -299,26 +271,69 @@ class PresenceBuilder:
     def _build_gaming(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         game_name = str(activity.get('game_name') or activity.get('launcher') or 'Game')
         launcher = str(activity.get('launcher') or 'Gaming')
+        artwork_url = str(activity.get('artwork_url', '') or '').strip()
+        store_url = str(activity.get('store_url', '') or '').strip()
+        source = str(activity.get('game_source', '') or '').strip()
+
         configured = (
             self._configured_app_image(game_name, launcher)
             or self.config.get(f"images.games.{game_name.lower()}")
         )
-        key = self.icons.resolve(
+        resolved_image = self.icons.resolve(
             game_name,
             launcher,
             configured=configured,
             fallback=self.config.get('images.app', 'app'),
         )
-        payload = {
+        large_image = (
+            artwork_url
+            if artwork_url.startswith(('https://', 'http://')) and len(artwork_url) <= 300
+            else resolved_image
+        )
+
+        if activity.get('gsi'):
+            mode = str(activity.get('mode', '') or '').strip()
+            map_name = str(activity.get('map', '') or '').strip()
+            team_name = str(activity.get('team_name', '') or '').strip()
+            ct_score = int(activity.get('ct_score', 0) or 0)
+            t_score = int(activity.get('t_score', 0) or 0)
+            mode_key = str(activity.get('mode_key', '') or '').lower()
+
+            details = ' · '.join(part for part in (game_name, mode) if part)
+            state_parts = [part for part in (map_name, team_name) if part]
+            score_is_meaningful = (
+                mode_key in {
+                    'competitive', 'casual', 'scrimcomp2v2', 'scrimpcomp2v2',
+                    'wingman', 'gungametrbomb', 'demolition',
+                }
+                or ct_score > 0
+                or t_score > 0
+            )
+            if score_is_meaningful:
+                state_parts.append(f'{ct_score}–{t_score}')
+            state = ' · '.join(state_parts) or launcher
+        else:
+            details = game_name
+            state = source or launcher
+
+        payload: Dict[str, Any] = {
             'activity_type': ActivityType.PLAYING,
-            'name': self._rpc_activity_name(game_name, 'Game'),
-            'details': f"Playing · {game_name}"[:128],
-            'state': launcher[:128],
-            'large_image': key,
+            'details': details[:128],
+            'state': state[:128],
+            'large_image': large_image,
             'large_text': game_name[:128],
             'start': self._get_activity_start('gaming', game_name),
         }
-        self._add_buttons(payload)
+
+        if source.lower() == 'steam':
+            payload['small_image'] = self.STEAM_ICON
+            payload['small_text'] = 'Steam'
+
+        self._add_buttons(
+            payload,
+            url=store_url if store_url.startswith(('https://', 'http://')) else None,
+            service='Steam' if source.lower() == 'steam' else '',
+        )
         return payload
 
     @classmethod
@@ -377,7 +392,11 @@ class PresenceBuilder:
                     continue
                 label = str(button.get('label', '')).strip()
                 button_url = str(button.get('url', '')).strip().strip('`')
-                if 1 <= len(label) <= 32 and len(button_url) <= 512 and button_url.startswith(('http://', 'https://')):
+                if (
+                    1 <= len(label) <= 32
+                    and len(button_url) <= 512
+                    and button_url.startswith(('http://', 'https://'))
+                ):
                     buttons.append({'label': label, 'url': button_url})
 
         if len(buttons) < 2 and url and str(url).startswith(('http://', 'https://')):
@@ -385,6 +404,8 @@ class PresenceBuilder:
                 label = 'Search on YouTube'
             elif service == 'GitHub':
                 label = 'Open GitHub'
+            elif service == 'Steam':
+                label = 'View on Steam'
             elif service:
                 label = f"Open {service}"[:32]
             else:
@@ -401,7 +422,6 @@ class PresenceBuilder:
             payload['buttons'] = buttons[:2]
 
     def _get_activity_start(self, activity_type: str, activity_id: str) -> int:
-        """Return an epoch timestamp in milliseconds, as required by pypresence 4.6.x."""
         key = f"{activity_type}:{activity_id}"
         if key not in self.activity_start_times:
             self.activity_start_times[key] = int(time.time() * 1000)
