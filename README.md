@@ -261,7 +261,7 @@ See `docs/PRIVACY.md` and `SECURITY.md`.
 
 ## QA and release hardening
 
-Pull-request QA currently includes:
+Pull-request QA includes:
 
 - Ubuntu and Windows tests on Python 3.10 and 3.12.
 - Python compilation and critical Ruff checks.
