@@ -88,25 +88,35 @@ class GamingDetector:
         self.config = config
         self.logger = logging.getLogger(__name__)
         gaming_enabled = bool(config.get('rules.enabled_detectors.gaming', True))
+        gsi_enabled = self._strict_bool_setting(config, 'cs2_gsi.enabled', True)
+        auto_install = self._strict_bool_setting(config, 'cs2_gsi.auto_install', True)
         self.cs2_gsi = None
 
         # Fail closed: never point CS2 at a port unless our own loopback listener
         # successfully owns that port first. Otherwise an unrelated local process
         # could receive GSI metadata if it happened to bind the configured port.
-        if gaming_enabled:
+        if gaming_enabled and gsi_enabled:
             candidate = get_cs2_gsi(config, start=False)
             if candidate is not None and candidate.start():
                 self.cs2_gsi = candidate
-                if bool(config.get('cs2_gsi.auto_install', True)):
+                if auto_install:
                     self._auto_configure_cs2_gsi()
             elif candidate is not None:
-                if bool(config.get('cs2_gsi.auto_install', True)):
+                if auto_install:
                     self._remove_auto_gsi_config_after_bind_failure()
                 self.logger.warning(
                     'CS2 GSI listener is unavailable; automatic game configuration '
                     'was disabled to avoid sending game state to an unverified local port. '
                     'Restart CS2 if it was already running.'
                 )
+
+    @staticmethod
+    def _strict_bool_setting(config: Config, key: str, default: bool) -> bool:
+        value = config.get(key, default)
+        # YAML booleans are expected. Strings such as "false" are deliberately
+        # not coerced because a malformed security-sensitive setting must not
+        # unexpectedly enable GSI or automatic writes to the game directory.
+        return value if isinstance(value, bool) else False
 
     def _remove_auto_gsi_config_after_bind_failure(self) -> None:
         """Remove our auto-managed cfg when its loopback port is not ours."""
