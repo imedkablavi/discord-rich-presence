@@ -68,7 +68,7 @@ jobs:
           assert manifest['manifest_version'] == 3
           assert manifest['background']['service_worker'] == 'background.js'
           assert 'background.js' in manifest['background']['scripts']
-          assert set(manifest['permissions']) == {'tabs', 'storage'}
+          assert set(manifest['permissions']) == {'storage'}
           assert manifest['host_permissions'] == ['http://127.0.0.1/*']
           assert manifest['options_ui']['page'] == 'options.html'
           matches = set(manifest['content_scripts'][0]['matches'])
@@ -80,6 +80,9 @@ jobs:
           assert 'signal: controller.signal' in background
           assert 'api.storage.local.get' in background
           assert 'snapshot.url ||' not in background
+          assert "changeInfo.status !== 'complete'" in background
+          assert 'changeInfo.url' not in background
+          assert 'changeInfo.title' not in background
           PY
       - name: Validate JavaScript and helper syntax
         run: |
