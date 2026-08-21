@@ -177,6 +177,7 @@ class BrowserCompanionBridge:
             self._prune(now)
 
     def latest(self, browser_name: str = '') -> Optional[Dict[str, Any]]:
+        """Return the best recent tab for foreground browser activity."""
         now = time.monotonic()
         browser = str(browser_name or '').strip().lower()
         with self._lock:
@@ -188,8 +189,6 @@ class BrowserCompanionBridge:
             ]
             if not candidates:
                 return None
-            # Prefer the tab that is actually focused, then currently playing media,
-            # then a visible tab, and use recency only as the final tie breaker.
             _, selected = max(
                 candidates,
                 key=lambda item: (
@@ -198,6 +197,29 @@ class BrowserCompanionBridge:
                     bool(item[1].get('visible')),
                     item[0],
                 ),
+            )
+            return dict(selected)
+
+    def latest_media(self, browser_name: str = '') -> Optional[Dict[str, Any]]:
+        """Return the best recent tab that is actively playing media."""
+        now = time.monotonic()
+        browser = str(browser_name or '').strip().lower()
+        with self._lock:
+            self._prune(now)
+            candidates = [
+                (seen, data)
+                for (record_browser, _), (seen, data) in self._records.items()
+                if (not browser or self._browser_matches(browser, record_browser))
+                and bool((data.get('media') or {}).get('playing'))
+                and not bool(data.get('private'))
+            ]
+            if not candidates:
+                return None
+            # A playing tab that is currently focused is strongest. Otherwise
+            # recency decides between multiple background players.
+            _, selected = max(
+                candidates,
+                key=lambda item: (bool(item[1].get('focused')), item[0]),
             )
             return dict(selected)
 
