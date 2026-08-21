@@ -81,9 +81,10 @@ class GamingDetector:
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
-        # GSI is an official, read-only game-state feed. Starting the loopback
-        # listener is harmless even before its one-time CS2 cfg is installed.
-        self.cs2_gsi = get_cs2_gsi(config, start=True)
+        gaming_enabled = bool(config.get('rules.enabled_detectors.gaming', True))
+        # Do not bind a port or modify the game's cfg when the entire gaming
+        # detector is disabled by the user.
+        self.cs2_gsi = get_cs2_gsi(config, start=True) if gaming_enabled else None
         if self.cs2_gsi and bool(config.get('cs2_gsi.auto_install', True)):
             self._auto_configure_cs2_gsi()
 
