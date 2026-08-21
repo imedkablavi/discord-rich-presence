@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,7 +17,18 @@ from config import Config
 LOGGER = logging.getLogger(__name__)
 _ALLOWED_ORIGIN_PREFIXES = ('chrome-extension://', 'moz-extension://', 'safari-web-extension://')
 _MAX_BODY_BYTES = 32 * 1024
+_MAX_RECORDS = 100
+_CLIENT_TIMEOUT_SECS = 3.0
 _SUPPORTED_VERSION = 1
+
+
+class _CompanionHTTPServer(ThreadingHTTPServer):
+    """Small loopback HTTP server with bounded thread/socket behavior."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+    request_queue_size = 16
+    block_on_close = False
 
 
 class BrowserCompanionBridge:
@@ -29,11 +41,12 @@ class BrowserCompanionBridge:
         self.ttl_secs = float(config.get('browser_companion.ttl_secs', 15) or 15)
         self._records: Dict[tuple[str, str], tuple[float, Dict[str, Any]]] = {}
         self._lock = threading.RLock()
-        self._server: Optional[ThreadingHTTPServer] = None
+        self._server: Optional[_CompanionHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> bool:
-        if self._server is not None:
+        server = self._server
+        if server is not None:
             return True
 
         bridge = self
@@ -41,39 +54,60 @@ class BrowserCompanionBridge:
         class Handler(BaseHTTPRequestHandler):
             server_version = 'CYBREXBrowserCompanion/1'
 
+            def setup(self) -> None:
+                super().setup()
+                try:
+                    self.connection.settimeout(_CLIENT_TIMEOUT_SECS)
+                except OSError:
+                    pass
+
             def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
                 LOGGER.debug('Browser companion: ' + format, *args)
 
             def _origin_allowed(self) -> bool:
                 origin = (self.headers.get('Origin') or '').strip().lower()
+                # Empty Origin is kept for local diagnostics/tools. Browser pages
+                # send their real http(s) Origin and are rejected by CORS here.
+                # This endpoint is not a security boundary against another process
+                # already running as the same OS user.
                 return not origin or origin.startswith(_ALLOWED_ORIGIN_PREFIXES)
 
             def _send(self, status: int, payload: Dict[str, Any]) -> None:
                 body = json.dumps(payload, separators=(',', ':')).encode('utf-8')
-                self.send_response(status)
-                origin = (self.headers.get('Origin') or '').strip()
-                if origin.lower().startswith(_ALLOWED_ORIGIN_PREFIXES):
-                    self.send_header('Access-Control-Allow-Origin', origin)
-                    self.send_header('Vary', 'Origin')
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Content-Length', str(len(body)))
-                self.send_header('Cache-Control', 'no-store')
-                self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.send_response(status)
+                    origin = (self.headers.get('Origin') or '').strip()
+                    if origin.lower().startswith(_ALLOWED_ORIGIN_PREFIXES):
+                        self.send_header('Access-Control-Allow-Origin', origin)
+                        self.send_header('Vary', 'Origin')
+                    self.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError, socket.timeout, OSError):
+                    # Client tabs/service workers can disappear between request and
+                    # response. Never keep a server thread alive just to log that.
+                    return
 
             def do_OPTIONS(self) -> None:  # noqa: N802
                 if not self._origin_allowed():
                     self._send(403, {'ok': False, 'error': 'origin_not_allowed'})
                     return
-                self.send_response(204)
-                origin = (self.headers.get('Origin') or '').strip()
-                if origin:
-                    self.send_header('Access-Control-Allow-Origin', origin)
-                    self.send_header('Vary', 'Origin')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-CYBREX-Companion')
-                self.send_header('Access-Control-Max-Age', '600')
-                self.end_headers()
+                try:
+                    self.send_response(204)
+                    origin = (self.headers.get('Origin') or '').strip()
+                    if origin:
+                        self.send_header('Access-Control-Allow-Origin', origin)
+                        self.send_header('Vary', 'Origin')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-CYBREX-Companion')
+                    self.send_header('Access-Control-Max-Age', '600')
+                    self.send_header('Cache-Control', 'no-store')
+                    self.end_headers()
+                except (BrokenPipeError, ConnectionResetError, socket.timeout, OSError):
+                    return
 
             def do_GET(self) -> None:  # noqa: N802
                 if self.path == '/v1/health':
@@ -94,6 +128,10 @@ class BrowserCompanionBridge:
                 if self.headers.get('X-CYBREX-Companion') != '1':
                     self._send(403, {'ok': False, 'error': 'missing_companion_header'})
                     return
+                content_type = (self.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+                if content_type != 'application/json':
+                    self._send(415, {'ok': False, 'error': 'content_type_required'})
+                    return
                 try:
                     length = int(self.headers.get('Content-Length') or '0')
                 except ValueError:
@@ -103,6 +141,15 @@ class BrowserCompanionBridge:
                     return
                 try:
                     raw = self.rfile.read(length)
+                except (socket.timeout, TimeoutError):
+                    self._send(408, {'ok': False, 'error': 'request_timeout'})
+                    return
+                except OSError:
+                    return
+                if len(raw) != length:
+                    self._send(400, {'ok': False, 'error': 'truncated_body'})
+                    return
+                try:
                     payload = json.loads(raw.decode('utf-8'))
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     self._send(400, {'ok': False, 'error': 'invalid_json'})
@@ -115,14 +162,18 @@ class BrowserCompanionBridge:
                 self._send(200, {'ok': True})
 
         try:
-            self._server = ThreadingHTTPServer((self.host, self.port), Handler)
-            self._server.daemon_threads = True
-            self._thread = threading.Thread(
-                target=self._server.serve_forever,
+            server = _CompanionHTTPServer((self.host, self.port), Handler)
+            # Port 0 is useful for tests and diagnostics; persist the actual bound
+            # port so callers can connect to it and stop/rebind deterministically.
+            self.port = int(server.server_address[1])
+            thread = threading.Thread(
+                target=server.serve_forever,
                 name='browser-companion',
                 daemon=True,
             )
-            self._thread.start()
+            self._server = server
+            self._thread = thread
+            thread.start()
             LOGGER.info('Browser companion listening on http://%s:%d', self.host, self.port)
             return True
         except OSError as exc:
@@ -133,11 +184,28 @@ class BrowserCompanionBridge:
 
     def stop(self) -> None:
         server = self._server
+        thread = self._thread
         self._server = None
-        if server is not None:
-            server.shutdown()
-            server.server_close()
         self._thread = None
+        if server is not None:
+            try:
+                server.shutdown()
+            except OSError:
+                pass
+            try:
+                server.server_close()
+            except OSError:
+                pass
+        if (
+            thread is not None
+            and thread is not threading.current_thread()
+            and thread.is_alive()
+        ):
+            thread.join(timeout=2.0)
+        # Exact URLs/titles exist only in memory. Remove them immediately when
+        # the service stops rather than waiting for process teardown or TTL.
+        with self._lock:
+            self._records.clear()
 
     def update(self, payload: Any) -> None:
         if not isinstance(payload, dict):
@@ -268,8 +336,8 @@ class BrowserCompanionBridge:
         expired = [key for key, (seen, _) in self._records.items() if now - seen > self.ttl_secs]
         for key in expired:
             self._records.pop(key, None)
-        if len(self._records) > 100:
-            oldest = sorted(self._records.items(), key=lambda item: item[1][0])[:-100]
+        if len(self._records) > _MAX_RECORDS:
+            oldest = sorted(self._records.items(), key=lambda item: item[1][0])[:-_MAX_RECORDS]
             for key, _ in oldest:
                 self._records.pop(key, None)
 
@@ -301,11 +369,13 @@ class BrowserCompanionBridge:
             number = float(value or 0)
         except (TypeError, ValueError):
             return 0.0
+        if number != number or number in (float('inf'), float('-inf')):
+            return 0.0
         return max(0.0, min(number, 7 * 24 * 3600.0))
 
     @staticmethod
     def _clean_url(value: Any) -> Optional[str]:
-        raw = str(value or '').strip()
+        raw = str(value or '').replace('\x00', '').strip()
         if not raw:
             return None
         try:
@@ -335,3 +405,15 @@ def get_browser_companion(config: Config, start: bool = True) -> Optional[Browse
     if start:
         bridge.start()
     return bridge
+
+
+def stop_browser_companions() -> None:
+    """Stop and forget all shared local bridges owned by this process."""
+    with _BRIDGES_LOCK:
+        bridges = list(_BRIDGES.values())
+        _BRIDGES.clear()
+    for bridge in bridges:
+        try:
+            bridge.stop()
+        except Exception as exc:
+            LOGGER.debug('Could not stop browser companion cleanly: %s', exc)
