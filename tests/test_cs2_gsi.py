@@ -6,6 +6,7 @@ import pytest
 from config import Config
 from cs2_gsi import CS2GSIBridge, install_gsi_config, render_gsi_config
 from detectors.gaming import GamingDetector
+from presence import PresenceBuilder
 
 
 def _config(tmp_path: Path) -> Config:
@@ -124,3 +125,8 @@ def test_cs2_gaming_detector_formats_mode_map_team_and_score(tmp_path):
     assert activity['mode'] == 'Competitive'
     assert activity['team_name'] == 'Counter-Terrorists'
     assert activity['launcher'] == 'Competitive · Mirage · Counter-Terrorists · CT 8–6 T'
+
+    payload = PresenceBuilder(config).build(activity)
+    assert payload['details'] == 'Playing · Counter-Strike 2'
+    assert payload['state'] == 'Competitive · Mirage · Counter-Terrorists · CT 8–6 T'
+    assert payload['large_text'] == 'Counter-Strike 2'
