@@ -5,6 +5,7 @@ import pytest
 from browser_companion import BrowserCompanionBridge
 from config import Config
 from detectors.browser import BrowserDetector
+from detectors.media import MediaDetector
 from privacy import PrivacyRedactor
 
 
@@ -34,7 +35,7 @@ def _snapshot(**overrides):
 def test_bridge_prefers_focused_tab_over_background_media(tmp_path: Path):
     cfg = Config(tmp_path / 'config.yaml')
     bridge = BrowserCompanionBridge(cfg)
-    bridge.update(_snapshot(tab_id='playing', focused=False, visible=True))
+    bridge.update(_snapshot(tab_id='playing', focused=False, visible=False))
     bridge.update(_snapshot(
         tab_id='focused',
         focused=True,
@@ -48,6 +49,11 @@ def test_bridge_prefers_focused_tab_over_background_media(tmp_path: Path):
     assert latest['tab_id'] == 'focused'
     assert latest['service'] == 'GitHub'
 
+    playing = bridge.latest_media('Brave')
+    assert playing is not None
+    assert playing['tab_id'] == 'playing'
+    assert playing['service'] == 'YouTube'
+
 
 def test_bridge_rejects_wrong_protocol_version(tmp_path: Path):
     bridge = BrowserCompanionBridge(Config(tmp_path / 'config.yaml'))
@@ -57,6 +63,7 @@ def test_bridge_rejects_wrong_protocol_version(tmp_path: Path):
 
 def test_browser_detector_prefers_exact_companion_metadata(tmp_path: Path):
     cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('browser_companion.enabled', False)
     detector = BrowserDetector(cfg)
 
     class FakeCompanion:
@@ -79,6 +86,7 @@ def test_browser_detector_prefers_exact_companion_metadata(tmp_path: Path):
 
 def test_private_window_never_reuses_normal_companion_snapshot(tmp_path: Path):
     cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('browser_companion.enabled', False)
     detector = BrowserDetector(cfg)
 
     class FakeCompanion:
@@ -95,6 +103,30 @@ def test_private_window_never_reuses_normal_companion_snapshot(tmp_path: Path):
     assert activity['is_private'] is True
     assert activity['url'] is None
     assert activity['source'] == 'private'
+
+
+def test_media_detector_uses_background_youtube_companion_snapshot(tmp_path: Path, monkeypatch):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('browser_companion.enabled', False)
+    monkeypatch.setattr('platform.system', lambda: 'Linux')
+    monkeypatch.setattr('shutil.which', lambda _command: None)
+    detector = MediaDetector(cfg)
+
+    class FakeCompanion:
+        def latest_media(self):
+            return _snapshot(focused=False, visible=False)
+
+    detector.companion = FakeCompanion()
+    activity = detector.detect({'app_name': 'org.kde.konsole', 'title': 'Konsole'})
+
+    assert activity is not None
+    assert activity['source'] == 'companion'
+    assert activity['player'] == 'Brave'
+    assert activity['service'] == 'YouTube'
+    assert activity['title'] == 'Example channel - Example video'
+    assert activity['position'] == 10
+    assert activity['duration'] == 240
+    assert activity['tab_focused'] is False
 
 
 def test_balanced_privacy_reduces_exact_url_to_domain_by_default(tmp_path: Path):
