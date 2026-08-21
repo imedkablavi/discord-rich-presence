@@ -4,7 +4,7 @@ import logging
 from typing import Optional, Dict, Any
 
 from config import Config
-from cs2_gsi import get_cs2_gsi
+from cs2_gsi import discover_cs2_cfg_dirs, get_cs2_gsi, install_gsi_config
 
 
 class GamingDetector:
@@ -84,6 +84,24 @@ class GamingDetector:
         # GSI is an official, read-only game-state feed. Starting the loopback
         # listener is harmless even before its one-time CS2 cfg is installed.
         self.cs2_gsi = get_cs2_gsi(config, start=True)
+        if self.cs2_gsi and bool(config.get('cs2_gsi.auto_install', True)):
+            self._auto_configure_cs2_gsi()
+
+    def _auto_configure_cs2_gsi(self) -> None:
+        """Make packaged/source installs zero-setup when CS2 is discoverable."""
+        try:
+            locations = discover_cs2_cfg_dirs()
+            if not locations:
+                return
+            install_gsi_config(self.config, locations[0])
+            self.logger.info('Counter-Strike 2 GSI integration is configured')
+        except (OSError, ValueError):
+            # Never break generic game detection because the Steam install is
+            # read-only or unusual. The standalone installer supports --cfg-dir.
+            self.logger.warning(
+                'Counter-Strike 2 GSI auto-setup could not write the game config; '
+                'use scripts/install-cs2-gsi.py for manual setup'
+            )
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not window_info or not self.config.get('rules.enabled_detectors.gaming', False):
