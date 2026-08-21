@@ -23,6 +23,8 @@ def test_reload_rebuilds_from_defaults(tmp_path: Path):
     path.write_text('{}\n', encoding='utf-8')
     cfg.load(path)
     assert cfg.get('privacy.mode') == 'balanced'
+    assert cfg.get('cs2_gsi.enabled') is True
+    assert cfg.get('cs2_gsi.port') == 32192
 
 
 def test_invalid_interval_is_rejected(tmp_path: Path):
@@ -118,6 +120,41 @@ def test_override_urls_must_be_http_or_https(tmp_path: Path):
     )
     with pytest.raises(ValueError, match='override.details_url'):
         Config(path)
+
+
+def test_override_activity_urls_respect_discord_256_character_limit(tmp_path: Path):
+    path = tmp_path / 'config.yaml'
+    long_url = 'https://example.com/' + ('x' * 260)
+    path.write_text(
+        'override:\n'
+        f'  details_url: "{long_url}"\n',
+        encoding='utf-8',
+    )
+    with pytest.raises(ValueError, match='at most 256'):
+        Config(path)
+
+
+def test_cs2_gsi_defaults_and_validation(tmp_path: Path):
+    cfg = Config(tmp_path / 'missing.yaml')
+    assert cfg.get('cs2_gsi.enabled') is True
+    assert cfg.get('cs2_gsi.auto_install') is True
+    assert cfg.get('cs2_gsi.port') == 32192
+    assert cfg.get('cs2_gsi.ttl_secs') == 30
+
+    bad_port = tmp_path / 'bad-cs2-port.yaml'
+    bad_port.write_text('cs2_gsi:\n  port: 80\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='cs2_gsi.port'):
+        Config(bad_port)
+
+    bad_bool = tmp_path / 'bad-cs2-bool.yaml'
+    bad_bool.write_text('cs2_gsi:\n  enabled: "false"\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='cs2_gsi.enabled'):
+        Config(bad_bool)
+
+    bad_ttl = tmp_path / 'bad-cs2-ttl.yaml'
+    bad_ttl.write_text('cs2_gsi:\n  ttl_secs: 2\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='cs2_gsi.ttl_secs'):
+        Config(bad_ttl)
 
 
 def test_party_current_cannot_exceed_party_max(tmp_path: Path):
