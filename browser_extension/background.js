@@ -119,7 +119,10 @@ api.tabs.onActivated.addListener((activeInfo) => {
 
 api.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (!tab?.active) return;
-  if (!changeInfo.status && !changeInfo.url && !changeInfo.title) return;
+  // Do not request the broader `tabs` permission just to inspect URL/title
+  // changes. The content script publishes navigation/DOM changes itself; this
+  // hook only needs a fresh snapshot once page loading reaches completion.
+  if (changeInfo.status !== 'complete') return;
   requestActiveTab(tab.windowId);
 });
 
