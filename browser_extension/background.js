@@ -1,5 +1,6 @@
 const api = globalThis.browser || globalThis.chrome;
 const ENDPOINT = 'http://127.0.0.1:32191/v1/activity';
+const REQUEST_TIMEOUT_MS = 3000;
 
 async function setConnectionBadge(connected) {
   try {
@@ -23,10 +24,13 @@ async function setConnectionBadge(connected) {
 }
 
 async function postPayload(payload) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(ENDPOINT, {
       method: 'POST',
       cache: 'no-store',
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'X-CYBREX-Companion': '1',
@@ -42,6 +46,8 @@ async function postPayload(payload) {
   } catch (_) {
     await setConnectionBadge(false);
     return false;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -49,9 +55,12 @@ async function postSnapshot(snapshot, sender) {
   if (!snapshot || typeof snapshot !== 'object') return;
   const tabId = sender?.tab?.id;
   const windowId = sender?.tab?.windowId;
+  // Browser APIs normally provide a numeric tab ID. Avoid duplicating a full URL
+  // into the local record key on the defensive fallback path.
+  const fallbackId = `window:${windowId ?? 'unknown'}`;
   await postPayload({
     ...snapshot,
-    tab_id: String(tabId ?? `${windowId ?? 'window'}:${snapshot.url || 'unknown'}`),
+    tab_id: String(tabId ?? fallbackId),
   });
 }
 
