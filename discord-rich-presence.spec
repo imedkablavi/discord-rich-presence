@@ -37,7 +37,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # Avoid optional UPX compression for release binaries. It saves little for
+    # this desktop app and can increase antivirus/SmartScreen false positives.
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
