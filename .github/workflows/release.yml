@@ -10,7 +10,28 @@ permissions:
   contents: write
 
 jobs:
+  security-audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install release audit tooling
+        run: python -m pip install "pip-audit>=2.9,<3" "bandit>=1.8,<2"
+      - name: Audit runtime dependencies
+        run: pip-audit -r requirements.txt
+      - name: Scan Python for high-severity security issues
+        if: runner.os == 'Linux' && always()
+        run: bandit -q -r . -x ./tests,./build,./dist -lll
+
   windows:
+    needs: security-audit
     runs-on: windows-latest
     env:
       WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
@@ -31,6 +52,9 @@ jobs:
         if: env.WINDOWS_SIGNING_PFX_BASE64 != ''
         shell: pwsh
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_PASSWORD)) {
+            throw "WINDOWS_SIGNING_PFX_BASE64 is configured but WINDOWS_SIGNING_PFX_PASSWORD is empty"
+          }
           $certPath = Join-Path $env:RUNNER_TEMP "cybrex-signing.pfx"
           [IO.File]::WriteAllBytes(
             $certPath,
@@ -116,6 +140,7 @@ jobs:
           if-no-files-found: error
 
   linux:
+    needs: security-audit
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
@@ -160,6 +185,12 @@ jobs:
         with:
           name: release-linux
           path: release-assets
+      - name: Verify release checksums before publishing
+        run: |
+          cd release-assets
+          sha256sum -c DiscordRichPresence.exe.sha256
+          sha256sum -c CYBREX-Browser-Companion.zip.sha256
+          sha256sum -c CYBREX-DiscordRichPresence-linux-x86_64.sha256
       - name: Publish GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
