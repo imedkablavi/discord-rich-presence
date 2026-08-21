@@ -1,6 +1,7 @@
 """Browser activity detection."""
 
 import logging
+import re
 import urllib.parse
 from typing import Optional, Dict, Any
 
@@ -98,12 +99,20 @@ class BrowserDetector:
 
         raw_title = str(snapshot.get('title', '') or '')
         exact_url = snapshot.get('url')
-        service = (
-            str(snapshot.get('service', '') or '')
-            or self._configured_service(exact_url)
-            or self._detect_service(exact_url, raw_title)
-            or ''
-        )
+        snapshot_service = str(snapshot.get('service', '') or '').strip()
+
+        # Exact URL is authoritative. A stale content-script/service-worker label
+        # from a previously focused tab must never override the current domain
+        # (for example X leaking into a ChatGPT/Firefox activity).
+        if exact_url:
+            service = (
+                self._configured_service(exact_url)
+                or self._detect_service_from_url(exact_url)
+                or ''
+            )
+        else:
+            service = snapshot_service or self._detect_service(raw_title) or ''
+
         page_title = self._extract_page_title(raw_title, browser_name, service or None)
         media = snapshot.get('media') if isinstance(snapshot.get('media'), dict) else {}
 
@@ -160,17 +169,44 @@ class BrowserDetector:
                 return name
         return None
 
-    def _detect_service(self, *values: Any) -> Optional[str]:
-        combined = ' '.join(str(value or '') for value in values).lower()
+    def _detect_service_from_url(self, raw_url: Any) -> Optional[str]:
+        url = str(raw_url or '').strip()
+        if not url:
+            return None
+        lowered = url.lower()
         for service, markers in self.SERVICE_URL_MARKERS.items():
-            if any(marker in combined for marker in markers):
+            if any(marker in lowered for marker in markers):
                 return service
         youtube_markers = self.config.get('rules.youtube_domains', []) or []
-        if any(str(marker).lower() in combined for marker in youtube_markers if marker):
+        if any(str(marker).lower() in lowered for marker in youtube_markers if marker):
             return 'YouTube'
+        return None
+
+    def _detect_service(self, *values: Any) -> Optional[str]:
+        """Best-effort title fallback used only when no exact URL is available."""
+        combined = ' '.join(str(value or '') for value in values).strip().lower()
+        if not combined:
+            return None
+
+        # URL markers remain safe even if a caller passes a URL among the values.
+        url_service = self._detect_service_from_url(combined)
+        if url_service:
+            return url_service
+
+        # Match readable service names as words/phrases rather than substrings.
+        # In particular, never classify an arbitrary title as X simply because
+        # it contains the letter "x".
         for service in self.SERVICES:
-            if service.lower() in combined:
+            if len(service) < 3:
+                continue
+            pattern = rf'(?<!\w){re.escape(service.lower())}(?!\w)'
+            if re.search(pattern, combined):
                 return service
+
+        # X/Twitter needs explicit markers because the one-letter brand cannot
+        # be safely inferred from normal page-title text.
+        if re.search(r'(?<!\w)twitter(?!\w)', combined) or 'x.com' in combined:
+            return 'X'
         return None
 
     def _generate_url(self, service: Optional[str], title: str) -> Optional[str]:
