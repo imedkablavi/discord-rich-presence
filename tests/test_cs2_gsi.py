@@ -34,8 +34,6 @@ def _payload(token: str) -> dict:
             'team_ct': {'score': 8, 'name': 'Secret CT Name'},
             'team_t': {'score': 6, 'name': 'Secret T Name'},
         },
-        # Include fields that our generated cfg deliberately does not request to
-        # prove the parser still discards them if a custom/old cfg sends them.
         'round': {'phase': 'live'},
         'player': {
             'steamid': '76561198000000001',
@@ -158,9 +156,14 @@ def test_cs2_gaming_detector_formats_mode_map_team_and_score(tmp_path):
     assert activity['launcher'] == 'Competitive · Mirage · Counter-Terrorists · CT 8–6 T'
 
     payload = PresenceBuilder(config).build(activity)
-    assert payload['details'] == 'Playing · Counter-Strike 2'
-    assert payload['state'] == 'Competitive · Mirage · Counter-Terrorists · CT 8–6 T'
+    assert payload['details'] == 'Counter-Strike 2 · Competitive'
+    assert payload['state'] == 'Mirage · Counter-Terrorists · 8–6'
     assert payload['large_text'] == 'Counter-Strike 2'
+    assert payload['large_image'].endswith('/steam/apps/730/header.jpg')
+    assert payload['small_text'] == 'Steam'
+    assert payload['buttons'] == [
+        {'label': 'View on Steam', 'url': 'https://store.steampowered.com/app/730/'}
+    ]
 
 
 def test_cs2_steam_app_alias_and_deathmatch_omit_fake_round_score(tmp_path):
@@ -181,3 +184,7 @@ def test_cs2_steam_app_alias_and_deathmatch_omit_fake_round_score(tmp_path):
     assert activity is not None
     assert activity['game_name'] == 'Counter-Strike 2'
     assert activity['launcher'] == 'Deathmatch · Dust II · Terrorists'
+
+    payload = PresenceBuilder(config).build(activity)
+    assert payload['details'] == 'Counter-Strike 2 · Deathmatch'
+    assert payload['state'] == 'Dust II · Terrorists'
