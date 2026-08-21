@@ -9,25 +9,18 @@ discord:
   # Advanced only: set a custom Application ID if you intentionally maintain
   # your own Discord application/assets. Leave empty for the built-in identity.
   application_id_override: ""
-  # Optional buttons: maximum 2, label 1-32 chars, URL max 512 chars.
   buttons: []
 
 privacy:
-  # off: no activity redaction
-  # balanced: redact configured secrets and reduce path exposure
-  # strict: generic descriptions only; browser URLs/buttons are removed
   mode: balanced
-  # Exact URLs from the browser companion. Balanced mode defaults to sharing only
-  # the origin (for example https://youtube.com), not the full page URL.
-  # Values: none, domain, path, full
+  # Exact Companion URLs in Balanced mode: none, domain, path, or full.
+  # domain is the default and shares only e.g. https://www.youtube.com.
   browser_url_mode: domain
   redactions:
     - regex: '(?i)(password|token|secret|key|api[_-]?key)\S*'
     - regex: '([A-Fa-f0-9]{32,})'
   hide_home_paths: true
 
-# How often foreground/media state is checked. RPC updates are sent only when
-# the resulting payload changes. Valid range: 1-3600 seconds.
 update_interval_secs: 2
 
 system:
@@ -35,19 +28,20 @@ system:
   auto_start: false
 
 browser_companion:
-  # Optional browser extension bridge. It binds only to 127.0.0.1 and keeps
-  # recent snapshots in memory; nothing is uploaded by the desktop service.
+  # Optional Chromium/Firefox extension bridge. It listens on loopback only.
   enabled: true
   port: 32191
   ttl_secs: 15
+  # Free declarative support for self-hosted/custom domains. Exact hostnames and
+  # leading *. wildcards are accepted; no custom JavaScript is required.
+  domain_services: {}
+  # Example:
+  # domain_services:
+  #   media.home.example: "Jellyfin"
+  #   "*.corp.example": "Company Portal"
 
 images:
-  # Known applications use external brand artwork by default so the large Rich
-  # Presence image follows the app actually in use. Set false to use only the
-  # Discord Developer Portal asset keys configured below.
   use_external_app_icons: true
-  # Optional overrides take priority over built-in external artwork. A value can
-  # be a Developer Portal asset key or a direct http(s) image URL.
   icon_overrides: {}
   # Example:
   # icon_overrides:
@@ -129,7 +123,6 @@ rules:
     coding: true
     browser: true
     gaming: true
-    # Set false to avoid publishing generic/unknown application window titles.
     application: true
   activity_priority:
     # smart: foreground work beats background media, but foreground media wins.
@@ -144,10 +137,7 @@ rules:
       - browser
       - media
       - application
-  # Clear existing Presence when a known OS/compositor lock screen is foreground.
   clear_on_lock_screen: true
-  # Ignore terminal hook cache entries older than this. 0 disables expiration.
-  # Valid range: 0-604800 (7 days).
   terminal_command_ttl_secs: 21600
   whitelist:
     apps: []
