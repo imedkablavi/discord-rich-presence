@@ -4,11 +4,12 @@ import logging
 import urllib.parse
 from typing import Optional, Dict, Any
 
+from browser_companion import get_browser_companion
 from config import Config
 
 
 class BrowserDetector:
-    """Detect browser activity without pretending inferred URLs are exact URLs."""
+    """Detect browser activity, preferring exact companion metadata when available."""
 
     BROWSERS = {
         'firefox': 'Firefox',
@@ -22,13 +23,30 @@ class BrowserDetector:
     }
 
     SERVICES = (
-        'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu',
-        'SoundCloud', 'Spotify', 'Twitch', 'GitHub'
+        'YouTube Music', 'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu',
+        'SoundCloud', 'Spotify', 'Twitch', 'GitHub', 'Reddit', 'ChatGPT', 'X'
     )
+
+    SERVICE_URL_MARKERS = {
+        'YouTube Music': ('music.youtube.com',),
+        'YouTube': ('youtube.com', 'youtu.be'),
+        'Netflix': ('netflix.com',),
+        'Prime Video': ('primevideo.com', 'amazon.com/gp/video'),
+        'Disney+': ('disneyplus.com',),
+        'Hulu': ('hulu.com',),
+        'SoundCloud': ('soundcloud.com',),
+        'Spotify': ('open.spotify.com', 'spotify.com'),
+        'Twitch': ('twitch.tv',),
+        'GitHub': ('github.com',),
+        'Reddit': ('reddit.com',),
+        'ChatGPT': ('chatgpt.com',),
+        'X': ('x.com', 'twitter.com'),
+    }
 
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.companion = get_browser_companion(config, start=True)
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not window_info:
@@ -47,15 +65,15 @@ class BrowserDetector:
         if not browser_name:
             return None
 
+        # Never reuse a normal-tab companion snapshot while a private window is
+        # foreground. Browser extensions are normally disabled in private mode,
+        # so the window marker remains the conservative source of truth here.
         if self._is_private_browsing(raw_title):
-            return {
-                'type': 'browser',
-                'browser_name': browser_name,
-                'is_private': True,
-                'page_title': '',
-                'service': '',
-                'url': None,
-            }
+            return self._private_activity(browser_name)
+
+        companion_activity = self._from_companion(browser_name)
+        if companion_activity:
+            return companion_activity
 
         service = self._detect_service(raw_title)
         page_title = self._extract_page_title(raw_title, browser_name, service)
@@ -68,26 +86,73 @@ class BrowserDetector:
             'page_title': page_title,
             'service': service or '',
             'url': url,
+            'url_is_exact': False,
+            'source': 'window',
         }
 
-    def _detect_service(self, raw_title: str) -> Optional[str]:
-        title_lower = raw_title.lower()
+    def _from_companion(self, browser_name: str) -> Optional[Dict[str, Any]]:
+        if not self.companion:
+            return None
+        snapshot = self.companion.latest(browser_name)
+        if not snapshot:
+            return None
+        if bool(snapshot.get('private')):
+            return self._private_activity(browser_name)
+
+        raw_title = str(snapshot.get('title', '') or '')
+        exact_url = snapshot.get('url')
+        service = str(snapshot.get('service', '') or '') or self._detect_service(exact_url, raw_title)
+        page_title = self._extract_page_title(raw_title, browser_name, service or None)
+        media = snapshot.get('media') if isinstance(snapshot.get('media'), dict) else {}
+
+        return {
+            'type': 'browser',
+            'browser_name': browser_name,
+            'is_private': False,
+            'page_title': page_title,
+            'service': service,
+            'url': exact_url,
+            'url_is_exact': bool(exact_url),
+            'source': 'companion',
+            'media': media,
+        }
+
+    @staticmethod
+    def _private_activity(browser_name: str) -> Dict[str, Any]:
+        return {
+            'type': 'browser',
+            'browser_name': browser_name,
+            'is_private': True,
+            'page_title': '',
+            'service': '',
+            'url': None,
+            'url_is_exact': False,
+            'source': 'private',
+        }
+
+    def _detect_service(self, *values: Any) -> Optional[str]:
+        combined = ' '.join(str(value or '') for value in values).lower()
+        for service, markers in self.SERVICE_URL_MARKERS.items():
+            if any(marker in combined for marker in markers):
+                return service
         youtube_markers = self.config.get('rules.youtube_domains', []) or []
-        if any(str(marker).lower() in title_lower for marker in youtube_markers if marker):
+        if any(str(marker).lower() in combined for marker in youtube_markers if marker):
             return 'YouTube'
         for service in self.SERVICES:
-            if service.lower() in title_lower:
+            if service.lower() in combined:
                 return service
         return None
 
     def _generate_url(self, service: Optional[str], title: str) -> Optional[str]:
-        """Generate a search/home URL. This is intentionally not presented as the exact tab URL."""
+        """Generate a search/home URL only when the companion has no exact tab URL."""
         if not service:
             return None
         query = urllib.parse.quote(title)
 
         if service == 'YouTube':
             return f"https://www.youtube.com/results?search_query={query}" if title else 'https://www.youtube.com'
+        if service == 'YouTube Music':
+            return f"https://music.youtube.com/search?q={query}" if title else 'https://music.youtube.com'
         if service == 'SoundCloud':
             return f"https://soundcloud.com/search?q={query}" if title else 'https://soundcloud.com'
         if service == 'Netflix':
@@ -100,6 +165,12 @@ class BrowserDetector:
             return f"https://open.spotify.com/search/{query}" if title else 'https://open.spotify.com'
         if service == 'GitHub':
             return 'https://github.com'
+        if service == 'Reddit':
+            return 'https://www.reddit.com'
+        if service == 'ChatGPT':
+            return 'https://chatgpt.com'
+        if service == 'X':
+            return 'https://x.com'
         if service == 'Disney+':
             return 'https://www.disneyplus.com'
         if service == 'Hulu':
