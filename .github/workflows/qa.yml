@@ -68,7 +68,9 @@ jobs:
           assert manifest['manifest_version'] == 3
           assert manifest['background']['service_worker'] == 'background.js'
           assert 'background.js' in manifest['background']['scripts']
-          assert manifest['host_permissions'] == ['http://127.0.0.1:32191/*']
+          assert set(manifest['permissions']) == {'tabs', 'storage'}
+          assert manifest['host_permissions'] == ['http://127.0.0.1/*']
+          assert manifest['options_ui']['page'] == 'options.html'
           matches = set(manifest['content_scripts'][0]['matches'])
           assert matches == {'http://*/*', 'https://*/*'}
           assert manifest['content_scripts'][0]['all_frames'] is False
@@ -76,18 +78,31 @@ jobs:
           background = Path('browser_extension/background.js').read_text(encoding='utf-8')
           assert 'REQUEST_TIMEOUT_MS' in background
           assert 'signal: controller.signal' in background
+          assert 'api.storage.local.get' in background
           assert 'snapshot.url ||' not in background
           PY
-      - name: Validate JavaScript syntax
+      - name: Validate JavaScript and helper syntax
         run: |
           node --check browser_extension/background.js
           node --check browser_extension/content.js
+          node --check browser_extension/options.js
+          bash -n scripts/prepare-browser-companion.sh
+      - name: Verify clean unpacked helper
+        run: |
+          tmp="$(mktemp -d)"
+          bash scripts/prepare-browser-companion.sh "$tmp/CYBREX-Browser-Companion"
+          for file in manifest.json background.js content.js options.html options.js README.md; do
+            test -f "$tmp/CYBREX-Browser-Companion/$file"
+          done
+          test "$(find "$tmp/CYBREX-Browser-Companion" -maxdepth 1 -type f | wc -l)" -eq 6
       - name: Package clean companion extension
         run: |
           zip -j CYBREX-Browser-Companion.zip \
             browser_extension/manifest.json \
             browser_extension/background.js \
             browser_extension/content.js \
+            browser_extension/options.html \
+            browser_extension/options.js \
             browser_extension/README.md
           unzip -l CYBREX-Browser-Companion.zip
           if unzip -l CYBREX-Browser-Companion.zip | grep -E '(__pycache__|\.pyc|/\.git)'; then
