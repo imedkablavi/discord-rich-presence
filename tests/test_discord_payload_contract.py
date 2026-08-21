@@ -60,6 +60,40 @@ def test_legacy_rpc_drops_dynamic_name_instead_of_promising_app_name_override():
     assert payload['state'] == 'Mirage'
 
 
+def test_clickable_activity_urls_over_discord_limit_are_dropped():
+    long_url = 'https://example.test/' + ('a' * 240)
+    assert len(long_url) > 256
+
+    payload = sanitize_rpc_payload({
+        'details': 'A valid details field',
+        'state': 'A valid state field',
+        'details_url': long_url,
+        'state_url': long_url,
+        'large_url': long_url,
+        'small_url': long_url,
+        'large_image': 'app',
+    })
+
+    assert 'details_url' not in payload
+    assert 'state_url' not in payload
+    assert 'large_url' not in payload
+    assert 'small_url' not in payload
+    assert payload['details'] == 'A valid details field'
+    assert payload['state'] == 'A valid state field'
+
+
+def test_button_url_keeps_separate_512_character_allowance():
+    url = 'https://example.test/' + ('a' * 300)
+    assert 256 < len(url) <= 512
+
+    payload = sanitize_rpc_payload({
+        'details': 'Example',
+        'buttons': [{'label': 'Open', 'url': url}],
+    })
+
+    assert payload['buttons'] == [{'label': 'Open', 'url': url}]
+
+
 def test_steam_game_card_prefers_game_artwork_and_store_button(tmp_path: Path):
     config = Config(tmp_path / 'config.yaml')
     payload = PresenceBuilder(config).build({
