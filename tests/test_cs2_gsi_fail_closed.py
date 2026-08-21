@@ -8,6 +8,46 @@ import cs2_gsi as cs2_gsi_module
 import detectors.gaming as gaming_module
 
 
+def test_malformed_gsi_enabled_value_fails_closed(monkeypatch, tmp_path):
+    config = Config(tmp_path / 'config.yaml')
+    config.set('rules.enabled_detectors.gaming', True)
+    config.set('cs2_gsi.enabled', 'false')
+
+    get_bridge = Mock()
+    monkeypatch.setattr(gaming_module, 'get_cs2_gsi', get_bridge)
+
+    detector = gaming_module.GamingDetector(config)
+
+    assert detector.cs2_gsi is None
+    get_bridge.assert_not_called()
+
+
+def test_malformed_auto_install_value_does_not_write_game_config(monkeypatch, tmp_path):
+    config = Config(tmp_path / 'config.yaml')
+    config.set('rules.enabled_detectors.gaming', True)
+    config.set('cs2_gsi.enabled', True)
+    config.set('cs2_gsi.auto_install', 'true')
+
+    candidate = Mock()
+    candidate.start.return_value = True
+    monkeypatch.setattr(
+        gaming_module,
+        'get_cs2_gsi',
+        lambda _config, start=False: candidate,
+    )
+    discover = Mock(return_value=[tmp_path / 'cfg'])
+    install = Mock()
+    monkeypatch.setattr(gaming_module, 'discover_cs2_cfg_dirs', discover)
+    monkeypatch.setattr(gaming_module, 'install_gsi_config', install)
+
+    detector = gaming_module.GamingDetector(config)
+
+    assert detector.cs2_gsi is candidate
+    candidate.start.assert_called_once_with()
+    discover.assert_not_called()
+    install.assert_not_called()
+
+
 def test_auto_install_is_skipped_and_stale_cfg_removed_when_listener_cannot_bind(
     monkeypatch,
     tmp_path,
