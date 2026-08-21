@@ -1,8 +1,8 @@
 (() => {
   const api = globalThis.browser || globalThis.chrome;
   const SERVICE_MAP = [
-    [/^(www\.)?youtube\.com$/i, 'YouTube'],
     [/^music\.youtube\.com$/i, 'YouTube Music'],
+    [/^(www\.)?youtube\.com$/i, 'YouTube'],
     [/^(www\.)?netflix\.com$/i, 'Netflix'],
     [/^(www\.)?twitch\.tv$/i, 'Twitch'],
     [/^open\.spotify\.com$/i, 'Spotify'],
@@ -18,6 +18,9 @@
 
   let lastSent = '';
   let lastSentAt = 0;
+  let lastBuildAt = 0;
+  let publishTimer = null;
+  let mediaWasPlaying = false;
 
   function detectBrowser() {
     const ua = navigator.userAgent || '';
@@ -81,6 +84,8 @@
   function buildSnapshot() {
     const service = detectService();
     const element = bestMediaElement();
+    const media = mediaMetadata(service, element);
+    mediaWasPlaying = media.playing;
     return {
       version: 1,
       browser: detectBrowser(),
@@ -90,16 +95,22 @@
       private: Boolean(api?.extension?.inIncognitoContext),
       focused: document.hasFocus(),
       visible: document.visibilityState === 'visible',
-      media: mediaMetadata(service, element),
+      media,
     };
   }
 
   function publish(force = false) {
     if (!api?.runtime?.sendMessage) return;
+    const now = Date.now();
+    // Mutation-heavy pages can trigger thousands of callbacks. Avoid walking
+    // the DOM repeatedly when we already built a snapshot moments ago.
+    if (!force && now - lastBuildAt < 500) return;
+    if (!force && document.visibilityState !== 'visible' && !mediaWasPlaying) return;
+    lastBuildAt = now;
+
     const snapshot = buildSnapshot();
     if (!snapshot.visible && !snapshot.media.playing) return;
     const serialized = JSON.stringify(snapshot);
-    const now = Date.now();
     if (!force && serialized === lastSent && now - lastSentAt < 5000) return;
     if (!force && now - lastSentAt < 1500) return;
     lastSent = serialized;
@@ -110,6 +121,14 @@
     } catch (_) {
       // Extension may be reloading; the next event will retry.
     }
+  }
+
+  function schedulePublish() {
+    if (publishTimer !== null) return;
+    publishTimer = setTimeout(() => {
+      publishTimer = null;
+      publish(false);
+    }, 300);
   }
 
   api?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
@@ -127,9 +146,11 @@
   window.addEventListener('popstate', () => publish(true));
   window.addEventListener('hashchange', () => publish(true));
 
-  const observer = new MutationObserver(() => publish(false));
+  const observer = new MutationObserver(schedulePublish);
   observer.observe(document.documentElement, { subtree: true, childList: true });
 
-  setInterval(() => publish(false), 2000);
+  setInterval(() => {
+    if (document.visibilityState === 'visible' || mediaWasPlaying) publish(false);
+  }, 2000);
   publish(true);
 })();
