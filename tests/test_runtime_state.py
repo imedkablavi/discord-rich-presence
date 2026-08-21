@@ -1,8 +1,10 @@
 import json
 import os
+import stat
 import time
 
 import psutil
+import pytest
 
 from runtime_state import RuntimeState
 
@@ -95,3 +97,24 @@ def test_stop_request_targets_exact_live_instance(tmp_path):
         assert abs(request['create_time'] - service_runtime.create_time) < 1.0
     finally:
         service_runtime.release()
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX file modes are not Windows ACLs')
+def test_runtime_state_forces_private_permissions_even_with_open_umask(tmp_path):
+    runtime = RuntimeState(tmp_path / 'runtime')
+    previous_umask = os.umask(0)
+    try:
+        assert runtime.acquire() is True
+        runtime.update(activity='Sensitive activity title')
+        controller = RuntimeState(runtime.runtime_dir)
+        assert controller.request_stop() is True
+    finally:
+        os.umask(previous_umask)
+
+    try:
+        assert stat.S_IMODE(runtime.runtime_dir.stat().st_mode) == 0o700
+        assert stat.S_IMODE(runtime.lock_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(runtime.status_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(runtime.stop_path.stat().st_mode) == 0o600
+    finally:
+        runtime.release()
