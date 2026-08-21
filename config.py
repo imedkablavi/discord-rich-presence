@@ -30,6 +30,9 @@ DEFAULT_CONFIG = {
     },
     'privacy': {
         'mode': 'balanced',
+        # Exact URLs from the browser companion are reduced to their origin by
+        # default. Options: none, domain, path, full.
+        'browser_url_mode': 'domain',
         'redactions': [
             {'regex': r'(?i)(password|token|secret|key|api[_-]?key)\S*'},
             {'regex': r'([A-Fa-f0-9]{32,})'},
@@ -40,6 +43,12 @@ DEFAULT_CONFIG = {
     'system': {
         'start_minimized': False,
         'auto_start': False
+    },
+    'browser_companion': {
+        # Loopback-only bridge for the optional Chromium/Firefox extension.
+        'enabled': True,
+        'port': 32191,
+        'ttl_secs': 15,
     },
     'images': {
         'use_external_app_icons': True,
@@ -85,6 +94,12 @@ DEFAULT_CONFIG = {
         'enabled_detectors': {
             'media': True, 'terminal': True, 'coding': True,
             'browser': True, 'gaming': True, 'application': True
+        },
+        'activity_priority': {
+            # smart: foreground work beats background media, while media wins
+            # when its own player/browser is the foreground application.
+            'policy': 'smart',
+            'custom_order': ['gaming', 'terminal', 'coding', 'browser', 'media', 'application'],
         },
         'terminal_command_ttl_secs': 21600,
         'clear_on_lock_screen': True,
@@ -252,6 +267,9 @@ class Config:
         mode = privacy.get('mode', 'balanced')
         if mode not in {'off', 'balanced', 'strict'}:
             raise ValueError("privacy.mode must be one of: off, balanced, strict")
+        browser_url_mode = str(privacy.get('browser_url_mode', 'domain') or 'domain').lower()
+        if browser_url_mode not in {'none', 'domain', 'path', 'full'}:
+            raise ValueError('privacy.browser_url_mode must be one of: none, domain, path, full')
         if not isinstance(privacy.get('hide_home_paths', True), bool):
             raise ValueError('privacy.hide_home_paths must be true or false')
         redactions = privacy.get('redactions', []) or []
@@ -277,6 +295,23 @@ class Config:
         for key in ('start_minimized', 'auto_start'):
             if not isinstance(system.get(key, False), bool):
                 raise ValueError(f'system.{key} must be true or false')
+
+        companion = data.get('browser_companion', {})
+        if not isinstance(companion, dict):
+            raise ValueError('browser_companion must be an object')
+        if not isinstance(companion.get('enabled', True), bool):
+            raise ValueError('browser_companion.enabled must be true or false')
+        port = companion.get('port', 32191)
+        if isinstance(port, bool) or not isinstance(port, int) or port < 1024 or port > 65535:
+            raise ValueError('browser_companion.port must be an integer between 1024 and 65535')
+        companion_ttl = companion.get('ttl_secs', 15)
+        if (
+            isinstance(companion_ttl, bool)
+            or not isinstance(companion_ttl, (int, float))
+            or companion_ttl < 2
+            or companion_ttl > 300
+        ):
+            raise ValueError('browser_companion.ttl_secs must be between 2 and 300 seconds')
 
         images = data.get('images', {})
         if not isinstance(images, dict):
@@ -311,6 +346,24 @@ class Config:
         for key in ('media', 'terminal', 'coding', 'browser', 'gaming', 'application'):
             if not isinstance(detectors.get(key, True), bool):
                 raise ValueError(f'rules.enabled_detectors.{key} must be true or false')
+
+        priority = rules.get('activity_priority', {})
+        if not isinstance(priority, dict):
+            raise ValueError('rules.activity_priority must be an object')
+        priority_policy = str(priority.get('policy', 'smart') or 'smart').lower()
+        if priority_policy not in {'smart', 'foreground_first', 'media_first', 'custom'}:
+            raise ValueError(
+                'rules.activity_priority.policy must be one of: smart, foreground_first, media_first, custom'
+            )
+        custom_order = priority.get('custom_order', []) or []
+        Config._validate_string_list(custom_order, 'rules.activity_priority.custom_order')
+        known_priority_kinds = {'gaming', 'terminal', 'coding', 'browser', 'media', 'application'}
+        normalized_order = [str(item).lower() for item in custom_order]
+        if any(item not in known_priority_kinds for item in normalized_order):
+            raise ValueError('rules.activity_priority.custom_order contains an unknown activity type')
+        if len(normalized_order) != len(set(normalized_order)):
+            raise ValueError('rules.activity_priority.custom_order cannot contain duplicates')
+
         ttl = rules.get('terminal_command_ttl_secs', 21600)
         if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or ttl < 0 or ttl > 604800:
             raise ValueError('rules.terminal_command_ttl_secs must be between 0 and 604800')
