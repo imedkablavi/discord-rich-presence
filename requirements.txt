@@ -3,7 +3,10 @@ pypresence==4.6.2
 PyYAML>=6.0.3,<7
 customtkinter>=5.2,<6
 pystray>=0.19.5,<1
-Pillow>=10,<12
+# Pillow 12.3.0 includes fixes for the 2026 advisories affecting the older
+# 11.x line while retaining Python 3.10 support. Keep the next major release
+# out until its Python/runtime compatibility is part of the supported matrix.
+Pillow>=12.3,<13
 psutil>=7.2.2,<8
 
 # Linux media integration
