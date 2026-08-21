@@ -55,6 +55,7 @@ def test_playerctl_backend_reads_playing_track_in_one_process(tmp_path: Path, mo
         'is_playing': True,
         'position': 42,
         'duration': 240,
+        'source': 'mpris',
     }
     assert len(calls) == 1
     assert calls[0][0:3] == ['playerctl', '--all-players', 'metadata']
