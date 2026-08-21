@@ -17,6 +17,10 @@ privacy:
   # balanced: redact configured secrets and reduce path exposure
   # strict: generic descriptions only; browser URLs/buttons are removed
   mode: balanced
+  # Exact URLs from the browser companion. Balanced mode defaults to sharing only
+  # the origin (for example https://youtube.com), not the full page URL.
+  # Values: none, domain, path, full
+  browser_url_mode: domain
   redactions:
     - regex: '(?i)(password|token|secret|key|api[_-]?key)\S*'
     - regex: '([A-Fa-f0-9]{32,})'
@@ -29,6 +33,13 @@ update_interval_secs: 2
 system:
   start_minimized: false
   auto_start: false
+
+browser_companion:
+  # Optional browser extension bridge. It binds only to 127.0.0.1 and keeps
+  # recent snapshots in memory; nothing is uploaded by the desktop service.
+  enabled: true
+  port: 32191
+  ttl_secs: 15
 
 images:
   # Known applications use external brand artwork by default so the large Rich
@@ -120,6 +131,19 @@ rules:
     gaming: true
     # Set false to avoid publishing generic/unknown application window titles.
     application: true
+  activity_priority:
+    # smart: foreground work beats background media, but foreground media wins.
+    # foreground_first: always favor foreground terminal/code/browser over media.
+    # media_first: preserve the old background-media-first behavior.
+    # custom: use custom_order below.
+    policy: smart
+    custom_order:
+      - gaming
+      - terminal
+      - coding
+      - browser
+      - media
+      - application
   # Clear existing Presence when a known OS/compositor lock screen is foreground.
   clear_on_lock_screen: true
   # Ignore terminal hook cache entries older than this. 0 disables expiration.
