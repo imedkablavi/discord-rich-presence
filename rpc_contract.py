@@ -9,9 +9,11 @@ _TEXT_ALIASES = {'x': 'X.com', 'c': 'C language'}
 _TEXT_KEYS = ('details', 'state', 'large_text', 'small_text')
 _URL_KEYS = ('details_url', 'state_url', 'large_url', 'small_url')
 _ASSET_KEYS = ('large_image', 'small_image')
+_DISCORD_URL_MAX = 256
+_BUTTON_URL_MAX = 512
 
 
-def _http_url(value: Any, limit: int = 512) -> str | None:
+def _http_url(value: Any, limit: int) -> str | None:
     text = str(value or '').strip().strip('`')
     if not text or len(text) > limit:
         return None
@@ -21,13 +23,7 @@ def _http_url(value: Any, limit: int = 512) -> str | None:
 
 
 def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a payload that stays inside pypresence/legacy Discord RPC contracts.
-
-    Discord's newer Social SDK supports a dynamic Activity name, but the legacy
-    IPC path used by pypresence does not reliably change the registered
-    application name in the Discord card. Drop that field here so callers do not
-    mistake it for a supported branding override on this transport.
-    """
+    """Return a payload that stays inside pypresence/legacy Discord RPC contracts."""
     result = {key: value for key, value in dict(payload or {}).items() if value is not None}
     result.pop('name', None)
 
@@ -54,7 +50,7 @@ def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     for key in _URL_KEYS:
         if key not in result:
             continue
-        url = _http_url(result[key])
+        url = _http_url(result[key], _DISCORD_URL_MAX)
         if url is None:
             result.pop(key, None)
         else:
@@ -68,7 +64,7 @@ def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if not isinstance(button, dict):
                     continue
                 label = str(button.get('label', '')).strip()
-                url = _http_url(button.get('url'))
+                url = _http_url(button.get('url'), _BUTTON_URL_MAX)
                 if 1 <= len(label) <= 32 and url:
                     candidate = {'label': label, 'url': url}
                     if candidate not in safe_buttons:
