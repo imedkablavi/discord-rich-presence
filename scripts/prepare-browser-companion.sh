@@ -12,7 +12,7 @@ fi
 DOWNLOAD_DIR="${DOWNLOAD_DIR:-$HOME/Downloads}"
 DEST_DIR="${1:-$DOWNLOAD_DIR/CYBREX-Browser-Companion}"
 
-required_files=(manifest.json background.js content.js README.md)
+required_files=(manifest.json background.js content.js options.html options.js README.md)
 for file in "${required_files[@]}"; do
     if [[ ! -f "$SOURCE_DIR/$file" ]]; then
         printf 'Missing Browser Companion file: %s\n' "$SOURCE_DIR/$file" >&2
@@ -29,3 +29,4 @@ done
 printf '\nBrowser Companion prepared successfully.\n'
 printf 'In Brave, open brave://extensions, enable Developer mode, choose Load unpacked, and select:\n\n%s\n\n' "$DEST_DIR"
 printf 'Do not select the discord-rich-presence repository root.\n'
+printf 'If you change browser_companion.port, open the extension Options page and set the same port.\n'
