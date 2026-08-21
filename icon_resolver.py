@@ -80,6 +80,18 @@ class IconResolver:
         'x': 'x.com',
         'x.com': 'x.com',
         'steam': 'steampowered.com',
+        'epic': 'epicgames.com',
+        'epic games': 'epicgames.com',
+        'epic games launcher': 'epicgames.com',
+        'heroic': 'heroicgameslauncher.com',
+        'heroic games launcher': 'heroicgameslauncher.com',
+        'gog': 'gog.com',
+        'gog galaxy': 'gog.com',
+        'battle.net': 'battle.net',
+        'ubisoft connect': 'ubisoft.com',
+        'ea desktop': 'ea.com',
+        'riot client': 'riotgames.com',
+        'xbox': 'xbox.com',
         'discord': 'discord.com',
     }
 
