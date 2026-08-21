@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,9 @@ from config import Config
 from cs2_gsi import CS2GSIBridge, install_gsi_config, render_gsi_config
 from detectors.gaming import GamingDetector
 from presence import PresenceBuilder
+
+
+VALID_TEST_TOKEN = 'A' * 43
 
 
 def _config(tmp_path: Path) -> Config:
@@ -76,8 +80,17 @@ def test_cs2_gsi_rejects_wrong_token_and_retains_only_presence_fields(tmp_path):
     assert 'Secret CT Name' not in serialized
 
 
+def test_cs2_gsi_requires_counter_strike_appid(tmp_path):
+    config = _config(tmp_path)
+    bridge = CS2GSIBridge(config)
+    payload = _payload(bridge.token)
+    payload['provider']['appid'] = 570
+    with pytest.raises(ValueError, match='unexpected_appid'):
+        bridge.update(payload)
+
+
 def test_cs2_gsi_config_requests_only_minimum_match_context():
-    rendered = render_gsi_config(32192, 'test-token')
+    rendered = render_gsi_config(32192, VALID_TEST_TOKEN)
     assert 'http://127.0.0.1:32192/v1/cs2' in rendered
     assert '"map" "1"' in rendered
     assert '"round" "1"' in rendered
@@ -88,6 +101,11 @@ def test_cs2_gsi_config_requests_only_minimum_match_context():
     assert 'player_weapons' not in rendered
 
 
+def test_cs2_gsi_rejects_cfg_token_injection():
+    with pytest.raises(ValueError, match='authentication token'):
+        render_gsi_config(32192, 'bad-token"\n"allplayers" "1"')
+
+
 def test_cs2_installer_writes_authenticated_cfg_and_private_token(tmp_path):
     config = _config(tmp_path)
     cfg_dir = tmp_path / 'game' / 'csgo' / 'cfg'
@@ -95,11 +113,15 @@ def test_cs2_installer_writes_authenticated_cfg_and_private_token(tmp_path):
 
     target = install_gsi_config(config, cfg_dir)
     text = target.read_text(encoding='utf-8')
-    token = (tmp_path / 'cs2_gsi_token').read_text(encoding='utf-8').strip()
+    token_path = tmp_path / 'cs2_gsi_token'
+    token = token_path.read_text(encoding='utf-8').strip()
     assert target.name == 'gamestate_integration_cybrex.cfg'
     assert token
     assert token in text
     assert 'allplayers' not in text
+    if os.name == 'posix':
+        assert target.stat().st_mode & 0o777 == 0o600
+        assert token_path.stat().st_mode & 0o777 == 0o600
 
 
 def test_cs2_gaming_detector_formats_mode_map_team_and_score(tmp_path):
