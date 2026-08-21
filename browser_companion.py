@@ -146,10 +146,20 @@ class BrowserCompanionBridge:
         if version != _SUPPORTED_VERSION:
             raise ValueError('unsupported_version')
 
-        browser = self._clean_text(payload.get('browser'), 40)
         tab_id = self._clean_text(payload.get('tab_id'), 80)
-        if not browser or not tab_id:
-            raise ValueError('browser_and_tab_id_required')
+        if not tab_id:
+            raise ValueError('tab_id_required')
+
+        if bool(payload.get('removed')):
+            with self._lock:
+                stale = [key for key in self._records if key[1] == tab_id]
+                for key in stale:
+                    self._records.pop(key, None)
+            return
+
+        browser = self._clean_text(payload.get('browser'), 40)
+        if not browser:
+            raise ValueError('browser_required')
 
         url = self._clean_url(payload.get('url'))
         media = payload.get('media') if isinstance(payload.get('media'), dict) else {}
@@ -215,8 +225,6 @@ class BrowserCompanionBridge:
             ]
             if not candidates:
                 return None
-            # A playing tab that is currently focused is strongest. Otherwise
-            # recency decides between multiple background players.
             _, selected = max(
                 candidates,
                 key=lambda item: (bool(item[1].get('focused')), item[0]),
