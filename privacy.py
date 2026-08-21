@@ -70,11 +70,17 @@ class PrivacyRedactor:
             if safe_title != raw_title:
                 result['url'] = None
             elif bool(result.get('url_is_exact')):
+                # Exact Companion URLs have their own structured sanitizer below.
+                # Do not run the generic text regexes over the serialized URL a
+                # second time or keys such as access_token become malformed.
                 result['url'] = self._sanitize_exact_browser_url(result.get('url'))
 
         for key, value in list(result.items()):
-            if isinstance(value, str):
-                result[key] = self._redact_sensitive_patterns(value)
+            if not isinstance(value, str):
+                continue
+            if activity_type == 'browser' and key == 'url':
+                continue
+            result[key] = self._redact_sensitive_patterns(value)
         return result
 
     def _sanitize_exact_browser_url(self, value: Any) -> Optional[str]:
