@@ -2,7 +2,7 @@
 
 The Browser Companion is optional. It gives the desktop service exact browser-tab and media context that foreground-window titles and MPRIS often cannot provide reliably.
 
-It does not connect to Discord itself. It sends short-lived activity snapshots only to the local desktop service over `127.0.0.1:32191`.
+It does not connect to Discord itself. It sends short-lived activity snapshots only to the local desktop service over `127.0.0.1`. The default bridge port is `32191`.
 
 ## What it adds
 
@@ -18,13 +18,20 @@ It does not connect to Discord itself. It sends short-lived activity snapshots o
 
 The extension runs its content script only on normal `http://` and `https://` pages. It does not request access to `file://` pages.
 
-It requests the browser `tabs` permission because the background component needs the active tab ID/window ID and must request fresh snapshots when tab focus changes. Its only explicit network host permission is:
+It requests:
+
+- `tabs` so the background component can follow active-tab/window changes and request fresh snapshots;
+- `storage` to save only the local bridge port selected in the Options page.
+
+Its only explicit network host permission is:
 
 ```text
-http://127.0.0.1:32191/*
+http://127.0.0.1/*
 ```
 
-The background component is not granted arbitrary cross-origin network access. The desktop bridge is loopback-only, and extension requests are aborted after a short timeout if the local service is unavailable.
+That permission is limited to the IPv4 loopback host. It is intentionally written without an explicit port so the same manifest works in Chromium-family browsers and Firefox, and so a user can move the local bridge when the default port is occupied.
+
+The background component is not granted arbitrary cross-origin network access. Extension requests are aborted after a short timeout if the local service is unavailable.
 
 ## Privacy model
 
@@ -44,7 +51,7 @@ For the simplest setup, especially when Brave/Chrome is installed as a Flatpak, 
 bash scripts/prepare-browser-companion.sh
 ```
 
-The helper copies only the extension files to a clean `CYBREX-Browser-Companion` directory in the user's Downloads folder and prints the exact directory to select.
+The helper copies only the required extension files to a clean `CYBREX-Browser-Companion` directory in the user's Downloads folder and prints the exact directory to select.
 
 Do **not** choose the `discord-rich-presence` repository root in **Load unpacked**. The repository contains Python directories such as `__pycache__`; Chromium-family browsers reject reserved extension filenames beginning with `_` when they are inside the selected extension directory.
 
@@ -72,6 +79,22 @@ After the extension is loaded, reload it from the browser's extension page whene
 4. Select `manifest.json` from this directory.
 
 The manifest intentionally includes both the Manifest V3 service-worker background entry used by Chromium-family browsers and the background-script fallback used by Firefox.
+
+## Change the bridge port
+
+The desktop configuration and extension must use the same port.
+
+Desktop config:
+
+```yaml
+browser_companion:
+  enabled: true
+  port: 32191
+```
+
+If you change that value, open the extension's **Options** page and enter the same port. Use **Test connection** there to verify that the desktop bridge is reachable.
+
+The extension stores only this port number in `storage.local`; it does not persist the URLs/titles it sends to the desktop service.
 
 ## Public store release
 
