@@ -3,8 +3,9 @@
 import logging
 import re
 import shlex
+import urllib.parse
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from config import Config
 
@@ -68,11 +69,57 @@ class PrivacyRedactor:
             result['page_title'] = safe_title
             if safe_title != raw_title:
                 result['url'] = None
+            elif bool(result.get('url_is_exact')):
+                result['url'] = self._sanitize_exact_browser_url(result.get('url'))
 
         for key, value in list(result.items()):
             if isinstance(value, str):
                 result[key] = self._redact_sensitive_patterns(value)
         return result
+
+    def _sanitize_exact_browser_url(self, value: Any) -> Optional[str]:
+        """Limit exact companion URLs according to the balanced-mode URL policy."""
+        raw = str(value or '').strip()
+        if not raw:
+            return None
+        policy = str(self.config.get('privacy.browser_url_mode', 'domain') or 'domain').lower()
+        if policy == 'none':
+            return None
+        if policy not in {'domain', 'path', 'full'}:
+            policy = 'domain'
+
+        try:
+            parsed = urllib.parse.urlsplit(raw)
+        except ValueError:
+            return None
+        if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
+            return None
+
+        host = parsed.hostname
+        if ':' in host and not host.startswith('['):
+            host = f'[{host}]'
+        netloc = host
+        if parsed.port:
+            netloc = f'{netloc}:{parsed.port}'
+
+        if policy == 'domain':
+            return urllib.parse.urlunsplit((parsed.scheme, netloc, '', '', ''))
+        if policy == 'path':
+            return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path or '/', '', ''))
+
+        query_items = []
+        try:
+            for key, item_value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True):
+                normalized = key.lower().replace('-', '_')
+                sensitive_key = any(marker.replace('-', '_') in normalized for marker in self.SENSITIVE_ARG_MARKERS)
+                redacted_value = self._redact_sensitive_patterns(item_value)
+                query_items.append((key, '[REDACTED]' if sensitive_key else redacted_value))
+        except ValueError:
+            query_items = []
+        query = urllib.parse.urlencode(query_items, doseq=True)
+        # Fragments are intentionally dropped even in full mode because OAuth
+        # and SPA tokens are commonly placed there.
+        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path or '/', query, ''))
 
     def _apply_strict_mode(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         activity_type = activity.get('type')
@@ -90,7 +137,7 @@ class PrivacyRedactor:
             return {
                 'type': 'browser', 'browser_name': 'Browser',
                 'is_private': bool(activity.get('is_private')), 'page_title': 'Browsing',
-                'service': '', 'url': None
+                'service': '', 'url': None, 'url_is_exact': False
             }
         if activity_type == 'media':
             return {
