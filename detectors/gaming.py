@@ -139,16 +139,29 @@ class GamingDetector:
         map_key = str(snapshot.get('map', '') or '').lower()
         mode_key = str(snapshot.get('mode', '') or '').lower()
         team = str(snapshot.get('team', '') or '').upper()
+        map_name = self._friendly_map(map_key)
+        mode_name = self.CS2_MODE_NAMES.get(mode_key, self._friendly_label(mode_key))
+        team_name = 'Counter-Terrorists' if team == 'CT' else ('Terrorists' if team == 'T' else '')
+        ct_score = int(snapshot.get('ct_score', 0) or 0)
+        t_score = int(snapshot.get('t_score', 0) or 0)
+
+        state_parts = [part for part in (mode_name, map_name, team_name) if part]
+        if map_name:
+            state_parts.append(f'CT {ct_score}–{t_score} T')
+
         activity.update({
             'gsi': True,
-            'map': self._friendly_map(map_key),
+            # PresenceBuilder already uses launcher as the gaming state line.
+            # For CS2 this becomes the live, user-facing match summary.
+            'launcher': ' · '.join(state_parts) or activity.get('launcher') or 'Steam',
+            'map': map_name,
             'map_key': map_key,
-            'mode': self.CS2_MODE_NAMES.get(mode_key, self._friendly_label(mode_key)),
+            'mode': mode_name,
             'mode_key': mode_key,
             'team': team,
-            'team_name': 'Counter-Terrorists' if team == 'CT' else ('Terrorists' if team == 'T' else ''),
-            'ct_score': int(snapshot.get('ct_score', 0) or 0),
-            't_score': int(snapshot.get('t_score', 0) or 0),
+            'team_name': team_name,
+            'ct_score': ct_score,
+            't_score': t_score,
             'round': int(snapshot.get('round', 0) or 0),
             'phase': str(
                 snapshot.get('round_phase')
