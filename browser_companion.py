@@ -76,10 +76,13 @@ class BrowserCompanionBridge:
                 self.end_headers()
 
             def do_GET(self) -> None:  # noqa: N802
-                if self.path != '/v1/health':
-                    self._send(404, {'ok': False})
+                if self.path == '/v1/health':
+                    self._send(200, {'ok': True, 'version': _SUPPORTED_VERSION})
                     return
-                self._send(200, {'ok': True, 'version': _SUPPORTED_VERSION})
+                if self.path == '/v1/status':
+                    self._send(200, bridge.status())
+                    return
+                self._send(404, {'ok': False})
 
             def do_POST(self) -> None:  # noqa: N802
                 if self.path != '/v1/activity':
@@ -185,6 +188,36 @@ class BrowserCompanionBridge:
         with self._lock:
             self._records[(browser.lower(), tab_id)] = (now, record)
             self._prune(now)
+
+    def status(self) -> Dict[str, Any]:
+        """Return privacy-safe diagnostics without exposing URLs, titles, or tab IDs."""
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            if not self._records:
+                return {
+                    'ok': True,
+                    'version': _SUPPORTED_VERSION,
+                    'records': 0,
+                    'connected': False,
+                    'latest': None,
+                }
+            seen, record = max(self._records.values(), key=lambda item: item[0])
+            media = record.get('media') or {}
+            return {
+                'ok': True,
+                'version': _SUPPORTED_VERSION,
+                'records': len(self._records),
+                'connected': True,
+                'latest': {
+                    'browser': record.get('browser') or '',
+                    'service': record.get('service') or '',
+                    'focused': bool(record.get('focused')),
+                    'visible': bool(record.get('visible')),
+                    'media_playing': bool(media.get('playing')),
+                    'age_ms': max(0, int((now - seen) * 1000)),
+                },
+            }
 
     def latest(self, browser_name: str = '') -> Optional[Dict[str, Any]]:
         """Return the best recent tab for foreground browser activity."""
