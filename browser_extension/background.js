@@ -1,9 +1,30 @@
 const api = globalThis.browser || globalThis.chrome;
 const ENDPOINT = 'http://127.0.0.1:32191/v1/activity';
 
+async function setConnectionBadge(connected) {
+  try {
+    if (!api?.action?.setBadgeText) return;
+    await api.action.setBadgeText({ text: connected ? 'ON' : 'OFF' });
+    if (api.action.setBadgeBackgroundColor) {
+      await api.action.setBadgeBackgroundColor({
+        color: connected ? '#2e7d32' : '#b3261e',
+      });
+    }
+    if (api.action.setTitle) {
+      await api.action.setTitle({
+        title: connected
+          ? 'CYBREX Rich Presence Companion — connected'
+          : 'CYBREX Rich Presence Companion — desktop service unavailable',
+      });
+    }
+  } catch (_) {
+    // Badge support varies slightly between browsers; never block activity delivery.
+  }
+}
+
 async function postPayload(payload) {
   try {
-    await fetch(ENDPOINT, {
+    const response = await fetch(ENDPOINT, {
       method: 'POST',
       cache: 'no-store',
       headers: {
@@ -12,8 +33,15 @@ async function postPayload(payload) {
       },
       body: JSON.stringify(payload),
     });
+    const connected = response.ok;
+    await setConnectionBadge(connected);
+    if (!response.ok) {
+      console.warn('CYBREX Companion bridge rejected activity:', response.status);
+    }
+    return connected;
   } catch (_) {
-    // Desktop service is optional and may not be running yet.
+    await setConnectionBadge(false);
+    return false;
   }
 }
 
@@ -71,5 +99,8 @@ api.windows?.onFocusChanged?.addListener((windowId) => {
 });
 
 api.runtime.onInstalled?.addListener(() => {
+  setConnectionBadge(false);
   requestActiveTab();
 });
+
+setConnectionBadge(false);
