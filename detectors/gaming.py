@@ -88,11 +88,22 @@ class GamingDetector:
         self.config = config
         self.logger = logging.getLogger(__name__)
         gaming_enabled = bool(config.get('rules.enabled_detectors.gaming', True))
-        # Do not bind a port or modify the game's cfg when the entire gaming
-        # detector is disabled by the user.
-        self.cs2_gsi = get_cs2_gsi(config, start=True) if gaming_enabled else None
-        if self.cs2_gsi and bool(config.get('cs2_gsi.auto_install', True)):
-            self._auto_configure_cs2_gsi()
+        self.cs2_gsi = None
+
+        # Fail closed: never point CS2 at a port unless our own loopback listener
+        # successfully owns that port first. Otherwise an unrelated local process
+        # could receive GSI metadata if it happened to bind the configured port.
+        if gaming_enabled:
+            candidate = get_cs2_gsi(config, start=False)
+            if candidate is not None and candidate.start():
+                self.cs2_gsi = candidate
+                if bool(config.get('cs2_gsi.auto_install', True)):
+                    self._auto_configure_cs2_gsi()
+            elif candidate is not None:
+                self.logger.warning(
+                    'CS2 GSI listener is unavailable; automatic game configuration '
+                    'was skipped to avoid sending game state to an unverified local port'
+                )
 
     def _auto_configure_cs2_gsi(self) -> None:
         """Make packaged/source installs zero-setup when CS2 is discoverable."""
