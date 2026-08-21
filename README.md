@@ -5,9 +5,9 @@
 [![Windows + Linux](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/imedkablavi/discord-rich-presence)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-A local Discord Rich Presence service for developers, media playback, browsers, terminals, games, and normal desktop applications.
+A local Discord Rich Presence service for coding, browsers, media, terminals, games, and normal desktop applications.
 
-The service watches the foreground application, converts it into a Discord activity, applies the configured privacy rules, and publishes it through Discord Desktop RPC. It does not depend on a project-operated cloud service.
+It watches local activity, applies privacy rules, chooses the most relevant activity, and publishes the result through Discord Desktop RPC. There is no CYBREX telemetry or activity-history backend.
 
 ## Screenshots
 
@@ -16,52 +16,99 @@ The service watches the foreground application, converts it into a Discord activ
 | ![Control Panel](docs/images/control-panel.png) | ![Activity Detection](docs/images/activity.png) |
 | Control panel and service status | Rich Presence in Discord |
 
+## Highlights
+
+- No Discord Developer Portal setup is required for normal users.
+- Windows and Linux support with packaged release artifacts.
+- KDE Plasma Wayland support through `kdotool`, plus X11 and Sway support.
+- Windows Media Control and Linux MPRIS/playerctl integration.
+- Smart activity priority so background media does not unnecessarily hide foreground coding or terminal work.
+- Optional Browser Companion for exact tab/service/media context.
+- Balanced, strict, and unfiltered privacy modes.
+- Application-aware artwork with configurable Discord asset-key fallbacks.
+- Local terminal command hooks with secret redaction and short-lived private cache files.
+- Single-instance runtime guard, graceful shutdown, hot configuration reload, and bounded caches.
+
 ## What it detects
 
 | Category | Examples |
 | --- | --- |
 | Coding | VS Code, VSCodium, Trae, JetBrains IDEs, Vim/Neovim, Sublime Text, Notepad++ |
 | Browsers | Chrome, Firefox, Edge, Brave, Chromium, Opera, Vivaldi |
-| Media | Spotify, VLC, MPV, browser media sessions, Windows media sessions |
-| Terminal | Bash, Zsh, PowerShell, Windows Terminal, CMD and other supported terminals |
-| Gaming | Known game processes with conservative matching to reduce false positives |
-| Applications | Optional fallback for foreground apps that do not match a specialized detector |
+| Media | Spotify, VLC, MPV, browser media, Windows media sessions, Linux MPRIS |
+| Terminal | Bash, Zsh, PowerShell, Windows Terminal, CMD and supported terminal emulators |
+| Gaming | Known game processes with conservative matching |
+| Applications | Optional foreground-app fallback |
 
-Media activities use Discord listening/watching activity types where appropriate. Playing media uses Discord start/end timestamps so elapsed time continues to advance without repeatedly rewriting the RPC payload. Browser service links are inferred from visible window-title metadata; the service does not currently read the exact browser tab URL.
+Playing media uses Discord timestamps so elapsed/remaining time advances without rewriting the RPC payload every second.
 
-For known applications, the large Rich Presence artwork follows the application actually in use instead of always showing one generic category image. For example, Brave media uses Brave artwork, VS Code uses VS Code artwork, and KDE apps use KDE artwork. Browser services such as YouTube can appear as the smaller overlay while the large image remains the browser itself. Discord supports external image URLs for Rich Presence assets, so the default setup uses Simple Icons artwork for common apps without requiring every icon to be uploaded manually to the Developer Portal. You can disable this behavior or override any icon in configuration.
+## Browser Companion
+
+The optional Browser Companion improves browser accuracy by sending the active tab title, URL, focus/visibility state, recognized service, and HTML media metadata to a loopback-only bridge on `127.0.0.1`.
+
+It is useful when Chromium MPRIS does not expose enough information to distinguish a background YouTube tab from the foreground browser tab.
+
+The desktop service keeps only a small, short-lived in-memory snapshot set. Normal web-page origins are rejected by the bridge, requests require the Companion marker header, request/body sizes are bounded, and the project does not upload browser history to a CYBREX server.
+
+To prepare a clean unpacked extension directory on Linux:
+
+```bash
+bash scripts/prepare-browser-companion.sh
+```
+
+Then load the generated directory through the browser's extension page. See [browser_extension/README.md](browser_extension/README.md) for Chromium/Brave/Edge and Firefox instructions.
+
+### Browser URL privacy
+
+Balanced mode defaults to sharing only the URL origin, for example `https://www.youtube.com`.
+
+```yaml
+privacy:
+  browser_url_mode: domain
+```
+
+Supported values are `none`, `domain`, `path`, and `full`. Query values that look like credentials/tokens are redacted, fragments are removed, and strict mode removes identifying browser URLs.
 
 ## Privacy
 
-There are three privacy modes:
-
 | Mode | Behavior |
 | --- | --- |
-| `off` | Publishes detected activity without project-side redaction. |
-| `balanced` | Keeps useful context while redacting configured secret patterns and reducing path exposure. |
-| `strict` | Uses generic descriptions and removes identifying browser URLs/buttons. |
+| `off` | Keeps detected activity without project-side redaction. |
+| `balanced` | Redacts sensitive patterns and reduces browser/path exposure. Default. |
+| `strict` | Uses generic descriptions and removes identifying URLs/buttons. |
 
-The default is `balanced`.
+Rich Presence is cleared when activity disappears, becomes blocked, or a supported lock-screen window is detected.
 
-Rich Presence is cleared when activity disappears or becomes blocked. It can also be cleared when a known lock-screen window is detected. Terminal tracking uses local per-shell cache files and tries to match the focused terminal process tree before publishing a command. In Balanced mode, values following sensitive command flags such as token/password arguments are redacted. Inferred browser links are removed when their source title contains data that required redaction.
+Terminal commands are optional. PID-scoped cache files are matched to the focused terminal where possible, sensitive command flags are redacted, and the default raw command cache lifetime is only 15 minutes.
 
-For the exact data paths and behavior, see [docs/PRIVACY.md](docs/PRIVACY.md).
+On POSIX systems, configuration/runtime/log/cache directories and sensitive files are hardened to user-only permissions. Persistent logs intentionally avoid writing full Rich Presence payloads containing page titles, commands, buttons, or URLs.
+
+See [docs/PRIVACY.md](docs/PRIVACY.md) for the detailed data-flow and file locations.
 
 ## Windows
 
-### Packaged releases
+### Packaged release
 
-Tagged releases are built as `DiscordRichPresence.exe` and published with a SHA-256 checksum. The executable contains the service, tray controls, and control panel in one build.
+Tagged releases publish:
+
+```text
+DiscordRichPresence.exe
+DiscordRichPresence.exe.sha256
+CYBREX-Browser-Companion.zip
+CYBREX-Browser-Companion.zip.sha256
+```
+
+The EXE contains the service, tray controls, and control panel. A SHA-256 checksum is included for integrity verification.
 
 [Open Releases](https://github.com/imedkablavi/discord-rich-presence/releases)
 
-If no tagged release has been published yet, use the source setup below.
+Windows Authenticode signing is supported by the release workflow when the repository has a valid code-signing certificate configured. Unsigned development builds may still trigger Windows SmartScreen.
 
 ### Run from source
 
 Requirements:
 
-- Python 3.10 or newer
+- Python 3.10+
 - Discord Desktop
 
 ```bat
@@ -70,49 +117,63 @@ cd discord-rich-presence
 run.bat
 ```
 
-`run.bat` creates the virtual environment when needed, repairs an outdated environment, verifies the required runtime packages, and starts the service in the system tray.
+`run.bat` creates/repairs the virtual environment, verifies runtime packages, and starts the service.
 
 ## Linux
 
-Requirements:
+Tagged releases also publish:
 
-- Python 3.10 or newer
+```text
+CYBREX-DiscordRichPresence-linux-x86_64
+CYBREX-DiscordRichPresence-linux-x86_64.sha256
+```
+
+For source installations, requirements are:
+
+- Python 3.10+
 - Discord Desktop
-- X11: `xprop` for foreground-window detection
+- X11: `xprop`
 - KDE Plasma Wayland: `kdotool`
 - Sway: `swaymsg`
-- Media: `playerctl` is recommended for MPRIS detection; pydbus/PyGObject remains a fallback
+- Media: `playerctl` recommended
 
 ```bash
 git clone https://github.com/imedkablavi/discord-rich-presence.git
 cd discord-rich-presence
 python3 -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 python main.py
 ```
 
-KDE Plasma Wayland is supported through `kdotool`, and Sway is supported through `swaymsg`. Other Wayland compositors may not expose a reliable foreground-window API, so the service returns no foreground activity instead of guessing from unrelated running processes.
+KDE Plasma Wayland uses `kdotool`; Sway uses `swaymsg`. Unsupported Wayland compositors return no foreground activity rather than guessing from unrelated processes.
 
 ## Configuration
 
-Configuration is stored at:
+Configuration paths:
 
 - Windows: `%APPDATA%\discord-rich-presence\config.yaml`
 - Linux: `~/.config/discord-rich-presence/config.yaml`
 
-The full example is in [config.example.yaml](config.example.yaml).
+Normal users do **not** need to create a Discord application or copy a Developer ID. The project includes its public Discord Application ID. A custom application ID is an advanced override only.
 
 ```yaml
 discord:
-  client_id: "1437867564762923028"
+  application_id_override: ""
   buttons: []
 
 privacy:
   mode: balanced
+  browser_url_mode: domain
   hide_home_paths: true
 
 update_interval_secs: 2
+
+browser_companion:
+  enabled: true
+  port: 32191
+  ttl_secs: 15
+  domain_services: {}
 
 images:
   use_external_app_icons: true
@@ -120,47 +181,69 @@ images:
 
 rules:
   clear_on_lock_screen: true
-  terminal_command_ttl_secs: 21600
-  enabled_detectors:
-    media: true
-    terminal: true
-    coding: true
-    browser: true
-    gaming: true
-    application: true
+  terminal_command_ttl_secs: 900
+  activity_priority:
+    policy: smart
+    custom_order:
+      - gaming
+      - terminal
+      - coding
+      - browser
+      - media
+      - application
 ```
 
-`update_interval_secs` controls how often local activity is checked, not how often Discord is updated. The service only sends a new RPC payload when the resulting activity changes. The default is 2 seconds; values down to 1 second are accepted when faster switching is preferred.
+The full example is in [config.example.yaml](config.example.yaml).
 
-`images.use_external_app_icons: true` enables built-in application-aware artwork for common browsers, editors, terminals, media players, and services. Set it to `false` if you want to use only assets uploaded to your Discord application. `images.icon_overrides` can replace any known icon with your own Developer Portal asset key or direct image URL, for example:
+### Activity priority
+
+`rules.activity_priority.policy` supports:
+
+- `smart` — foreground work beats background media; foreground media still wins.
+- `foreground_first` — terminal/coding/browser is preferred to background media.
+- `media_first` — media receives the old high priority.
+- `custom` — use `custom_order`.
+
+### Custom/self-hosted services
+
+The Companion can map private or self-hosted domains without custom JavaScript:
+
+```yaml
+browser_companion:
+  domain_services:
+    media.home.example: "Jellyfin"
+    "*.corp.example": "Company Portal"
+```
+
+### Artwork
+
+Known apps can use external raster artwork URLs where supported by the Discord client. If external images are unreliable in your client, disable them and use Discord Developer Portal asset keys instead:
 
 ```yaml
 images:
-  use_external_app_icons: true
-  icon_overrides:
-    trae: "https://example.com/trae.png"
-    konsole: "my-konsole-asset"
+  use_external_app_icons: false
 ```
 
-Set `application: false` if you only want recognized activity categories and do not want generic foreground-window titles published.
+Specific apps can be overridden with either an asset key or direct image URL:
 
-The config loader validates Client IDs, button limits, URLs, privacy regexes, icon settings, detector settings, party sizes, and other values before saving or applying them.
+```yaml
+images:
+  icon_overrides:
+    trae: "my-trae-asset"
+    konsole: "https://example.com/konsole.png"
+```
 
 ## Control panel
 
-The control panel can start and stop the service, edit common settings, test Discord RPC, change privacy mode, open logs, and show the state of a service started by the GUI, tray, `run.bat`, or Windows startup.
+The control panel can start/stop the service, change privacy settings, edit common configuration, inspect current runtime status, test Discord RPC, and open local logs.
 
-The Dashboard reports the service PID, heartbeat, Discord RPC connection state, current activity summary, and recent runtime errors. A per-user runtime lock prevents multiple service instances from fighting over Discord RPC.
-
-When the GUI stops the service, it requests a graceful shutdown first so Rich Presence can be cleared and the RPC connection can be closed normally.
+A per-user runtime lock prevents multiple service processes from fighting over Discord RPC. GUI/tray shutdown requests are graceful so the activity, RPC connection, Browser Companion server, and local runtime state can close cleanly.
 
 ## Terminal command tracking
 
-Terminal command tracking is optional. Install only the hook for shells where you want command activity published.
+Terminal command tracking is optional.
 
 ### Bash
-
-Add this to `~/.bashrc`:
 
 ```bash
 source /path/to/discord-rich-presence/scripts/hooks/bash.sh
@@ -168,21 +251,17 @@ source /path/to/discord-rich-presence/scripts/hooks/bash.sh
 
 ### Zsh
 
-Add this to `~/.zshrc`:
-
 ```zsh
 source /path/to/discord-rich-presence/scripts/hooks/zsh.zsh
 ```
 
 ### PowerShell
 
-Add this to `$PROFILE`:
-
 ```powershell
 . "C:\path\to\discord-rich-presence\scripts\hooks\powershell.ps1"
 ```
 
-Restart the shell after adding the hook. The supplied hooks write local PID-scoped cache files. The Bash hook composes with an existing `PROMPT_COMMAND` instead of replacing a user's DEBUG trap, and the PowerShell hook preserves an existing PSReadLine history handler.
+The supplied hooks preserve existing prompt/history integrations instead of replacing them.
 
 ## Command line
 
@@ -191,66 +270,57 @@ python main.py [--config PATH] [--privacy off|balanced|strict]
                [--dry-run] [--once] [--verbose] [--tray]
 ```
 
-Useful diagnostics:
+Useful local diagnostic:
 
 ```bash
 python main.py --dry-run --once --verbose
 ```
 
-This performs one detection cycle and logs the payload without publishing it to Discord.
+The full payload is printed to the interactive terminal for explicit dry-run debugging, while persistent rotating logs keep only non-sensitive protocol metadata.
 
-## Logs and runtime files
+## Local files
 
-Logs:
+### Windows
 
-- Windows: `%LOCALAPPDATA%\discord-rich-presence\logs\app.log`
-- Linux: `~/.local/state/discord-rich-presence/app.log`
+- Config: `%APPDATA%\discord-rich-presence\config.yaml`
+- Logs: `%LOCALAPPDATA%\discord-rich-presence\logs\app.log`
+- Runtime: `%LOCALAPPDATA%\discord-rich-presence\runtime\`
+- Terminal cache: `%LOCALAPPDATA%\discord-rich-presence\cache\`
 
-Runtime state:
+### Linux
 
-- Windows: `%LOCALAPPDATA%\discord-rich-presence\runtime\`
-- Linux: `~/.local/state/discord-rich-presence/runtime/`
+- Config: `~/.config/discord-rich-presence/config.yaml`
+- Logs: `~/.local/state/discord-rich-presence/app.log`
+- Runtime: `~/.local/state/discord-rich-presence/runtime/`
+- Terminal cache: `~/.cache/discord-rich-presence/`
 
-Logs rotate automatically. See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) when a detector or Discord connection is not behaving as expected.
-
-## Building the Windows executable
-
-```powershell
-python -m pip install -r requirements-dev.txt
-pyinstaller --clean --noconfirm discord-rich-presence.spec
-```
-
-The output is:
-
-```text
-dist/DiscordRichPresence.exe
-```
-
-The QA workflow also builds the Windows executable on pull requests so packaging failures are caught before release. Tags matching `v*` use the release workflow to publish the executable and SHA-256 checksum.
-
-## Development
+## Development and release checks
 
 ```bash
 python -m pip install -r requirements-dev.txt
+python -m pip check
 python -m compileall -q .
 ruff check . --select E9,F63,F7,F82
 pytest -q
+pip-audit -r requirements.txt
+bandit -q -r . -x ./tests,./build,./dist -lll
 ```
 
-CI runs on Windows and Ubuntu with Python 3.10 and 3.12. Linux CI also syntax-checks the Bash and Zsh hooks.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Security reports should follow [SECURITY.md](SECURITY.md).
+CI covers Python 3.10/3.12 on Windows and Ubuntu, Browser Companion syntax/package validation, Bash/Zsh permissions, PowerShell syntax, known-vulnerability auditing, Windows EXE packaging, and Linux x86_64 packaging/smoke tests.
 
 ## Current limitations
 
-- Exact browser URLs are not available without a browser extension or native browser integration.
-- Wayland foreground-window support currently covers KDE Plasma through `kdotool` and Sway through `swaymsg`; other compositors may need a dedicated implementation.
-- Built-in application-aware icons cover common apps; unknown or unbranded apps still use configured category/Developer Portal fallbacks unless you add an `icon_overrides` entry.
-- External application icons depend on Discord being able to fetch the configured image URL; disable them if you prefer only Developer Portal assets.
-- Game detection intentionally avoids broad guesses, so unknown games may fall back to normal application activity.
-- Lock-screen detection uses known lock applications/window markers and may need updates for new desktop environments.
-- macOS foreground-window detection is not implemented yet.
-- Published Windows binaries are not code-signed yet. Releases include a SHA-256 checksum for integrity verification.
+- Wayland foreground-window support currently targets KDE Plasma (`kdotool`) and Sway (`swaymsg`).
+- Browser Companion store publication/signing is separate from the unpacked extension included in this repository.
+- External Rich Presence image URLs depend on the Discord client; Developer Portal asset keys remain the deterministic fallback.
+- Unknown games/apps may fall back to generic application activity.
+- Lock-screen heuristics may need updates for new desktop environments.
+- macOS foreground-window detection is not implemented.
+- Windows SmartScreen reputation/code signing requires a real third-party signing certificate; the workflow can use one when configured.
+
+## Security
+
+Do not publish tokens, private paths, sensitive screenshots, or raw terminal history in public issues. Follow [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 
