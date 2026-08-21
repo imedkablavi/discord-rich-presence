@@ -1,15 +1,7 @@
 const api = globalThis.browser || globalThis.chrome;
 const ENDPOINT = 'http://127.0.0.1:32191/v1/activity';
 
-async function postSnapshot(snapshot, sender) {
-  if (!snapshot || typeof snapshot !== 'object') return;
-  const tabId = sender?.tab?.id;
-  const windowId = sender?.tab?.windowId;
-  const payload = {
-    ...snapshot,
-    tab_id: String(tabId ?? `${windowId ?? 'window'}:${snapshot.url || 'unknown'}`),
-  };
-
+async function postPayload(payload) {
   try {
     await fetch(ENDPOINT, {
       method: 'POST',
@@ -23,6 +15,16 @@ async function postSnapshot(snapshot, sender) {
   } catch (_) {
     // Desktop service is optional and may not be running yet.
   }
+}
+
+async function postSnapshot(snapshot, sender) {
+  if (!snapshot || typeof snapshot !== 'object') return;
+  const tabId = sender?.tab?.id;
+  const windowId = sender?.tab?.windowId;
+  await postPayload({
+    ...snapshot,
+    tab_id: String(tabId ?? `${windowId ?? 'window'}:${snapshot.url || 'unknown'}`),
+  });
 }
 
 api.runtime.onMessage.addListener((message, sender) => {
@@ -50,10 +52,18 @@ api.tabs.onActivated.addListener((activeInfo) => {
   requestActiveTab(activeInfo.windowId);
 });
 
-api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+api.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (!tab?.active) return;
   if (!changeInfo.status && !changeInfo.url && !changeInfo.title) return;
   requestActiveTab(tab.windowId);
+});
+
+api.tabs.onRemoved.addListener((tabId) => {
+  postPayload({
+    version: 1,
+    tab_id: String(tabId),
+    removed: true,
+  });
 });
 
 api.windows?.onFocusChanged?.addListener((windowId) => {
