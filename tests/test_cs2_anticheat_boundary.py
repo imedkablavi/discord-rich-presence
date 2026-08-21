@@ -81,10 +81,12 @@ def test_runtime_dependencies_do_not_add_memory_or_input_automation_tooling():
 def test_generated_gsi_stays_loopback_and_minimum_data_only():
     rendered = render_gsi_config(32192, 'A' * 43)
     assert '"uri" "http://127.0.0.1:32192/v1/cs2"' in rendered
-    for required in ('provider', 'map', 'round', 'player_id', 'phase_countdowns'):
+    for required in ('provider', 'map', 'player_id'):
         assert f'"{required}" "1"' in rendered
 
     for forbidden in (
+        '"round" "1"',
+        '"phase_countdowns" "1"',
         'allplayers',
         'allgrenades',
         'player_state',
@@ -96,12 +98,24 @@ def test_generated_gsi_stays_loopback_and_minimum_data_only():
         assert forbidden not in rendered
 
 
-def test_gsi_listener_is_ipv4_loopback_and_status_never_contains_auth(tmp_path):
+def test_gsi_listener_is_ipv4_loopback_and_status_never_contains_activity_details(tmp_path):
     config = Config(tmp_path / 'config.yaml')
     bridge = CS2GSIBridge(config)
     assert bridge.host == '127.0.0.1'
+
+    bridge.update({
+        'provider': {'appid': 730, 'steamid': '76561198000000000'},
+        'map': {'name': 'de_mirage', 'mode': 'competitive'},
+        'player': {'name': 'Private Name', 'steamid': '76561198000000001', 'team': 'CT'},
+        'auth': {'token': bridge.token},
+    })
     status_text = repr(bridge.status()).lower()
+
     assert bridge.token not in status_text
-    assert 'token' not in status_text
-    assert 'steamid' not in status_text
-    assert 'player_name' not in status_text
+    for forbidden in (
+        'token', 'steamid', 'player_name', 'private name', '765611',
+        'de_mirage', 'competitive', "'ct'",
+    ):
+        assert forbidden not in status_text
+    assert bridge.status()['connected'] is True
+    assert bridge.status()['has_match_context'] is True
