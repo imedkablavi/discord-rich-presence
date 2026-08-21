@@ -12,6 +12,9 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+      WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -20,8 +23,46 @@ jobs:
           cache: pip
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
+      - name: Verify dependencies
+        run: python -m pip check
       - name: Build Windows executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Sign Windows executable when certificate is configured
+        if: env.WINDOWS_SIGNING_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "cybrex-signing.pfx"
+          [IO.File]::WriteAllBytes(
+            $certPath,
+            [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64)
+          )
+          try {
+            $signtool = Get-ChildItem `
+              "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" `
+              -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+            if ($null -eq $signtool) {
+              throw "signtool.exe was not found on the GitHub runner"
+            }
+            & $signtool.FullName sign `
+              /fd SHA256 `
+              /f $certPath `
+              /p $env:WINDOWS_SIGNING_PFX_PASSWORD `
+              /tr http://timestamp.digicert.com `
+              /td SHA256 `
+              "dist/DiscordRichPresence.exe"
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
+            $signature = Get-AuthenticodeSignature "dist/DiscordRichPresence.exe"
+            if ($signature.Status -ne 'Valid') {
+              throw "Windows signature verification failed: $($signature.Status)"
+            }
+          }
+          finally {
+            Remove-Item $certPath -Force -ErrorAction SilentlyContinue
+          }
+      - name: Note unsigned Windows build
+        if: env.WINDOWS_SIGNING_PFX_BASE64 == ''
+        shell: pwsh
+        run: Write-Warning "No Windows signing certificate configured; release EXE will be unsigned."
       - name: Verify and smoke-test executable
         shell: pwsh
         run: |
@@ -43,26 +84,92 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "Packaged executable exited with code $($process.ExitCode)"
           }
-      - name: Generate SHA-256 checksum
+      - name: Package Browser Companion
         shell: pwsh
         run: |
-          $hash = (Get-FileHash "dist/DiscordRichPresence.exe" -Algorithm SHA256).Hash.ToLower()
-          "$hash  DiscordRichPresence.exe" | Set-Content -Encoding ascii "dist/DiscordRichPresence.exe.sha256"
+          $stage = Join-Path $env:RUNNER_TEMP "CYBREX-Browser-Companion"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "browser_extension/manifest.json" $stage
+          Copy-Item "browser_extension/background.js" $stage
+          Copy-Item "browser_extension/content.js" $stage
+          Copy-Item "browser_extension/README.md" $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/CYBREX-Browser-Companion.zip" -Force
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          foreach ($file in @(
+            "dist/DiscordRichPresence.exe",
+            "dist/CYBREX-Browser-Companion.zip"
+          )) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+            $name = Split-Path $file -Leaf
+            "$hash  $name" | Set-Content -Encoding ascii "$file.sha256"
+          }
       - uses: actions/upload-artifact@v7
         with:
-          name: DiscordRichPresence-windows
+          name: release-windows-and-extension
           path: |
             dist/DiscordRichPresence.exe
             dist/DiscordRichPresence.exe.sha256
+            dist/CYBREX-Browser-Companion.zip
+            dist/CYBREX-Browser-Companion.zip.sha256
           if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Verify dependencies
+        run: python -m pip check
+      - name: Build Linux executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Verify and smoke-test executable
+        run: |
+          test -x dist/DiscordRichPresence
+          test "$(stat -c %s dist/DiscordRichPresence)" -gt 1000000
+          timeout 20s ./dist/DiscordRichPresence --dry-run --once
+      - name: Rename and checksum Linux executable
+        run: |
+          mv dist/DiscordRichPresence dist/CYBREX-DiscordRichPresence-linux-x86_64
+          cd dist
+          sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > CYBREX-DiscordRichPresence-linux-x86_64.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux
+          path: |
+            dist/CYBREX-DiscordRichPresence-linux-x86_64
+            dist/CYBREX-DiscordRichPresence-linux-x86_64.sha256
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-windows-and-extension
+          path: release-assets
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-linux
+          path: release-assets
       - name: Publish GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" `
-            "dist/DiscordRichPresence.exe" `
-            "dist/DiscordRichPresence.exe.sha256" `
-            --generate-notes `
+          gh release create "${{ github.ref_name }}" \
+            release-assets/DiscordRichPresence.exe \
+            release-assets/DiscordRichPresence.exe.sha256 \
+            release-assets/CYBREX-Browser-Companion.zip \
+            release-assets/CYBREX-Browser-Companion.zip.sha256 \
+            release-assets/CYBREX-DiscordRichPresence-linux-x86_64 \
+            release-assets/CYBREX-DiscordRichPresence-linux-x86_64.sha256 \
+            --generate-notes \
             --title "Discord Rich Presence ${{ github.ref_name }}"

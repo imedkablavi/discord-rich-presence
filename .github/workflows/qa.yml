@@ -2,8 +2,11 @@ name: QA
 
 on:
   push:
-    branches: [main, "fix/**"]
+    branches: [main, "fix/**", "feat/**"]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -21,12 +24,34 @@ jobs:
           cache: pip
       - name: Install QA dependencies
         run: python -m pip install "pypresence==4.6.2" "PyYAML>=6.0.3,<7" "psutil>=7.2.2,<8" "pytest>=9.1.1,<10" "ruff>=0.9,<1"
+      - name: Verify dependency environment
+        run: python -m pip check
       - name: Compile Python sources
         run: python -m compileall -q .
       - name: Ruff critical checks
         run: ruff check . --select E9,F63,F7,F82
       - name: Run tests
         run: pytest -q
+
+  security-audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install audit tooling
+        run: python -m pip install "pip-audit>=2.9,<3" "bandit>=1.8,<2"
+      - name: Audit runtime dependencies for known vulnerabilities
+        run: pip-audit -r requirements.txt
+      - name: Scan Python for high-severity security issues
+        if: runner.os == 'Linux'
+        run: bandit -q -r . -x ./tests,./build,./dist -lll
 
   browser-extension:
     runs-on: ubuntu-latest
@@ -51,10 +76,18 @@ jobs:
         run: |
           node --check browser_extension/background.js
           node --check browser_extension/content.js
-      - name: Package companion extension
+      - name: Package clean companion extension
         run: |
-          cd browser_extension
-          zip -r ../CYBREX-Browser-Companion.zip .
+          zip -j CYBREX-Browser-Companion.zip \
+            browser_extension/manifest.json \
+            browser_extension/background.js \
+            browser_extension/content.js \
+            browser_extension/README.md
+          unzip -l CYBREX-Browser-Companion.zip
+          if unzip -l CYBREX-Browser-Companion.zip | grep -E '(__pycache__|\.pyc|/\.git)'; then
+            echo "Unexpected development files in extension package" >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: CYBREX-Browser-Companion
@@ -69,10 +102,34 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y zsh
-      - name: Validate Bash and Zsh hooks
+      - name: Validate Bash and Zsh hook syntax
         run: |
           bash -n scripts/hooks/bash.sh
           zsh -n scripts/hooks/zsh.zsh
+      - name: Verify Bash command cache permissions
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/home"
+          HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" bash -c \
+            'source scripts/hooks/bash.sh; __drp_record_command "echo release-check"'
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence")" = "700"
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence/commands")" = "700"
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence/rp_last_cmd")" = "600"
+          pid_file="$(find "$tmp/cache/discord-rich-presence/commands" -type f -name '*.txt' -print -quit)"
+          test -n "$pid_file"
+          test "$(stat -c %a "$pid_file")" = "600"
+      - name: Verify Zsh command cache permissions
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/home"
+          HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" zsh -c \
+            'source scripts/hooks/zsh.zsh; __drp_preexec "echo release-check"'
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence")" = "700"
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence/commands")" = "700"
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence/rp_last_cmd")" = "600"
+          pid_file="$(find "$tmp/cache/discord-rich-presence/commands" -type f -name '*.txt' -print -quit)"
+          test -n "$pid_file"
+          test "$(stat -c %a "$pid_file")" = "600"
 
   package-windows:
     runs-on: windows-latest
@@ -84,6 +141,22 @@ jobs:
           cache: pip
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
+      - name: Verify dependency environment
+        run: python -m pip check
+      - name: Validate PowerShell hook
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts/hooks/powershell.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "PowerShell hook contains syntax errors"
+          }
       - name: Build executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
       - name: Verify executable exists
@@ -114,4 +187,31 @@ jobs:
         with:
           name: DiscordRichPresence-windows
           path: dist/DiscordRichPresence.exe
+          if-no-files-found: error
+
+  package-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Verify dependency environment
+        run: python -m pip check
+      - name: Build Linux executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Verify and smoke-test Linux executable
+        run: |
+          test -x dist/DiscordRichPresence
+          test "$(stat -c %s dist/DiscordRichPresence)" -gt 1000000
+          timeout 20s ./dist/DiscordRichPresence --dry-run --once
+      - name: Rename Linux artifact
+        run: mv dist/DiscordRichPresence dist/CYBREX-DiscordRichPresence-linux-x86_64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: DiscordRichPresence-linux-x86_64
+          path: dist/CYBREX-DiscordRichPresence-linux-x86_64
           if-no-files-found: error
