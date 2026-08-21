@@ -148,16 +148,29 @@ class WindowDetector:
                 return None
 
             lines = result.stdout.splitlines()
-            if len(lines) < 3:
+            if not lines:
                 self.logger.debug('Unexpected kdotool output: %r', result.stdout)
                 return None
 
             app_name = lines[0].strip() or 'Unknown'
-            title = '\n'.join(lines[1:-1]).strip()
-            try:
-                pid = int(lines[-1].strip()) if lines[-1].strip() else None
-            except ValueError:
-                pid = None
+            title = ''
+            pid = None
+
+            if len(lines) >= 2:
+                last = lines[-1].strip()
+                try:
+                    pid = int(last) if last else None
+                except ValueError:
+                    # Some KDE/kdotool combinations occasionally return only
+                    # class + title. Preserve that partial metadata instead of
+                    # clearing Presence for a transient missing PID.
+                    pid = None
+                    title = '\n'.join(lines[1:]).strip()
+                else:
+                    title = '\n'.join(lines[1:-1]).strip()
+
+            if len(lines) < 3:
+                self.logger.debug('Partial kdotool output accepted: %r', result.stdout)
 
             return {
                 'app_name': app_name,
