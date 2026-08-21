@@ -34,6 +34,8 @@ def _payload(token: str) -> dict:
             'team_ct': {'score': 8, 'name': 'Secret CT Name'},
             'team_t': {'score': 6, 'name': 'Secret T Name'},
         },
+        # Include fields that our generated cfg deliberately does not request to
+        # prove the parser still discards them if a custom/old cfg sends them.
         'round': {'phase': 'live'},
         'player': {
             'steamid': '76561198000000001',
@@ -66,8 +68,6 @@ def test_cs2_gsi_rejects_wrong_token_and_retains_only_presence_fields(tmp_path):
         'mode': 'competitive',
         'map_phase': 'live',
         'round': 14,
-        'round_phase': 'live',
-        'countdown_phase': 'live',
         'team': 'CT',
         'player_activity': 'playing',
         'ct_score': 8,
@@ -78,6 +78,7 @@ def test_cs2_gsi_rejects_wrong_token_and_retains_only_presence_fields(tmp_path):
     assert 'Private Player Name' not in serialized
     assert 'weapon_ak47' not in serialized
     assert 'Secret CT Name' not in serialized
+    assert 'phase_ends_in' not in serialized
 
 
 def test_cs2_gsi_requires_counter_strike_appid(tmp_path):
@@ -92,13 +93,21 @@ def test_cs2_gsi_requires_counter_strike_appid(tmp_path):
 def test_cs2_gsi_config_requests_only_minimum_match_context():
     rendered = render_gsi_config(32192, VALID_TEST_TOKEN)
     assert 'http://127.0.0.1:32192/v1/cs2' in rendered
+    assert '"provider" "1"' in rendered
     assert '"map" "1"' in rendered
-    assert '"round" "1"' in rendered
     assert '"player_id" "1"' in rendered
-    assert '"phase_countdowns" "1"' in rendered
-    assert 'allplayers' not in rendered
-    assert 'player_state' not in rendered
-    assert 'player_weapons' not in rendered
+    for forbidden in (
+        '"round" "1"',
+        '"phase_countdowns" "1"',
+        'allplayers',
+        'player_state',
+        'player_weapons',
+        'player_position',
+        'player_match_stats',
+        'allgrenades',
+        'bomb',
+    ):
+        assert forbidden not in rendered
 
 
 def test_cs2_gsi_rejects_cfg_token_injection():
@@ -119,6 +128,8 @@ def test_cs2_installer_writes_authenticated_cfg_and_private_token(tmp_path):
     assert token
     assert token in text
     assert 'allplayers' not in text
+    assert 'player_state' not in text
+    assert 'phase_countdowns' not in text
     if os.name == 'posix':
         assert target.stat().st_mode & 0o777 == 0o600
         assert token_path.stat().st_mode & 0o777 == 0o600
@@ -132,8 +143,6 @@ def test_cs2_gaming_detector_formats_mode_map_team_and_score(tmp_path):
         'mode': 'competitive',
         'map_phase': 'live',
         'round': 14,
-        'round_phase': 'live',
-        'countdown_phase': 'live',
         'team': 'CT',
         'player_activity': 'playing',
         'ct_score': 8,
@@ -162,8 +171,6 @@ def test_cs2_steam_app_alias_and_deathmatch_omit_fake_round_score(tmp_path):
         'mode': 'deathmatch',
         'map_phase': 'live',
         'round': 0,
-        'round_phase': 'live',
-        'countdown_phase': 'live',
         'team': 'T',
         'player_activity': 'playing',
         'ct_score': 0,
