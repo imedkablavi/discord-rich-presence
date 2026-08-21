@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 
 _TEXT_ALIASES = {'x': 'X.com', 'c': 'C language'}
-_TEXT_KEYS = ('details', 'state', 'large_text', 'small_text')
+_TEXT_KEYS = ('name', 'details', 'state', 'large_text', 'small_text')
 _URL_KEYS = ('details_url', 'state_url', 'large_url', 'small_url')
 _ASSET_KEYS = ('large_image', 'small_image')
 
@@ -33,7 +33,7 @@ def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         if key not in result:
             continue
         text = str(result[key]).strip()
-        if key in {'large_text', 'small_text'}:
+        if key in {'name', 'large_text', 'small_text'}:
             text = _TEXT_ALIASES.get(text.lower(), text)
         if len(text) < 2:
             result.pop(key, None)
