@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 
 _TEXT_ALIASES = {'x': 'X.com', 'c': 'C language'}
-_TEXT_KEYS = ('name', 'details', 'state', 'large_text', 'small_text')
+_TEXT_KEYS = ('details', 'state', 'large_text', 'small_text')
 _URL_KEYS = ('details_url', 'state_url', 'large_url', 'small_url')
 _ASSET_KEYS = ('large_image', 'small_image')
 
@@ -21,19 +21,21 @@ def _http_url(value: Any, limit: int = 512) -> str | None:
 
 
 def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a payload that stays inside pypresence/Discord field contracts.
+    """Return a payload that stays inside pypresence/legacy Discord RPC contracts.
 
-    This is intentionally a second line of defense after detector-specific
-    builders. Manual overrides and future detectors must not be able to break
-    the entire RPC session with one malformed optional field.
+    Discord's newer Social SDK supports a dynamic Activity name, but the legacy
+    IPC path used by pypresence does not reliably change the registered
+    application name in the Discord card. Drop that field here so callers do not
+    mistake it for a supported branding override on this transport.
     """
     result = {key: value for key, value in dict(payload or {}).items() if value is not None}
+    result.pop('name', None)
 
     for key in _TEXT_KEYS:
         if key not in result:
             continue
         text = str(result[key]).strip()
-        if key in {'name', 'large_text', 'small_text'}:
+        if key in {'large_text', 'small_text'}:
             text = _TEXT_ALIASES.get(text.lower(), text)
         if len(text) < 2:
             result.pop(key, None)
