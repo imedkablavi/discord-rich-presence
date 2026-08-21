@@ -10,7 +10,7 @@ When CS2 is the detected game and a fresh GSI snapshot is available, Rich Presen
 - the current game mode, such as Competitive, Casual, Deathmatch, or Wingman;
 - the current map, such as Mirage, Dust II, Inferno, Nuke, Ancient, or Anubis;
 - the local/currently observed side: Counter-Terrorists or Terrorists;
-- the current CT/T round score.
+- the current CT/T round score when that score is meaningful for the reported mode.
 
 Example:
 
@@ -23,9 +23,19 @@ Competitive · Mirage · Counter-Terrorists · CT 8–6 T
 
 If GSI is not configured or the latest snapshot has expired, ordinary foreground-game detection still reports Counter-Strike 2 without the live match fields.
 
+## Anti-cheat boundary
+
+The CS2 feature is intentionally limited to Valve GSI. It does not read or write game memory, inject DLLs or code, install hooks, automate keyboard/mouse input, manipulate packets/lobbies, or launch CS2 with `-insecure` or `-allow_third_party_software`.
+
+No third-party application can promise that a Steam account can never receive an enforcement action or that Valve will never change its policies. What this project can make auditable is the implementation boundary: the Rich Presence integration stays outside the game process and only consumes the GSI feed that CS2 sends to its configured local HTTP endpoint.
+
+The QA suite contains a regression test that fails if the CS2 runtime starts using common process-memory, injection, anti-cheat-bypass, or input-automation primitives or adds common memory/automation packages.
+
+See [Anti-Cheat and Game Integration Boundary](ANTI_CHEAT.md) for the full policy.
+
 ## Zero-setup path
 
-When the desktop service starts and gaming detection is enabled, it checks common Steam library locations. If it finds Counter-Strike 2 and the game configuration directory is writable, it prepares:
+When the desktop service starts and gaming detection is enabled, it first attempts to own its configured IPv4 loopback listener. Only after that bind succeeds does it check common Steam library locations and prepare:
 
 ```text
 game/csgo/cfg/gamestate_integration_cybrex.cfg
@@ -36,6 +46,8 @@ The generated integration points only to the local IPv4 loopback listener:
 ```text
 http://127.0.0.1:32192/v1/cs2
 ```
+
+If that port is already owned by another local process, automatic configuration is disabled. For an auto-managed installation the service also removes its stale `gamestate_integration_cybrex.cfg` where possible rather than knowingly leave future CS2 launches pointed at an unverified listener. If CS2 was already running when this happens, restart the game because GSI configuration is loaded by the game process.
 
 The integration uses a random per-user authentication token. On POSIX systems both the private token file and token-bearing CS2 integration file are kept at mode `0600` where the filesystem supports it.
 
@@ -80,14 +92,14 @@ Start the service and look for:
 CS2 GSI listening on http://127.0.0.1:32192/v1/cs2
 ```
 
-The listener has privacy-safe local diagnostics:
+The listener has local diagnostics:
 
 ```bash
 curl -s http://127.0.0.1:32192/v1/health
 curl -s http://127.0.0.1:32192/v1/status
 ```
 
-`/v1/status` reports only connection age plus map/mode/local side. It does not expose the authentication token, Steam ID, player name, weapons, money, health, positions, or other players.
+`/v1/status` does not expose the authentication token, Steam ID, player name, weapons, money, health, positions, or other players. It is bound to IPv4 loopback rather than an external interface.
 
 ## Data minimization
 
@@ -99,7 +111,7 @@ The generated GSI configuration requests only:
 - `player_id`;
 - `phase_countdowns`.
 
-`player_id` is sufficient for GSI to expose the current player/spectatee side and activity, so the integration does not need `player_state` just to determine CT/T.
+`player_id` is sufficient for GSI to expose the current player/spectatee side and activity, so the integration does not need `player_state` just to determine CT/T. The GSI transport may include identification fields inside `player_id`; the bridge does not retain them and does not send them to Discord.
 
 It intentionally does **not** request `allplayers`, player weapons, or player state. The desktop bridge additionally discards fields it does not need after parsing. In particular it does not retain player names, Steam IDs, health, money, weapons, positions, all-player state, or team names.
 
