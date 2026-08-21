@@ -1,4 +1,4 @@
-"""Conservative foreground-game detection with Steam catalog and CS2 GSI enrichment."""
+"""Foreground-game detection from local launcher catalogs with CS2 GSI enrichment."""
 
 import logging
 import re
@@ -6,6 +6,8 @@ from typing import Optional, Dict, Any
 
 from config import Config
 from cs2_gsi import discover_cs2_cfg_dirs, get_cs2_gsi, install_gsi_config
+from epic_catalog import EpicGame, EpicGameCatalog
+from heroic_catalog import HeroicGame, HeroicGameCatalog
 from steam_catalog import SteamGame, SteamGameCatalog
 
 
@@ -15,6 +17,7 @@ class GamingDetector:
     GAME_LAUNCHERS = {
         'steam': 'Steam', 'steamwebhelper': 'Steam',
         'epicgameslauncher': 'Epic Games', 'eossdk-win64-shipping': 'Epic Games',
+        'heroic': 'Heroic',
         'origin': 'Origin', 'eadesktop': 'EA Desktop',
         'uplay': 'Ubisoft Connect', 'ubisoftconnect': 'Ubisoft Connect',
         'gog': 'GOG Galaxy', 'galaxyclient': 'GOG Galaxy',
@@ -23,8 +26,8 @@ class GamingDetector:
         'xboxapp': 'Xbox',
     }
 
-    # Fallback aliases for non-Steam games or platforms where executable metadata
-    # is all that is available. Steam games are resolved from local manifests first.
+    # Fallback aliases for launchers/platforms that do not expose a local game
+    # catalog we can resolve safely. Steam/Epic/Heroic are resolved locally first.
     KNOWN_GAMES = {
         'leagueoflegends': 'League of Legends',
         'league of legends': 'League of Legends',
@@ -117,6 +120,8 @@ class GamingDetector:
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.steam_catalog = SteamGameCatalog()
+        self.epic_catalog = EpicGameCatalog()
+        self.heroic_catalog = HeroicGameCatalog()
         gaming_enabled = bool(config.get('rules.enabled_detectors.gaming', True))
         gsi_enabled = self._strict_bool_setting(config, 'cs2_gsi.enabled', True)
         auto_install = self._strict_bool_setting(config, 'cs2_gsi.auto_install', True)
@@ -181,9 +186,9 @@ class GamingDetector:
         app_name = str(window_info.get('app_name', '')).lower().replace('.exe', '')
         title = str(window_info.get('title', '')).strip()
 
-        # Steam is authoritative when possible: appmanifest files provide the
-        # actual installed title instead of leaking process/class strings such as
-        # ``csgo``, ``steam_app_730`` or ``CS GO Steam`` into Discord.
+        # Local launcher catalogs are authoritative when available. They provide
+        # the real installed title instead of leaking process/class strings into
+        # Discord, and they work for games never hardcoded in this project.
         steam_game = self.steam_catalog.resolve(window_info)
         if steam_game:
             activity = self._steam_activity(steam_game)
@@ -191,6 +196,14 @@ class GamingDetector:
                 activity['game_name'] = 'Counter-Strike 2'
                 self._enrich_cs2(activity)
             return activity
+
+        epic_game = self.epic_catalog.resolve(window_info)
+        if epic_game:
+            return self._epic_activity(epic_game)
+
+        heroic_game = self.heroic_catalog.resolve(window_info)
+        if heroic_game:
+            return self._heroic_activity(heroic_game)
 
         game_name = self._match(app_name, self.KNOWN_GAMES)
         launcher_name = self._match(app_name, self.GAME_LAUNCHERS)
@@ -211,9 +224,6 @@ class GamingDetector:
                 self._enrich_cs2(activity)
             return activity
 
-        # Some Linux compositors expose a slightly different CS2 app/class
-        # string. A fresh authenticated GSI snapshot is enough to disambiguate
-        # only when the foreground name still clearly contains Counter-Strike.
         if self.cs2_gsi and ('counter-strike' in app_name or 'counter strike' in app_name):
             activity = {
                 'type': 'gaming', 'game_name': 'Counter-Strike 2',
@@ -227,17 +237,18 @@ class GamingDetector:
 
         # A launcher is useful context, but it is not itself a game. Only use a
         # title fallback when it contains a plausible game title, never generic
-        # Steam/Store/Library text.
+        # launcher/store/library text.
         if launcher_name:
             title_game = self._extract_game_from_title(title)
             if title_game:
                 return {
                     'type': 'gaming', 'game_name': title_game,
-                    'launcher': launcher_name, 'is_game': True
+                    'launcher': launcher_name, 'game_source': launcher_name,
+                    'is_game': True,
                 }
             return {
                 'type': 'gaming', 'game_name': None,
-                'launcher': launcher_name, 'is_game': False
+                'launcher': launcher_name, 'is_game': False,
             }
         return None
 
@@ -252,6 +263,28 @@ class GamingDetector:
             'game_source': 'Steam',
             'artwork_url': game.artwork_url,
             'store_url': f'https://store.steampowered.com/app/{game.appid}/',
+        }
+
+    @staticmethod
+    def _epic_activity(game: EpicGame) -> Dict[str, Any]:
+        return {
+            'type': 'gaming',
+            'game_name': game.name,
+            'launcher': 'Epic Games',
+            'game_source': 'Epic Games',
+            'epic_app_name': game.app_name,
+            'is_game': True,
+        }
+
+    @staticmethod
+    def _heroic_activity(game: HeroicGame) -> Dict[str, Any]:
+        return {
+            'type': 'gaming',
+            'game_name': game.name,
+            'launcher': 'Heroic',
+            'game_source': 'Heroic',
+            'heroic_app_name': game.app_name,
+            'is_game': True,
         }
 
     @staticmethod
@@ -343,20 +376,19 @@ class GamingDetector:
         for suffix in (
             ' - Steam', ' — Steam', ' – Steam', ' | Steam',
             ' - Epic Games', ' — Epic Games', ' - Origin', ' - Battle.net',
+            ' - Heroic', ' — Heroic',
         ):
             if candidate.lower().endswith(suffix.lower()):
                 candidate = candidate[:-len(suffix)].strip()
                 break
         else:
-            # Handle low-quality titles such as "CS GO Steam" without allowing
-            # generic Steam pages to masquerade as games.
             if candidate.lower().endswith(' steam'):
                 candidate = candidate[:-6].strip()
 
         lowered = candidate.lower().strip(' -—–|')
         if not lowered or lowered in {
             'steam', 'store', 'library', 'community', 'friends', 'downloads',
-            'epic games', 'origin', 'battle.net',
+            'epic games', 'heroic', 'origin', 'battle.net',
         }:
             return None
         if lowered in cls.TITLE_GAME_ALIASES:
