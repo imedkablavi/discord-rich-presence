@@ -55,6 +55,34 @@ def test_bridge_prefers_focused_tab_over_background_media(tmp_path: Path):
     assert playing['service'] == 'YouTube'
 
 
+def test_companion_status_is_privacy_safe(tmp_path: Path):
+    bridge = BrowserCompanionBridge(Config(tmp_path / 'config.yaml'))
+    empty = bridge.status()
+    assert empty == {
+        'ok': True,
+        'version': 1,
+        'records': 0,
+        'connected': False,
+        'latest': None,
+    }
+
+    bridge.update(_snapshot())
+    status = bridge.status()
+    assert status['ok'] is True
+    assert status['connected'] is True
+    assert status['records'] == 1
+    assert status['latest']['browser'] == 'Brave'
+    assert status['latest']['service'] == 'YouTube'
+    assert status['latest']['focused'] is True
+    assert status['latest']['visible'] is True
+    assert status['latest']['media_playing'] is True
+    assert status['latest']['age_ms'] >= 0
+    serialized = repr(status)
+    assert 'abc123' not in serialized
+    assert 'Example video' not in serialized
+    assert '42' not in serialized
+
+
 def test_bridge_rejects_wrong_protocol_version(tmp_path: Path):
     bridge = BrowserCompanionBridge(Config(tmp_path / 'config.yaml'))
     with pytest.raises(ValueError, match='unsupported_version'):
