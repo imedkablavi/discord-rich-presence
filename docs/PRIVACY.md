@@ -13,13 +13,30 @@ Depending on the enabled detectors and operating system, the service may read:
 - game process names;
 - optional terminal commands written by the supplied shell hooks.
 
-The browser detector does not read the exact browser tab URL. Links shown in Rich Presence are inferred search or service links from visible window-title information.
+When the optional Browser Companion extension is installed, the local desktop service can also receive the current tab URL/title, recognized service/domain, tab focus/visibility state, and HTML audio/video playback metadata. This is how the service can distinguish a background YouTube tab from another foreground Brave tab when Chromium MPRIS omits the real media URL.
+
+The Companion sends snapshots only to the loopback bridge (`127.0.0.1`) and the desktop service keeps recent snapshots in memory. The project does not operate a browser-history collection service.
+
+## Browser URL privacy
+
+Without the Browser Companion, browser links remain inferred from visible window-title information.
+
+With the Companion, the exact URL is available locally so service detection can be accurate. Balanced mode does **not** publish the exact URL by default. `privacy.browser_url_mode` controls what can survive privacy filtering:
+
+- `none` — publish no browser URL;
+- `domain` — publish only the origin, for example `https://www.youtube.com` (default);
+- `path` — include the path but remove query parameters and fragments;
+- `full` — keep ordinary query parameters, redact values of sensitive token/auth/key parameters, and always remove the URL fragment.
+
+If a page title itself requires redaction, the associated URL is removed instead of trying to preserve a derived link.
+
+Private/incognito foreground windows are treated conservatively and do not reuse a normal-tab Companion snapshot. Browsers usually disable extensions in private windows unless the user explicitly grants private-window access.
 
 ## What reaches Discord
 
 Only the Rich Presence payload produced after detector rules and privacy filtering is sent through Discord Desktop RPC. That payload can contain activity text, image keys or external image URLs, timestamps, buttons, and configured URLs.
 
-By default, known applications can use external raster artwork URLs so the Rich Presence image follows the application actually in use. Built-in external icons use Google's favicon service to request PNG artwork for the application's public product/domain. The service itself does not download those images; the image URL is included in the Discord activity payload. Set `images.use_external_app_icons: false` to use only Discord Developer Portal asset keys, or use `images.icon_overrides` to select your own asset key or image URL for a specific application. PNG, JPEG, or WebP URLs are recommended for custom external artwork because SVG artwork can be ignored by some Discord desktop RPC clients.
+Known applications can attempt to use external raster artwork URLs so the Rich Presence image follows the application actually in use. External artwork rendering depends on the Discord client; core Developer Portal assets remain the more predictable option for release-critical icons. Set `images.use_external_app_icons: false` to use only configured Discord application asset keys, or use `images.icon_overrides` to select your own asset key or image URL for a specific application.
 
 If you do not want a category published, disable its detector. `rules.enabled_detectors.application` controls the generic fallback for applications that do not match a specialized detector.
 
@@ -27,13 +44,13 @@ If you do not want a category published, disable its detector. `rules.enabled_de
 
 ### `off`
 
-Keeps detected activity details with no project-side redaction. Use this only if you are comfortable publishing the detected text.
+Keeps detected activity details with no project-side redaction. Use this only if you are comfortable publishing the detected text. When the Browser Companion is enabled, this also means exact local browser URLs can reach the Rich Presence builder.
 
 ### `balanced`
 
-Keeps useful context while applying configured redaction patterns and reducing path exposure. This is the default mode.
+Keeps useful context while applying configured redaction patterns and reducing path and browser-URL exposure. This is the default mode.
 
-For terminal commands, values following common sensitive flags such as token, password, authorization, API-key, access-key, and private-key arguments are redacted in addition to the configured regex rules. For browsers, an inferred link is removed if its source window title had to be redacted; this prevents the original value from surviving only in percent-encoded URL form.
+For terminal commands, values following common sensitive flags such as token, password, authorization, API-key, access-key, and private-key arguments are redacted in addition to the configured regex rules. Exact Companion URLs use the `browser_url_mode` policy described above.
 
 ### `strict`
 
@@ -41,7 +58,7 @@ Uses generic descriptions and removes identifying browser URLs and buttons.
 
 The service can also clear Rich Presence when a known lock-screen window is detected.
 
-## Local files
+## Local files and local network state
 
 ### Windows
 
@@ -56,6 +73,8 @@ The service can also clear Rich Presence when a known lock-screen window is dete
 - Logs: `~/.local/state/discord-rich-presence/app.log`
 - Runtime state: `~/.local/state/discord-rich-presence/runtime/`
 - Terminal hook cache: `~/.cache/discord-rich-presence/`
+
+The optional Browser Companion bridge listens only on `127.0.0.1` (default port `32191`). POST requests require the Companion marker header and browser-origin CORS checks reject normal web-page origins. Like other loopback integrations, this is not intended as a security boundary against a malicious process already running as the same local user.
 
 Logs rotate locally. Runtime state is used by the control panel and single-instance guard. Terminal command cache entries expire according to `rules.terminal_command_ttl_secs`.
 
