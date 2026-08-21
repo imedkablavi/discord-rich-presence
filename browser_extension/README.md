@@ -22,17 +22,31 @@ Balanced privacy mode publishes only the URL origin by default (for example `htt
 
 Private/incognito metadata is suppressed by the desktop service. Browsers normally keep extensions disabled in private windows unless the user explicitly grants private-window access.
 
+## Prepare a clean unpacked extension directory
+
+For the simplest setup, especially when Brave/Chrome is installed as a Flatpak, run from the repository root:
+
+```bash
+bash scripts/prepare-browser-companion.sh
+```
+
+The helper copies only the extension files to a clean `CYBREX-Browser-Companion` directory in the user's Downloads folder and prints the exact directory to select.
+
+Do **not** choose the `discord-rich-presence` repository root in **Load unpacked**. The repository contains Python directories such as `__pycache__`; Chromium-family browsers reject reserved extension filenames beginning with `_` when they are inside the selected extension directory.
+
 ## Load unpacked in Brave / Chrome / Edge
 
 1. Open the browser extension management page.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked**.
-4. Select this `browser_extension` directory.
+4. Select either the clean directory printed by `scripts/prepare-browser-companion.sh` or this repository's `browser_extension` directory specifically.
 5. Start the desktop service and look for:
 
 ```text
 Browser companion listening on http://127.0.0.1:32191
 ```
+
+After the extension is loaded, reload it from the browser's extension page whenever development files under `browser_extension/` change.
 
 ## Temporary install in Firefox
 
