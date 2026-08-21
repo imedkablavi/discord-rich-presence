@@ -1,11 +1,10 @@
 {
   "manifest_version": 3,
   "name": "CYBREX Rich Presence Companion",
-  "version": "0.1.0",
-  "description": "Shares the active browser tab and media metadata with the local CYBREX Discord Rich Presence service.",
+  "version": "0.2.0",
+  "description": "Shares active web-tab and media metadata with the local CYBREX Discord Rich Presence service.",
   "permissions": ["tabs"],
   "host_permissions": [
-    "<all_urls>",
     "http://127.0.0.1:32191/*"
   ],
   "background": {
@@ -14,7 +13,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": false
