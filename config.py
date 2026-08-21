@@ -54,6 +54,14 @@ DEFAULT_CONFIG = {
         'ttl_secs': 15,
         'domain_services': {},
     },
+    'cs2_gsi': {
+        # Valve Game State Integration. The listener binds IPv4 loopback only
+        # and authenticates each POST with a locally generated token.
+        'enabled': True,
+        'auto_install': True,
+        'port': 32192,
+        'ttl_secs': 30,
+    },
     'images': {
         'use_external_app_icons': True,
         'icon_overrides': {},
@@ -284,14 +292,20 @@ class Config:
                 base[key] = copy.deepcopy(value)
 
     @staticmethod
-    def _validate_url(value: Any, name: str, allow_empty: bool = True):
+    def _validate_url(
+        value: Any,
+        name: str,
+        allow_empty: bool = True,
+        *,
+        max_length: int = 512,
+    ):
         url = str(value or '').strip()
         if not url and allow_empty:
             return
         if not url.startswith(('https://', 'http://')):
             raise ValueError(f'{name} must start with http:// or https://')
-        if len(url) > 512:
-            raise ValueError(f'{name} must be at most 512 characters')
+        if len(url) > max_length:
+            raise ValueError(f'{name} must be at most {max_length} characters')
 
     @staticmethod
     def _validate_buttons(buttons: Any, name: str):
@@ -305,7 +319,12 @@ class Config:
             label = str(button.get('label', '')).strip()
             if not (1 <= len(label) <= 32):
                 raise ValueError('Discord button labels must be 1-32 characters')
-            Config._validate_url(button.get('url', ''), 'Discord button URL', allow_empty=False)
+            Config._validate_url(
+                button.get('url', ''),
+                'Discord button URL',
+                allow_empty=False,
+                max_length=512,
+            )
 
     @staticmethod
     def _validate_string_list(
@@ -406,6 +425,29 @@ class Config:
             if not (1 <= len(name) <= 80):
                 raise ValueError('browser_companion.domain_services labels must be 1-80 characters')
 
+        cs2 = data.get('cs2_gsi', {})
+        if not isinstance(cs2, dict):
+            raise ValueError('cs2_gsi must be an object')
+        for key in ('enabled', 'auto_install'):
+            if not isinstance(cs2.get(key, True), bool):
+                raise ValueError(f'cs2_gsi.{key} must be true or false')
+        cs2_port = cs2.get('port', 32192)
+        if (
+            isinstance(cs2_port, bool)
+            or not isinstance(cs2_port, int)
+            or cs2_port < 1024
+            or cs2_port > 65535
+        ):
+            raise ValueError('cs2_gsi.port must be an integer between 1024 and 65535')
+        cs2_ttl = cs2.get('ttl_secs', 30)
+        if (
+            isinstance(cs2_ttl, bool)
+            or not isinstance(cs2_ttl, (int, float))
+            or cs2_ttl < 5
+            or cs2_ttl > 300
+        ):
+            raise ValueError('cs2_gsi.ttl_secs must be between 5 and 300 seconds')
+
         images = data.get('images', {})
         if not isinstance(images, dict):
             raise ValueError('images must be an object')
@@ -481,7 +523,11 @@ class Config:
                 raise ValueError(f'override.{key} must be true or false')
         Config._validate_buttons(override.get('buttons', []), 'override.buttons')
         for key in ('details_url', 'state_url', 'large_url', 'small_url'):
-            Config._validate_url(override.get(key, ''), f'override.{key}')
+            Config._validate_url(
+                override.get(key, ''),
+                f'override.{key}',
+                max_length=256,
+            )
         for key in ('details', 'state', 'large_text', 'small_text', 'party_id'):
             value = override.get(key, '')
             if not isinstance(value, str) or len(value) > 512:
