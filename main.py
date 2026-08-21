@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from pypresence import DiscordNotFound, InvalidID, InvalidPipe, Presence
 
+from activity_priority import ActivityPriorityEngine
 from config import Config
 from detectors.browser import BrowserDetector
 from detectors.coding import CodingDetector
@@ -64,6 +65,7 @@ class DiscordRichPresenceService:
         self.coding_detector = CodingDetector(config)
         self.media_detector = MediaDetector(config)
         self.gaming_detector = GamingDetector(config)
+        self.priority_engine = ActivityPriorityEngine(config)
         self.presence_builder = PresenceBuilder(config)
 
     def _runtime_update(self, **fields: Any):
@@ -355,40 +357,45 @@ class DiscordRichPresenceService:
         if not self._is_app_allowed(app_name):
             return None
 
+        candidates: Dict[str, Dict[str, Any]] = {}
+
         gaming = self.gaming_detector.detect(window_info)
         if gaming and gaming.get('is_game'):
             game_name = str(gaming.get('game_name') or '').lower()
             if not self._is_game_allowed(game_name):
                 return None
-            return self.presence_builder.build(gaming)
+            candidates['gaming'] = gaming
 
         media = self.media_detector.detect(window_info)
         if media and media.get('is_playing'):
-            return self.presence_builder.build(media)
+            candidates['media'] = media
 
         terminal = self.terminal_detector.detect(window_info)
         if terminal and terminal.get('has_command'):
-            return self.presence_builder.build(terminal)
+            candidates['terminal'] = terminal
 
         coding = self.coding_detector.detect(window_info)
         if coding:
-            return self.presence_builder.build(coding)
+            candidates['coding'] = coding
 
         browser = self.browser_detector.detect(window_info)
         if browser:
-            searchable = f"{browser.get('service', '')} {browser.get('page_title', '')}".strip()
+            searchable = ' '.join(str(value or '') for value in (
+                browser.get('service'), browser.get('page_title'), browser.get('url')
+            )).strip()
             if not self._is_site_allowed(searchable):
                 return None
-            return self.presence_builder.build(browser)
+            candidates['browser'] = browser
 
-        if not self.config.get('rules.enabled_detectors.application', True):
-            return None
-        generic = {
-            'type': 'application',
-            'app_name': window_info.get('app_name', 'Unknown'),
-            'window_title': window_info.get('title', ''),
-        }
-        return self.presence_builder.build(generic)
+        if self.config.get('rules.enabled_detectors.application', True):
+            candidates['application'] = {
+                'type': 'application',
+                'app_name': window_info.get('app_name', 'Unknown'),
+                'window_title': window_info.get('title', ''),
+            }
+
+        selected = self.priority_engine.choose(window_info, candidates)
+        return self.presence_builder.build(selected) if selected else None
 
     def _is_game_allowed(self, game_name: str) -> bool:
         whitelist = [str(value).lower() for value in (self.config.get('rules.whitelist.games', []) or [])]
@@ -461,14 +468,14 @@ class DiscordRichPresenceService:
                     )
                     if self.once:
                         break
-                    interval = float(self.config.get('update_interval_secs', 5))
+                    interval = float(self.config.get('update_interval_secs', 2))
                     self._wait(max(1.0, interval))
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
                     self.logger.error('Error in main loop: %s', e, exc_info=True)
                     self._runtime_update(state='loop_error', last_error=str(e)[:300])
-                    self._wait(max(1.0, float(self.config.get('update_interval_secs', 5))))
+                    self._wait(max(1.0, float(self.config.get('update_interval_secs', 2))))
         except KeyboardInterrupt:
             self.logger.info('Received interrupt signal')
         finally:
