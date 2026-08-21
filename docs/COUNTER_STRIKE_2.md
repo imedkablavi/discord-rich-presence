@@ -99,23 +99,23 @@ curl -s http://127.0.0.1:32192/v1/health
 curl -s http://127.0.0.1:32192/v1/status
 ```
 
-`/v1/status` does not expose the authentication token, Steam ID, player name, weapons, money, health, positions, or other players. It is bound to IPv4 loopback rather than an external interface.
+`/v1/status` intentionally exposes only `connected`, `age_ms`, and `has_match_context` metadata. It does not reveal map, mode, side, authentication token, Steam ID, player name, weapons, money, health, positions, or other players. It is bound to IPv4 loopback rather than an external interface.
 
 ## Data minimization
 
-The generated GSI configuration requests only:
+The generated GSI configuration requests only three components:
 
 - `provider`;
 - `map`;
-- `round`;
-- `player_id`;
-- `phase_countdowns`.
+- `player_id`.
+
+`map` already contains the game mode, map identifier, map phase/round number, and CT/T score context needed for this Rich Presence. Separate `round` and `phase_countdowns` subscriptions are therefore not requested.
 
 `player_id` is sufficient for GSI to expose the current player/spectatee side and activity, so the integration does not need `player_state` just to determine CT/T. The GSI transport may include identification fields inside `player_id`; the bridge does not retain them and does not send them to Discord.
 
-It intentionally does **not** request `allplayers`, player weapons, or player state. The desktop bridge additionally discards fields it does not need after parsing. In particular it does not retain player names, Steam IDs, health, money, weapons, positions, all-player state, or team names.
+It intentionally does **not** request `round`, `phase_countdowns`, `allplayers`, player weapons, player state, positions, match stats, grenade state, or bomb state. The desktop bridge additionally discards fields it does not need after parsing. In particular it does not retain player names, Steam IDs, health, money, weapons, positions, all-player state, or team names.
 
-The listener binds to `127.0.0.1`, uses a random local authentication token, validates CS2 App ID `730`, limits request sizes, applies socket timeouts, and expires stale game state automatically. Invalid/foreign authenticated Valve payloads are rejected instead of being interpreted as CS2.
+The listener binds to `127.0.0.1`, uses a random local authentication token, validates CS2 App ID `730`, limits request sizes, caps concurrent request workers, applies socket timeouts, and expires stale game state automatically. Invalid/foreign authenticated Valve payloads are rejected instead of being interpreted as CS2.
 
 ## Supported mode labels
 
