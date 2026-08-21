@@ -1,12 +1,12 @@
 # CYBREX Browser Companion
 
-The Browser Companion is optional. It gives the desktop service exact browser tab and media context that foreground-window titles and MPRIS often cannot provide reliably.
+The Browser Companion is optional. It gives the desktop service exact browser-tab and media context that foreground-window titles and MPRIS often cannot provide reliably.
 
-It does not connect to Discord itself. It only sends recent activity snapshots to the desktop service over `127.0.0.1:32191`.
+It does not connect to Discord itself. It sends short-lived activity snapshots only to the local desktop service over `127.0.0.1:32191`.
 
 ## What it adds
 
-- exact current tab URL and page title
+- exact current web-tab URL and page title
 - exact service/domain identification
 - browser video/audio playing state, position, and duration
 - YouTube title/channel enrichment
@@ -14,13 +14,27 @@ It does not connect to Discord itself. It only sends recent activity snapshots t
 - correct tab-aware activity priority when media is playing in another tab
 - declarative self-hosted/custom-domain support on the desktop side
 
+## Permissions
+
+The extension runs its content script only on normal `http://` and `https://` pages. It does not request access to `file://` pages.
+
+It requests the browser `tabs` permission because the background component needs the active tab ID/window ID and must request fresh snapshots when tab focus changes. Its only explicit network host permission is:
+
+```text
+http://127.0.0.1:32191/*
+```
+
+The background component is not granted arbitrary cross-origin network access. The desktop bridge is loopback-only, and extension requests are aborted after a short timeout if the local service is unavailable.
+
 ## Privacy model
 
-The bridge binds to loopback only and keeps snapshots in memory. The desktop service does not upload browser history or Companion data to a CYBREX server.
+The bridge keeps a bounded set of recent snapshots in memory. Closed tabs are removed immediately when the browser reports their closure, old snapshots expire automatically, and the service clears Companion state when the bridge stops.
+
+The desktop service does not upload browser history or Companion data to a CYBREX server.
 
 Balanced privacy mode publishes only the URL origin by default (for example `https://www.youtube.com`), even though the extension can see the exact tab URL locally. This can be changed with `privacy.browser_url_mode`.
 
-Private/incognito metadata is suppressed by the desktop service. Browsers normally keep extensions disabled in private windows unless the user explicitly grants private-window access.
+Private/incognito metadata is treated conservatively by the desktop service. Browsers normally keep extensions disabled in private windows unless the user explicitly grants private-window access.
 
 ## Prepare a clean unpacked extension directory
 
@@ -46,6 +60,8 @@ Do **not** choose the `discord-rich-presence` repository root in **Load unpacked
 Browser companion listening on http://127.0.0.1:32191
 ```
 
+The toolbar badge shows `ON` when the local bridge accepts a snapshot and `OFF` when it is unavailable.
+
 After the extension is loaded, reload it from the browser's extension page whenever development files under `browser_extension/` change.
 
 ## Temporary install in Firefox
@@ -55,4 +71,8 @@ After the extension is loaded, reload it from the browser's extension page whene
 3. Choose **Load Temporary Add-on**.
 4. Select `manifest.json` from this directory.
 
-The current files are for development/testing. Store packaging and signed extension releases should be handled separately before a public release.
+The manifest intentionally includes both the Manifest V3 service-worker background entry used by Chromium-family browsers and the background-script fallback used by Firefox.
+
+## Public store release
+
+The repository/release ZIP is suitable for unpacked local installation. Official Chrome Web Store or Firefox AMO publication requires the corresponding developer account, store metadata/privacy disclosures, and the store review/signing process. Do not describe the unpacked ZIP as store-signed until that process has actually been completed.
