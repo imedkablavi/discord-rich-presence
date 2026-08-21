@@ -188,3 +188,41 @@ def test_cs2_steam_app_alias_and_deathmatch_omit_fake_round_score(tmp_path):
     payload = PresenceBuilder(config).build(activity)
     assert payload['details'] == 'Counter-Strike 2 · Deathmatch'
     assert payload['state'] == 'Dust II · Terrorists'
+
+
+def test_cs2_gsi_settings_hot_reload_without_service_restart(tmp_path, monkeypatch):
+    import detectors.gaming as gaming_module
+
+    config = _config(tmp_path)
+    config.set('cs2_gsi.auto_install', False)
+    detector = GamingDetector(config)
+
+    fake_bridge = SimpleNamespace(start=lambda: True, latest=lambda: None)
+    stop_calls = []
+    remove_calls = []
+
+    monkeypatch.setattr(
+        gaming_module,
+        'get_cs2_gsi',
+        lambda _config, start=False: fake_bridge,
+    )
+    monkeypatch.setattr(gaming_module, 'stop_cs2_gsi', lambda: stop_calls.append(True))
+    monkeypatch.setattr(
+        detector,
+        '_remove_cybrex_gsi_config',
+        lambda: remove_calls.append(True),
+    )
+
+    # Enabling GSI after the detector already exists must start the bridge on the
+    # next detection cycle without restarting the desktop service.
+    config.set('cs2_gsi.enabled', True)
+    detector.detect({})
+    assert detector.cs2_gsi is fake_bridge
+
+    # Disabling it again must stop the old bridge and remove our game cfg so a
+    # future CS2 launch does not keep posting to a disabled endpoint.
+    config.set('cs2_gsi.enabled', False)
+    detector.detect({})
+    assert detector.cs2_gsi is None
+    assert stop_calls
+    assert remove_calls
