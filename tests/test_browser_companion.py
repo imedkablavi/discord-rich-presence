@@ -84,6 +84,38 @@ def test_browser_detector_prefers_exact_companion_metadata(tmp_path: Path):
     assert activity['url_is_exact'] is True
 
 
+def test_self_hosted_domain_mapping_requires_no_custom_javascript(tmp_path: Path):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('browser_companion.enabled', False)
+    cfg.set('browser_companion.domain_services', {
+        'media.home.example': 'Jellyfin',
+        '*.corp.example': 'Company Portal',
+    })
+    detector = BrowserDetector(cfg)
+
+    class FakeCompanion:
+        def __init__(self, url):
+            self.url = url
+
+        def latest(self, _browser_name):
+            return _snapshot(
+                url=self.url,
+                title='Dashboard',
+                service='',
+                media={'playing': False},
+            )
+
+    detector.companion = FakeCompanion('https://media.home.example/web/index.html')
+    exact = detector.detect({'app_name': 'brave', 'title': 'Dashboard — Brave'})
+    assert exact is not None
+    assert exact['service'] == 'Jellyfin'
+
+    detector.companion = FakeCompanion('https://git.corp.example/projects')
+    wildcard = detector.detect({'app_name': 'brave', 'title': 'Projects — Brave'})
+    assert wildcard is not None
+    assert wildcard['service'] == 'Company Portal'
+
+
 def test_private_window_never_reuses_normal_companion_snapshot(tmp_path: Path):
     cfg = Config(tmp_path / 'config.yaml')
     cfg.set('browser_companion.enabled', False)
