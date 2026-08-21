@@ -8,7 +8,10 @@ import cs2_gsi as cs2_gsi_module
 import detectors.gaming as gaming_module
 
 
-def test_auto_install_is_skipped_when_gsi_listener_cannot_bind(monkeypatch, tmp_path):
+def test_auto_install_is_skipped_and_stale_cfg_removed_when_listener_cannot_bind(
+    monkeypatch,
+    tmp_path,
+):
     config = Config(tmp_path / 'config.yaml')
     config.set('rules.enabled_detectors.gaming', True)
     config.set('cs2_gsi.enabled', True)
@@ -22,7 +25,11 @@ def test_auto_install_is_skipped_when_gsi_listener_cannot_bind(monkeypatch, tmp_
         lambda _config, start=False: candidate,
     )
 
-    discover = Mock(return_value=[tmp_path / 'fake-cs2-cfg'])
+    cfg_dir = tmp_path / 'game' / 'csgo' / 'cfg'
+    cfg_dir.mkdir(parents=True)
+    stale_cfg = cfg_dir / 'gamestate_integration_cybrex.cfg'
+    stale_cfg.write_text('stale', encoding='utf-8')
+    discover = Mock(return_value=[cfg_dir])
     install = Mock()
     monkeypatch.setattr(gaming_module, 'discover_cs2_cfg_dirs', discover)
     monkeypatch.setattr(gaming_module, 'install_gsi_config', install)
@@ -31,7 +38,8 @@ def test_auto_install_is_skipped_when_gsi_listener_cannot_bind(monkeypatch, tmp_
 
     assert detector.cs2_gsi is None
     candidate.start.assert_called_once_with()
-    discover.assert_not_called()
+    discover.assert_called_once_with()
+    assert not stale_cfg.exists()
     install.assert_not_called()
 
 
