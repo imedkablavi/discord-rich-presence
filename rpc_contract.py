@@ -157,11 +157,17 @@ def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         result.pop('end', None)
 
     if 'party_id' in result:
-        party_id = _clean_text(result['party_id'], 128)
-        if party_id is None:
+        raw_party_id = str(result['party_id']).strip()
+        # Party IDs are identifiers, not display text. Never truncate them:
+        # changing an overlong ID could silently point at a different party.
+        if (
+            not raw_party_id
+            or len(raw_party_id) > 128
+            or _contains_controls(raw_party_id)
+        ):
             result.pop('party_id', None)
         else:
-            result['party_id'] = party_id
+            result['party_id'] = raw_party_id
 
     if 'party_size' in result:
         party_size = result['party_size']
