@@ -1,4 +1,5 @@
 import pytest
+from pypresence.types import ActivityType
 
 from social_sdk_protocol import (
     MAX_PROTOCOL_LINE_BYTES,
@@ -33,7 +34,7 @@ def test_protocol_rejects_unknown_fields_and_oversized_lines():
 
 def test_activity_fields_use_specific_large_text_as_dynamic_name():
     fields = activity_fields({
-        'activity_type': 0,
+        'activity_type': ActivityType.PLAYING,
         'details': 'Counter-Strike 2 · Competitive',
         'state': 'Mirage · Counter-Terrorists · 8–6',
         'large_image': 'https://example.com/cs2.png',
@@ -41,6 +42,7 @@ def test_activity_fields_use_specific_large_text_as_dynamic_name():
         'buttons': [{'label': 'View on Steam', 'url': 'https://store.steampowered.com/app/730/'}],
     })
     assert fields['name'] == 'Counter-Strike 2'
+    assert fields['activity_type'] == 0
     assert fields['details'] == 'Counter-Strike 2 · Competitive'
     assert fields['button1_label'] == 'View on Steam'
     assert fields['button1_url'].endswith('/730/')
@@ -55,7 +57,7 @@ def test_dynamic_name_fallback_is_bounded_and_never_one_character():
 def test_encode_update_inherits_rpc_sanitizer_for_discord_url_limits():
     long_url = 'https://example.com/' + ('a' * 300)
     line = encode_update({
-        'activity_type': 0,
+        'activity_type': ActivityType.WATCHING,
         'details': 'Firefox',
         'state': 'Browsing',
         'large_text': 'Firefox',
@@ -63,4 +65,5 @@ def test_encode_update_inherits_rpc_sanitizer_for_discord_url_limits():
     })
     _, fields = decode_message(line)
     assert fields['name'] == 'Firefox'
+    assert fields['activity_type'] == '3'
     assert 'details_url' not in fields
