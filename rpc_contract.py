@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict
+from urllib.parse import urlsplit
 
 
 _TEXT_ALIASES = {'x': 'X.com', 'c': 'C language'}
@@ -17,7 +18,19 @@ def _http_url(value: Any, limit: int) -> str | None:
     text = str(value or '').strip().strip('`')
     if not text or len(text) > limit:
         return None
-    if not text.startswith(('https://', 'http://')):
+    if any(ord(char) < 32 or ord(char) == 127 for char in text):
+        return None
+    try:
+        parsed = urlsplit(text)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {'https', 'http'} or not hostname:
+        return None
+    # Rich Presence links never need URL userinfo. Reject it instead of risking
+    # accidental publication of credentials embedded in a browser/custom URL.
+    if parsed.username is not None or parsed.password is not None:
         return None
     return text
 
