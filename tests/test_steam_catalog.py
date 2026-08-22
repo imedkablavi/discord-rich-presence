@@ -19,7 +19,8 @@ def _write_manifest(steamapps: Path, appid: int, name: str, installdir: str) -> 
         '}\n',
         encoding='utf-8',
     )
-    (steamapps / 'common' / installdir).mkdir(parents=True, exist_ok=True)
+    if '/' not in installdir and '\\' not in installdir and installdir not in {'.', '..'}:
+        (steamapps / 'common' / installdir).mkdir(parents=True, exist_ok=True)
     return manifest
 
 
@@ -69,6 +70,54 @@ def test_catalog_filters_steam_runtime_tools(monkeypatch, tmp_path: Path):
 
     assert catalog.by_appid(123) is None
     assert catalog.by_appid(124) is None
+
+
+def test_catalog_rejects_manifest_installdir_traversal(monkeypatch, tmp_path: Path):
+    root = tmp_path / 'Steam'
+    steamapps = root / 'steamapps'
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    _write_manifest(steamapps, 991001, 'Traversal Game', '../outside')
+
+    monkeypatch.setattr(steam_catalog, '_steamapps_locations', lambda: [(root, steamapps)])
+    catalog = SteamGameCatalog()
+
+    assert catalog.by_appid(991001) is None
+
+
+def test_catalog_rejects_nested_or_absolute_installdir(monkeypatch, tmp_path: Path):
+    root = tmp_path / 'Steam'
+    steamapps = root / 'steamapps'
+    _write_manifest(steamapps, 991002, 'Nested Game', 'nested/game')
+    absolute = tmp_path / 'absolute-game'
+    absolute.mkdir()
+    _write_manifest(steamapps, 991003, 'Absolute Game', str(absolute))
+
+    monkeypatch.setattr(steam_catalog, '_steamapps_locations', lambda: [(root, steamapps)])
+    catalog = SteamGameCatalog()
+
+    assert catalog.by_appid(991002) is None
+    assert catalog.by_appid(991003) is None
+
+
+def test_catalog_ignores_missing_install_directory(monkeypatch, tmp_path: Path):
+    root = tmp_path / 'Steam'
+    steamapps = root / 'steamapps'
+    steamapps.mkdir(parents=True)
+    manifest = steamapps / 'appmanifest_991004.acf'
+    manifest.write_text(
+        '"AppState"\n{\n'
+        '    "appid" "991004"\n'
+        '    "name" "Missing Game"\n'
+        '    "installdir" "NoLongerInstalled"\n'
+        '}\n',
+        encoding='utf-8',
+    )
+
+    monkeypatch.setattr(steam_catalog, '_steamapps_locations', lambda: [(root, steamapps)])
+    catalog = SteamGameCatalog()
+
+    assert catalog.by_appid(991004) is None
 
 
 def test_gaming_detector_uses_generic_steam_catalog_metadata(tmp_path: Path):
