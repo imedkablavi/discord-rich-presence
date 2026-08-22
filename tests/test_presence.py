@@ -88,8 +88,8 @@ def test_browser_url_reaches_clickable_payload_and_button(tmp_path: Path):
 
 
 def test_long_browser_url_cannot_break_final_discord_payload(tmp_path: Path):
-    long_url = 'https://example.com/chat?' + ('conversation-part-' * 30)
-    assert len(long_url) > 256
+    long_url = 'https://example.com/chat?' + ('conversation-part-' * 20)
+    assert 256 < len(long_url) <= 512
 
     built = _builder(tmp_path).build({
         'type': 'browser',
@@ -105,10 +105,9 @@ def test_long_browser_url_cannot_break_final_discord_payload(tmp_path: Path):
     assert payload['state'] == 'Firefox'
     assert 'details_url' not in payload
     assert 'large_url' not in payload
-    # Button URLs have their own larger contract. If the original URL fits that
-    # contract, it must remain complete rather than being silently truncated.
-    if len(long_url) <= 512:
-        assert payload['buttons'][0]['url'] == long_url
+    # Button URLs use a separate 512-character limit and must stay byte-for-byte
+    # complete rather than being shortened into a broken link.
+    assert payload['buttons'][0]['url'] == long_url
 
 
 def test_strict_browser_does_not_emit_urls_or_buttons(tmp_path: Path):
