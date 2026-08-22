@@ -18,6 +18,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -41,6 +43,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -57,6 +61,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Validate Manifest V3 JSON and permission scope
         run: |
           python -m json.tool browser_extension/manifest.json >/dev/null
@@ -83,6 +89,9 @@ jobs:
           assert "changeInfo.status !== 'complete'" in background
           assert 'changeInfo.url' not in background
           assert 'changeInfo.title' not in background
+          assert "browser: String(payload?.browser || '')" in background
+          assert "const browser = String(previous?.browser || '').trim()" in background
+          assert 'if (!browser) return;' in background
           PY
       - name: Validate JavaScript and helper syntax
         run: |
@@ -122,6 +131,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Install Zsh
         run: |
           sudo apt-get update
@@ -159,6 +170,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -217,6 +230,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
