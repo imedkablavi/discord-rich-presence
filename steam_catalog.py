@@ -21,6 +21,9 @@ import psutil
 
 LOGGER = logging.getLogger(__name__)
 _REFRESH_SECS = 60.0
+_MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+_MAX_LIBRARY_VDF_BYTES = 4 * 1024 * 1024
+_MAX_MANIFESTS_PER_LIBRARY = 4096
 _STEAM_APP_CLASS_RE = re.compile(r'(?i)(?:^|[^a-z0-9])steam_app_(\d+)(?:$|[^0-9])')
 _STEAM_LAUNCH_RE = re.compile(r'(?i)SteamLaunch\s+AppId=(\d+)(?:\s|$)')
 _MANIFEST_FIELDS = {
@@ -75,7 +78,16 @@ class SteamGameCatalog:
         games: Dict[int, SteamGame] = {}
         for steam_root, steamapps in _steamapps_locations():
             try:
-                manifests = list(steamapps.glob('appmanifest_*.acf'))
+                manifests = []
+                for index, manifest in enumerate(steamapps.glob('appmanifest_*.acf')):
+                    if index >= _MAX_MANIFESTS_PER_LIBRARY:
+                        LOGGER.warning(
+                            'Steam library %s contains more than %d manifests; ignoring the remainder',
+                            steamapps,
+                            _MAX_MANIFESTS_PER_LIBRARY,
+                        )
+                        break
+                    manifests.append(manifest)
             except OSError:
                 continue
             for manifest in manifests:
@@ -258,15 +270,21 @@ def _steam_roots() -> Iterable[Path]:
         yield expanded
 
 
+def _read_small_text(path: Path, maximum: int) -> str:
+    try:
+        if not path.is_file() or path.stat().st_size > maximum:
+            return ''
+        return path.read_text(encoding='utf-8', errors='ignore')
+    except OSError:
+        return ''
+
+
 def _steamapps_locations() -> Iterable[tuple[Path, Path]]:
     seen: set[str] = set()
     for steam_root in _steam_roots():
         libraries = [steam_root]
         library_file = steam_root / 'steamapps/libraryfolders.vdf'
-        try:
-            text = library_file.read_text(encoding='utf-8', errors='ignore')
-        except OSError:
-            text = ''
+        text = _read_small_text(library_file, _MAX_LIBRARY_VDF_BYTES)
         for match in re.finditer(r'"path"\s+"([^"]+)"', text, re.IGNORECASE):
             libraries.append(Path(match.group(1).replace('\\\\', '\\')))
 
@@ -281,12 +299,32 @@ def _steamapps_locations() -> Iterable[tuple[Path, Path]]:
             yield steam_root, steamapps
 
 
-def _parse_manifest(manifest: Path, steam_root: Path, steamapps: Path) -> Optional[SteamGame]:
+def _safe_install_path(steamapps: Path, installdir: str) -> Optional[Path]:
+    name = str(installdir or '').strip()
+    if (
+        not name
+        or name in {'.', '..'}
+        or '/' in name
+        or '\\' in name
+        or Path(name).is_absolute()
+    ):
+        return None
+
+    common = steamapps / 'common'
+    candidate = common / name
     try:
-        if manifest.stat().st_size > 2 * 1024 * 1024:
+        common_resolved = common.resolve(strict=False)
+        candidate_resolved = candidate.resolve(strict=False)
+        if os.path.commonpath((str(candidate_resolved), str(common_resolved))) != str(common_resolved):
             return None
-        text = manifest.read_text(encoding='utf-8', errors='ignore')
-    except OSError:
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate if candidate.is_dir() else None
+
+
+def _parse_manifest(manifest: Path, steam_root: Path, steamapps: Path) -> Optional[SteamGame]:
+    text = _read_small_text(manifest, _MAX_MANIFEST_BYTES)
+    if not text:
         return None
 
     values: Dict[str, str] = {}
@@ -308,7 +346,9 @@ def _parse_manifest(manifest: Path, steam_root: Path, steamapps: Path) -> Option
     if any(marker in lowered for marker in _NON_GAME_NAME_MARKERS):
         return None
 
-    install_path = steamapps / 'common' / installdir
+    install_path = _safe_install_path(steamapps, installdir)
+    if install_path is None:
+        return None
     return SteamGame(
         appid=appid,
         name=name[:160],
