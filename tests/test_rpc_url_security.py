@@ -37,6 +37,45 @@ def test_rpc_drops_unsafe_button_urls(url: str):
     assert 'buttons' not in payload
 
 
+@pytest.mark.parametrize('url', [
+    'https://user:secret@example.com/icon.png',
+    'https://example.com/icon.png\nInjected: yes',
+    'https://example.com:bad/icon.png',
+])
+def test_rpc_drops_unsafe_external_artwork_urls(url: str):
+    payload = sanitize_rpc_payload({
+        'details': 'Safe activity',
+        'large_image': url,
+        'small_image': url,
+    })
+
+    assert 'large_image' not in payload
+    assert 'small_image' not in payload
+
+
+def test_rpc_keeps_asset_keys_and_safe_external_artwork():
+    payload = sanitize_rpc_payload({
+        'details': 'Safe activity',
+        'large_image': 'counter_strike_2',
+        'small_image': 'https://example.com/icon.png',
+    })
+
+    assert payload['large_image'] == 'counter_strike_2'
+    assert payload['small_image'] == 'https://example.com/icon.png'
+
+
+def test_rpc_normalizes_control_characters_in_display_text():
+    payload = sanitize_rpc_payload({
+        'details': 'Playing\nCounter-Strike 2',
+        'state': 'Mirage\tCompetitive',
+        'large_text': 'Counter-Strike 2\rLive',
+    })
+
+    assert payload['details'] == 'Playing Counter-Strike 2'
+    assert payload['state'] == 'Mirage Competitive'
+    assert payload['large_text'] == 'Counter-Strike 2 Live'
+
+
 def test_rpc_keeps_normal_https_urls_within_field_limits():
     payload = sanitize_rpc_payload({
         'details': 'Safe activity',
