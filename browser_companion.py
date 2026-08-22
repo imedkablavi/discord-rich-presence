@@ -9,7 +9,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 from config import Config
 
@@ -62,6 +62,17 @@ class BrowserCompanionBridge:
                     pass
 
             def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+                # A healthy extension posts snapshots frequently. Do not flood
+                # verbose logs with routine 200/204 requests; unexpected status
+                # codes remain visible for troubleshooting.
+                status = 0
+                if len(args) >= 2:
+                    try:
+                        status = int(args[1])
+                    except (TypeError, ValueError):
+                        status = 0
+                if status in {200, 204}:
+                    return
                 LOGGER.debug('Browser companion: ' + format, *args)
 
             def _origin_allowed(self) -> bool:
@@ -221,16 +232,18 @@ class BrowserCompanionBridge:
         if not tab_id:
             raise ValueError('tab_id_required')
 
-        if bool(payload.get('removed')):
-            with self._lock:
-                stale = [key for key in self._records if key[1] == tab_id]
-                for key in stale:
-                    self._records.pop(key, None)
-            return
-
+        # Browser is part of the record identity. Tab IDs are scoped to one
+        # browser profile and can collide across Brave/Firefox/Chrome. Requiring
+        # it for removals prevents closing tab 42 in one browser from deleting
+        # tab 42 snapshots belonging to another browser.
         browser = self._clean_text(payload.get('browser'), 40)
         if not browser:
             raise ValueError('browser_required')
+
+        if bool(payload.get('removed')):
+            with self._lock:
+                self._records.pop((browser.lower(), tab_id), None)
+            return
 
         url = self._clean_url(payload.get('url'))
         media = payload.get('media') if isinstance(payload.get('media'), dict) else {}
@@ -375,16 +388,26 @@ class BrowserCompanionBridge:
 
     @staticmethod
     def _clean_url(value: Any) -> Optional[str]:
-        raw = str(value or '').replace('\x00', '').strip()
-        if not raw:
+        raw = str(value or '').strip()
+        if not raw or len(raw) > 2048:
+            return None
+        # Control characters can confuse downstream URL parsers/logging and
+        # should never be part of an activity URL.
+        if any(ord(char) < 32 or ord(char) == 127 for char in raw):
             return None
         try:
-            parsed = urlparse(raw)
+            parsed = urlsplit(raw)
+            # Accessing hostname/port validates malformed bracketed hosts/ports.
+            hostname = parsed.hostname
+            _ = parsed.port
         except ValueError:
             return None
-        if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        if parsed.scheme.lower() not in {'http', 'https'} or not hostname:
             return None
-        return raw[:2048]
+        # Userinfo can contain credentials. Rich Presence never needs it.
+        if parsed.username is not None or parsed.password is not None:
+            return None
+        return raw
 
 
 _BRIDGES: Dict[tuple[str, int], BrowserCompanionBridge] = {}
