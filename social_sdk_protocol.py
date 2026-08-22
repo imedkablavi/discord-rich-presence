@@ -107,20 +107,32 @@ def derive_display_name(payload: Mapping[str, Any]) -> str:
     return 'CYBREX Activity'
 
 
+def _activity_type_value(value: object) -> int:
+    raw = getattr(value, 'value', value)
+    try:
+        result = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return result if 0 <= result <= 6 else 0
+
+
 def activity_fields(payload: Mapping[str, Any], *, name: str | None = None) -> dict[str, object]:
     """Convert a legacy-compatible payload to Social SDK helper fields."""
     clean = sanitize_rpc_payload(dict(payload or {}))
+    explicit_name = str(name or '').strip()
     fields: dict[str, object] = {
-        'name': (str(name).strip()[:MAX_DYNAMIC_NAME] if name else derive_display_name(clean)),
+        'name': explicit_name[:MAX_DYNAMIC_NAME] if len(explicit_name) >= 2 else derive_display_name(clean),
     }
 
     for key in (
-        'activity_type', 'details', 'state', 'details_url', 'state_url',
+        'details', 'state', 'details_url', 'state_url',
         'large_image', 'large_text', 'large_url', 'small_image', 'small_text',
         'small_url', 'start', 'end',
     ):
         if key in clean:
             fields[key] = clean[key]
+    if 'activity_type' in clean:
+        fields['activity_type'] = _activity_type_value(clean['activity_type'])
 
     buttons = clean.get('buttons')
     if isinstance(buttons, list):
