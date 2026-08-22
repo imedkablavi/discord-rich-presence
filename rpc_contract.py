@@ -14,6 +14,7 @@ _URL_KEYS = ('details_url', 'state_url', 'large_url', 'small_url')
 _ASSET_KEYS = ('large_image', 'small_image')
 _DISCORD_URL_MAX = 256
 _BUTTON_URL_MAX = 512
+_ASSET_MAX = 300
 _ALLOWED_KEYS = {
     'activity_type',
     'state', 'state_url',
@@ -26,11 +27,25 @@ _ALLOWED_KEYS = {
 }
 
 
+def _contains_controls(text: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
+def _clean_text(value: Any, limit: int) -> str | None:
+    text = str(value or '').strip()
+    if not text:
+        return None
+    # Discord text fields do not need embedded control characters. Normalize
+    # them to spaces so malformed page titles/custom labels cannot trip schema
+    # validation while preserving readable text.
+    text = ''.join(' ' if ord(char) < 32 or ord(char) == 127 else char for char in text)
+    text = ' '.join(text.split())
+    return text[:limit] or None
+
+
 def _http_url(value: Any, limit: int) -> str | None:
     text = str(value or '').strip().strip('`')
-    if not text or len(text) > limit:
-        return None
-    if any(ord(char) < 32 or ord(char) == 127 for char in text):
+    if not text or len(text) > limit or _contains_controls(text):
         return None
     try:
         parsed = urlsplit(text)
@@ -68,20 +83,30 @@ def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     for key in _TEXT_KEYS:
         if key not in result:
             continue
-        text = str(result[key]).strip()
+        text = _clean_text(result[key], 128)
+        if text is None:
+            result.pop(key, None)
+            continue
         if key in {'large_text', 'small_text'}:
             text = _TEXT_ALIASES.get(text.lower(), text)
         if len(text) < 2:
             result.pop(key, None)
         else:
-            result[key] = text[:128]
+            result[key] = text
 
     for key in _ASSET_KEYS:
         if key not in result:
             continue
         value = str(result[key]).strip()
-        if not (1 <= len(value) <= 300):
+        if not (1 <= len(value) <= _ASSET_MAX) or _contains_controls(value):
             result.pop(key, None)
+            continue
+        if value.lower().startswith(('http://', 'https://')):
+            safe_url = _http_url(value, _ASSET_MAX)
+            if safe_url is None:
+                result.pop(key, None)
+            else:
+                result[key] = safe_url
         else:
             result[key] = value
 
@@ -101,9 +126,9 @@ def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             for button in buttons[:2]:
                 if not isinstance(button, dict):
                     continue
-                label = str(button.get('label', '')).strip()
+                label = _clean_text(button.get('label', ''), 32)
                 url = _http_url(button.get('url'), _BUTTON_URL_MAX)
-                if 1 <= len(label) <= 32 and url:
+                if label and 1 <= len(label) <= 32 and url:
                     candidate = {'label': label, 'url': url}
                     if candidate not in safe_buttons:
                         safe_buttons.append(candidate)
@@ -132,8 +157,8 @@ def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         result.pop('end', None)
 
     if 'party_id' in result:
-        party_id = str(result['party_id']).strip()
-        if not party_id or len(party_id) > 128:
+        party_id = _clean_text(result['party_id'], 128)
+        if party_id is None:
             result.pop('party_id', None)
         else:
             result['party_id'] = party_id
