@@ -96,17 +96,21 @@ class PrivacyRedactor:
 
         try:
             parsed = urllib.parse.urlsplit(raw)
+            host = parsed.hostname
+            port = parsed.port
         except ValueError:
             return None
-        if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
+        if parsed.scheme not in {'http', 'https'} or not host:
             return None
 
-        host = parsed.hostname
+        # Rebuild netloc from hostname/port only. Userinfo is intentionally
+        # discarded so credentials can never be published even if a browser or
+        # custom integration somehow supplies them.
         if ':' in host and not host.startswith('['):
             host = f'[{host}]'
         netloc = host
-        if parsed.port:
-            netloc = f'{netloc}:{parsed.port}'
+        if port:
+            netloc = f'{netloc}:{port}'
 
         if policy == 'domain':
             return urllib.parse.urlunsplit((parsed.scheme, netloc, '', '', ''))
@@ -123,9 +127,23 @@ class PrivacyRedactor:
         except ValueError:
             query_items = []
         query = urllib.parse.urlencode(query_items, doseq=True)
+
+        # A token or reset secret can also live in a URL path. Decode path
+        # segments for pattern detection, redact, then re-encode them. This keeps
+        # ``full`` useful for page context without treating path secrets as safe.
+        try:
+            decoded_path = urllib.parse.unquote(parsed.path or '/', errors='strict')
+        except (UnicodeDecodeError, ValueError):
+            return None
+        redacted_path = self._redact_sensitive_patterns(decoded_path)
+        safe_path = urllib.parse.quote(
+            redacted_path,
+            safe="/:@-._~!$&'()*+,;=[]",
+        ) or '/'
+
         # Fragments are intentionally dropped even in full mode because OAuth
         # and SPA tokens are commonly placed there.
-        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path or '/', query, ''))
+        return urllib.parse.urlunsplit((parsed.scheme, netloc, safe_path, query, ''))
 
     def _apply_strict_mode(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         activity_type = activity.get('type')
