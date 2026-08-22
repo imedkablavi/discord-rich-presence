@@ -4,6 +4,7 @@ from pypresence.types import ActivityType
 
 from config import Config
 from presence import PresenceBuilder
+from rpc_contract import sanitize_rpc_payload
 
 
 def _builder(tmp_path: Path) -> PresenceBuilder:
@@ -84,6 +85,30 @@ def test_browser_url_reaches_clickable_payload_and_button(tmp_path: Path):
     assert payload['details_url'].startswith('https://www.youtube.com/')
     assert payload['large_url'] == payload['details_url']
     assert payload['buttons'][0]['url'] == payload['details_url']
+
+
+def test_long_browser_url_cannot_break_final_discord_payload(tmp_path: Path):
+    long_url = 'https://example.com/chat?' + ('conversation-part-' * 30)
+    assert len(long_url) > 256
+
+    built = _builder(tmp_path).build({
+        'type': 'browser',
+        'browser_name': 'Firefox',
+        'is_private': False,
+        'page_title': 'QA conversation',
+        'service': '',
+        'url': long_url,
+    })
+    payload = sanitize_rpc_payload(built)
+
+    assert payload['details'] == 'QA conversation'
+    assert payload['state'] == 'Firefox'
+    assert 'details_url' not in payload
+    assert 'large_url' not in payload
+    # Button URLs have their own larger contract. If the original URL fits that
+    # contract, it must remain complete rather than being silently truncated.
+    if len(long_url) <= 512:
+        assert payload['buttons'][0]['url'] == long_url
 
 
 def test_strict_browser_does_not_emit_urls_or_buttons(tmp_path: Path):
