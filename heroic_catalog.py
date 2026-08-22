@@ -21,6 +21,7 @@ import psutil
 
 _REFRESH_SECS = 60.0
 _MAX_JSON_BYTES = 16 * 1024 * 1024
+_MAX_GAMES = 4096
 _GENERIC_EXE_STEMS = {
     'game', 'launcher', 'start', 'run', 'wine', 'wine64', 'wineserver',
     'explorer', 'services', 'cmd', 'powershell',
@@ -60,6 +61,10 @@ class HeroicGameCatalog:
             for game in _read_installed(installed_json):
                 key = (os.path.normcase(str(game.install_path)), game.app_name.lower())
                 games[key] = game
+                if len(games) >= _MAX_GAMES:
+                    break
+            if len(games) >= _MAX_GAMES:
+                break
 
         self._games = sorted(
             games.values(),
@@ -162,6 +167,22 @@ def _installed_json_paths() -> list[Path]:
     return unique
 
 
+def _specific_install_path(value: str) -> Optional[Path]:
+    try:
+        path = Path(value).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not path.is_dir():
+        return None
+    try:
+        anchor = Path(path.anchor).resolve(strict=False) if path.anchor else None
+    except (OSError, RuntimeError, ValueError):
+        anchor = None
+    if anchor is not None and path == anchor:
+        return None
+    return path
+
+
 def _read_installed(path: Path) -> list[HeroicGame]:
     try:
         if not path.is_file() or path.stat().st_size > _MAX_JSON_BYTES:
@@ -174,6 +195,8 @@ def _read_installed(path: Path) -> list[HeroicGame]:
 
     games: list[HeroicGame] = []
     for key, value in data.items():
+        if len(games) >= _MAX_GAMES:
+            break
         if not isinstance(value, dict) or bool(value.get('is_dlc', False)):
             continue
         title = str(value.get('title') or '').strip()
@@ -182,8 +205,8 @@ def _read_installed(path: Path) -> list[HeroicGame]:
         app_name = str(value.get('app_name') or key or '').strip()
         if not title or not install:
             continue
-        install_path = Path(install).expanduser()
-        if not install_path.is_dir():
+        install_path = _specific_install_path(install)
+        if install_path is None:
             continue
         games.append(HeroicGame(
             app_name=app_name[:160],
