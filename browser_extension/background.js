@@ -93,7 +93,11 @@ function shouldSuppressSnapshot(tabKey, payload) {
   const now = Date.now();
   const serialized = JSON.stringify(payload);
   const previous = recentSnapshots.get(tabKey);
-  recentSnapshots.set(tabKey, { serialized, at: now });
+  recentSnapshots.set(tabKey, {
+    serialized,
+    at: now,
+    browser: String(payload?.browser || ''),
+  });
 
   if (recentSnapshots.size > MAX_RECENT_TABS) {
     const oldest = [...recentSnapshots.entries()]
@@ -161,9 +165,18 @@ api.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 
 api.tabs.onRemoved.addListener((tabId) => {
   const tabKey = String(tabId);
+  const previous = recentSnapshots.get(tabKey);
   recentSnapshots.delete(tabKey);
+
+  // Tab IDs are browser-local. Include the browser identity learned from the
+  // last snapshot so the desktop bridge cannot remove a same-numbered tab that
+  // belongs to a different browser. If this tab never produced a snapshot,
+  // fail closed and let the short bridge TTL expire any stale state.
+  const browser = String(previous?.browser || '').trim();
+  if (!browser) return;
   postPayload({
     version: 1,
+    browser,
     tab_id: tabKey,
     removed: true,
   });
