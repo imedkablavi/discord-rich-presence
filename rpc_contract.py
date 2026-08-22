@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any, Dict
 from urllib.parse import urlsplit
 
+from pypresence.types import ActivityType
+
 
 _TEXT_ALIASES = {'x': 'X.com', 'c': 'C language'}
 _TEXT_KEYS = ('details', 'state', 'large_text', 'small_text')
@@ -12,6 +14,16 @@ _URL_KEYS = ('details_url', 'state_url', 'large_url', 'small_url')
 _ASSET_KEYS = ('large_image', 'small_image')
 _DISCORD_URL_MAX = 256
 _BUTTON_URL_MAX = 512
+_ALLOWED_KEYS = {
+    'activity_type',
+    'state', 'state_url',
+    'details', 'details_url',
+    'start', 'end',
+    'large_image', 'large_text', 'large_url',
+    'small_image', 'small_text', 'small_url',
+    'party_id', 'party_size',
+    'buttons',
+}
 
 
 def _http_url(value: Any, limit: int) -> str | None:
@@ -36,9 +48,22 @@ def _http_url(value: Any, limit: int) -> str | None:
 
 
 def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a payload that stays inside pypresence/legacy Discord RPC contracts."""
-    result = {key: value for key, value in dict(payload or {}).items() if value is not None}
-    result.pop('name', None)
+    """Return a payload that stays inside pypresence/legacy Discord RPC contracts.
+
+    Only fields that this application intentionally supports are allowed through.
+    Detector metadata must never accidentally become a keyword argument to
+    ``Presence.update`` and tear down the service loop.
+    """
+    raw = dict(payload or {})
+    result = {
+        key: value
+        for key, value in raw.items()
+        if key in _ALLOWED_KEYS and value is not None
+    }
+
+    activity_type = result.get('activity_type')
+    if activity_type is not None and not isinstance(activity_type, ActivityType):
+        result.pop('activity_type', None)
 
     for key in _TEXT_KEYS:
         if key not in result:
