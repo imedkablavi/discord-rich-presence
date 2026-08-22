@@ -20,6 +20,7 @@ import psutil
 
 _REFRESH_SECS = 60.0
 _MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+_MAX_MANIFESTS = 4096
 _NON_GAME_MARKERS = (
     'unreal engine',
     'epic games launcher',
@@ -50,15 +51,24 @@ class EpicGameCatalog:
         self._last_refresh = now
 
         games: Dict[str, EpicGame] = {}
+        count = 0
         for directory in _manifest_dirs():
             try:
-                manifests = list(directory.glob('*.item'))
+                iterator = directory.glob('*.item')
             except OSError:
                 continue
-            for manifest in manifests:
-                game = _parse_manifest(manifest)
-                if game is not None:
-                    games[os.path.normcase(str(game.install_path))] = game
+            try:
+                for manifest in iterator:
+                    if count >= _MAX_MANIFESTS:
+                        break
+                    count += 1
+                    game = _parse_manifest(manifest)
+                    if game is not None:
+                        games[os.path.normcase(str(game.install_path))] = game
+            except OSError:
+                continue
+            if count >= _MAX_MANIFESTS:
+                break
 
         self._games = sorted(
             games.values(),
@@ -124,9 +134,25 @@ def _manifest_dirs() -> list[Path]:
     return [Path(program_data) / 'Epic/EpicGamesLauncher/Data/Manifests']
 
 
+def _specific_install_path(value: str) -> Optional[Path]:
+    try:
+        path = Path(value).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not path.is_dir():
+        return None
+    try:
+        anchor = Path(path.anchor).resolve(strict=False) if path.anchor else None
+    except (OSError, RuntimeError, ValueError):
+        anchor = None
+    if anchor is not None and path == anchor:
+        return None
+    return path
+
+
 def _parse_manifest(path: Path) -> Optional[EpicGame]:
     try:
-        if path.stat().st_size > _MAX_MANIFEST_BYTES:
+        if not path.is_file() or path.stat().st_size > _MAX_MANIFEST_BYTES:
             return None
         data = json.loads(path.read_text(encoding='utf-8', errors='strict'))
     except (OSError, UnicodeError, json.JSONDecodeError):
@@ -143,8 +169,8 @@ def _parse_manifest(path: Path) -> Optional[EpicGame]:
     if any(marker in lowered for marker in _NON_GAME_MARKERS):
         return None
 
-    install_path = Path(install).expanduser()
-    if not install_path.is_dir():
+    install_path = _specific_install_path(install)
+    if install_path is None:
         return None
     return EpicGame(app_name=app_name[:160], name=name[:160], install_path=install_path)
 
