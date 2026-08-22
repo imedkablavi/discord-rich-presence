@@ -1,7 +1,12 @@
 const api = globalThis.browser || globalThis.chrome;
 const DEFAULT_PORT = 32191;
 const REQUEST_TIMEOUT_MS = 3000;
+const SNAPSHOT_DEDUPE_MS = 1200;
+const MAX_RECENT_TABS = 256;
 let bridgePort = DEFAULT_PORT;
+let lastBadgeState = null;
+let lastBadgePort = null;
+const recentSnapshots = new Map();
 
 function validPort(value) {
   const port = Number(value);
@@ -23,6 +28,8 @@ api.storage?.onChanged?.addListener((changes, areaName) => {
   if (areaName !== 'local' || !changes.bridgePort) return;
   const next = changes.bridgePort.newValue;
   bridgePort = validPort(next) ? Number(next) : DEFAULT_PORT;
+  lastBadgeState = null;
+  lastBadgePort = null;
 });
 
 function endpoint(path = '/v1/activity') {
@@ -32,6 +39,9 @@ function endpoint(path = '/v1/activity') {
 async function setConnectionBadge(connected) {
   try {
     if (!api?.action?.setBadgeText) return;
+    if (lastBadgeState === connected && lastBadgePort === bridgePort) return;
+    lastBadgeState = connected;
+    lastBadgePort = bridgePort;
     await api.action.setBadgeText({ text: connected ? 'ON' : 'OFF' });
     if (api.action.setBadgeBackgroundColor) {
       await api.action.setBadgeBackgroundColor({
@@ -79,6 +89,26 @@ async function postPayload(payload) {
   }
 }
 
+function shouldSuppressSnapshot(tabKey, payload) {
+  const now = Date.now();
+  const serialized = JSON.stringify(payload);
+  const previous = recentSnapshots.get(tabKey);
+  recentSnapshots.set(tabKey, { serialized, at: now });
+
+  if (recentSnapshots.size > MAX_RECENT_TABS) {
+    const oldest = [...recentSnapshots.entries()]
+      .sort((left, right) => left[1].at - right[1].at)
+      .slice(0, recentSnapshots.size - MAX_RECENT_TABS);
+    for (const [key] of oldest) recentSnapshots.delete(key);
+  }
+
+  return Boolean(
+    previous &&
+    previous.serialized === serialized &&
+    now - previous.at < SNAPSHOT_DEDUPE_MS
+  );
+}
+
 async function postSnapshot(snapshot, sender) {
   if (!snapshot || typeof snapshot !== 'object') return;
   const tabId = sender?.tab?.id;
@@ -86,10 +116,13 @@ async function postSnapshot(snapshot, sender) {
   // Browser APIs normally provide a numeric tab ID. Avoid duplicating a full URL
   // into the local record key on the defensive fallback path.
   const fallbackId = `window:${windowId ?? 'unknown'}`;
-  await postPayload({
+  const tabKey = String(tabId ?? fallbackId);
+  const payload = {
     ...snapshot,
-    tab_id: String(tabId ?? fallbackId),
-  });
+    tab_id: tabKey,
+  };
+  if (shouldSuppressSnapshot(tabKey, payload)) return;
+  await postPayload(payload);
 }
 
 api.runtime.onMessage.addListener((message, sender) => {
@@ -127,9 +160,11 @@ api.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 });
 
 api.tabs.onRemoved.addListener((tabId) => {
+  const tabKey = String(tabId);
+  recentSnapshots.delete(tabKey);
   postPayload({
     version: 1,
-    tab_id: String(tabId),
+    tab_id: tabKey,
     removed: true,
   });
 });
