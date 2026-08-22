@@ -9,7 +9,6 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -19,6 +18,29 @@ constexpr std::size_t kMaxLineBytes = 16 * 1024;
 constexpr auto kCallbackTimeout = std::chrono::seconds(4);
 
 using Fields = std::unordered_map<std::string, std::string>;
+
+enum class ReadStatus { Line, TooLong, Eof };
+
+ReadStatus read_bounded_line(std::istream& input, std::string& output) {
+    output.clear();
+    output.reserve(1024);
+    bool saw_any = false;
+    bool overflow = false;
+    char ch = 0;
+    while (input.get(ch)) {
+        saw_any = true;
+        if (ch == '\n') break;
+        if (ch == '\r') continue;
+        if (output.size() < kMaxLineBytes) {
+            output.push_back(ch);
+        } else {
+            // Keep consuming until the line terminator without allocating more.
+            overflow = true;
+        }
+    }
+    if (!saw_any && input.eof()) return ReadStatus::Eof;
+    return overflow ? ReadStatus::TooLong : ReadStatus::Line;
+}
 
 int hex_value(char ch) {
     if (ch >= '0' && ch <= '9') return ch - '0';
@@ -193,8 +215,10 @@ int main() {
     bool application_set = false;
 
     std::string line;
-    while (std::getline(std::cin, line)) {
-        if (line.size() > kMaxLineBytes) {
+    while (true) {
+        const ReadStatus read_status = read_bounded_line(std::cin, line);
+        if (read_status == ReadStatus::Eof) break;
+        if (read_status == ReadStatus::TooLong) {
             print_error("line_too_large");
             continue;
         }
