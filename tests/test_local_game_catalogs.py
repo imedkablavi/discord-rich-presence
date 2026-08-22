@@ -49,6 +49,21 @@ def test_epic_catalog_filters_engine_manifests(monkeypatch, tmp_path: Path):
     assert catalog._games == []
 
 
+def test_epic_catalog_rejects_filesystem_root_install_location(monkeypatch, tmp_path: Path):
+    manifests = tmp_path / 'Manifests'
+    manifests.mkdir()
+    root = Path(tmp_path.anchor or '/')
+    (manifests / 'bad.item').write_text(json.dumps({
+        'AppName': 'BadRoot',
+        'DisplayName': 'Bad Root Game',
+        'InstallLocation': str(root),
+    }), encoding='utf-8')
+
+    monkeypatch.setattr(epic_catalog, '_manifest_dirs', lambda: [manifests])
+    catalog = EpicGameCatalog()
+    assert catalog._games == []
+
+
 def test_heroic_legendary_installed_json_resolves_executable_name(monkeypatch, tmp_path: Path):
     install = tmp_path / 'Games/HeroicExample'
     install.mkdir(parents=True)
@@ -86,6 +101,24 @@ def test_heroic_catalog_ignores_dlc(monkeypatch, tmp_path: Path):
             'install_path': str(install),
             'executable': 'dlc.exe',
             'is_dlc': True,
+        }
+    }), encoding='utf-8')
+
+    monkeypatch.setattr(heroic_catalog, '_installed_json_paths', lambda: [installed])
+    catalog = HeroicGameCatalog()
+    assert catalog._games == []
+
+
+def test_heroic_catalog_rejects_filesystem_root_install_path(monkeypatch, tmp_path: Path):
+    installed = tmp_path / 'installed.json'
+    root = Path(tmp_path.anchor or '/')
+    installed.write_text(json.dumps({
+        'BadRoot': {
+            'app_name': 'BadRoot',
+            'title': 'Bad Root Game',
+            'install_path': str(root),
+            'executable': 'game.exe',
+            'is_dlc': False,
         }
     }), encoding='utf-8')
 
