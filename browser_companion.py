@@ -18,6 +18,7 @@ LOGGER = logging.getLogger(__name__)
 _ALLOWED_ORIGIN_PREFIXES = ('chrome-extension://', 'moz-extension://', 'safari-web-extension://')
 _MAX_BODY_BYTES = 32 * 1024
 _MAX_RECORDS = 100
+_MAX_CONCURRENT_REQUESTS = 8
 _CLIENT_TIMEOUT_SECS = 3.0
 _SUPPORTED_VERSION = 1
 
@@ -29,6 +30,32 @@ class _CompanionHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 16
     block_on_close = False
+
+    def __init__(self, server_address, request_handler_class):
+        super().__init__(server_address, request_handler_class)
+        self._request_slots = threading.BoundedSemaphore(_MAX_CONCURRENT_REQUESTS)
+
+    def process_request(self, request, client_address) -> None:
+        # ThreadingMixIn normally creates one worker per accepted connection.
+        # Keep that bounded even on loopback so a buggy extension/local process
+        # cannot grow request threads without limit.
+        if not self._request_slots.acquire(blocking=False):
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
 
 
 class BrowserCompanionBridge:
