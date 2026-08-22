@@ -46,7 +46,8 @@ def test_activity_urls_longer_than_discord_limit_are_dropped():
         'state_url': long_url,
         'large_url': long_url,
         'small_url': long_url,
-        # Button URLs have a separate, larger contract and should remain valid.
+        # Button URLs have a separate, larger contract and should remain valid
+        # only if they fit that contract.
         'buttons': [{'label': 'Open', 'url': long_url}],
     })
 
@@ -54,7 +55,34 @@ def test_activity_urls_longer_than_discord_limit_are_dropped():
     assert 'state_url' not in payload
     assert 'large_url' not in payload
     assert 'small_url' not in payload
-    assert payload['buttons'] == [{'label': 'Open', 'url': long_url}]
+    if len(long_url) <= 512:
+        assert payload['buttons'] == [{'label': 'Open', 'url': long_url}]
+    else:
+        assert 'buttons' not in payload
+
+
+def test_activity_and_button_url_limits_are_exact():
+    prefix = 'https://example.com/'
+    activity_256 = prefix + ('a' * (256 - len(prefix)))
+    activity_257 = prefix + ('a' * (257 - len(prefix)))
+    button_512 = prefix + ('b' * (512 - len(prefix)))
+    button_513 = prefix + ('b' * (513 - len(prefix)))
+
+    allowed = sanitize_rpc_payload({
+        'details': 'Bounds',
+        'details_url': activity_256,
+        'buttons': [{'label': 'Open', 'url': button_512}],
+    })
+    assert allowed['details_url'] == activity_256
+    assert allowed['buttons'] == [{'label': 'Open', 'url': button_512}]
+
+    rejected = sanitize_rpc_payload({
+        'details': 'Bounds',
+        'details_url': activity_257,
+        'buttons': [{'label': 'Open', 'url': button_513}],
+    })
+    assert 'details_url' not in rejected
+    assert 'buttons' not in rejected
 
 
 def test_asset_and_party_bounds_are_enforced():
