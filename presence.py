@@ -399,7 +399,12 @@ class PresenceBuilder:
                 ):
                     buttons.append({'label': label, 'url': button_url})
 
-        if len(buttons) < 2 and url and str(url).startswith(('http://', 'https://')):
+        auto_url = str(url or '').strip().strip('`')
+        if (
+            len(buttons) < 2
+            and auto_url.startswith(('http://', 'https://'))
+            and len(auto_url) <= 512
+        ):
             if service == 'YouTube':
                 label = 'Search on YouTube'
             elif service == 'GitHub':
@@ -410,11 +415,11 @@ class PresenceBuilder:
                 label = f"Open {service}"[:32]
             else:
                 try:
-                    domain = urllib.parse.urlparse(str(url)).netloc.replace('www.', '')
+                    domain = urllib.parse.urlparse(auto_url).netloc.replace('www.', '')
                     label = f"Open {domain.split('.')[0].title()}"[:32]
                 except (ValueError, AttributeError):
                     label = 'Open Link'
-            candidate = {'label': label, 'url': str(url)[:512]}
+            candidate = {'label': label, 'url': auto_url}
             if candidate not in buttons:
                 buttons.append(candidate)
 
