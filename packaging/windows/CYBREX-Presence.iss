@@ -44,6 +44,3 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Parameters: "--gui"; Description: "Launch CYBREX Presence"; Flags: nowait postinstall skipifsilent
-
-[UninstallRun]
-Filename: "{app}\{#AppExeName}"; Parameters: "--shutdown"; Flags: runhidden waituntilterminated; RunOnceId: "StopCYBREXPresence"
