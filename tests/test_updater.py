@@ -101,3 +101,29 @@ def test_linux_atomic_replace_keeps_new_payload(tmp_path: Path):
     assert target.read_bytes() == b'new'
     assert not staged.exists()
     assert not (tmp_path / 'CYBREX.old').exists()
+
+
+def test_linux_relaunch_uses_verified_replacement(monkeypatch, tmp_path: Path):
+    target = tmp_path / 'CYBREX'
+    target.write_bytes(b'new')
+    launched = []
+
+    def fake_popen(command, **kwargs):
+        launched.append((command, kwargs))
+        return object()
+
+    monkeypatch.setattr(updater.subprocess, 'Popen', fake_popen)
+    updater._relaunch_linux(target, ['--gui'])
+
+    assert launched[0][0] == [str(target), '--gui']
+    assert launched[0][1]['close_fds'] is True
+    assert launched[0][1]['start_new_session'] is True
+
+
+def test_linux_relaunch_is_noop_without_restart_args(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        updater.subprocess,
+        'Popen',
+        lambda *_args, **_kwargs: pytest.fail('Popen should not be called'),
+    )
+    updater._relaunch_linux(tmp_path / 'CYBREX', [])
