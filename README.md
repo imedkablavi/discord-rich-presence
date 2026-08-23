@@ -36,28 +36,39 @@ CYBREX Presence watches the activity you are actually using and updates Discord 
 
 ## Download
 
-### Windows
+### Windows — recommended installer
 
-Download `DiscordRichPresence.exe` from the latest GitHub Release:
+Download **`CYBREX-Presence-Setup.exe`** from the latest GitHub Release:
 
 **[Download for Windows →](https://github.com/imedkablavi/discord-rich-presence/releases/latest)**
 
-The packaged executable contains the control panel, tray service, integrations and updater. Python is not required.
+The installer is per-user, does not require administrator rights for its normal install path, creates a Start Menu entry, supports normal Windows uninstall, and keeps the application in a user-owned location so verified in-app self-updates can replace the executable later.
 
-### Linux x86_64
+If you prefer a portable build, the same Release also contains `DiscordRichPresence.exe`.
 
-Download `CYBREX-DiscordRichPresence-linux-x86_64` from the latest GitHub Release:
+Python and a source checkout are not required for either option.
 
-**[Download for Linux →](https://github.com/imedkablavi/discord-rich-presence/releases/latest)**
+### Linux x86_64 — recommended user installer
 
-Make it executable once if your file manager does not preserve the bit:
+Download **`CYBREX-Presence-linux-x86_64.tar.gz`** from the latest GitHub Release, then:
 
 ```bash
-chmod +x CYBREX-DiscordRichPresence-linux-x86_64
-./CYBREX-DiscordRichPresence-linux-x86_64 --gui
+tar -xzf CYBREX-Presence-linux-x86_64.tar.gz
+cd CYBREX-Presence-linux-x86_64
+./install-user.sh
 ```
 
-Every desktop release includes a matching `.sha256` file. Tagged releases are security-audited and the update client verifies release assets before replacement.
+The installer deliberately does **not** use `sudo`. It installs for the current user under `~/.local`, creates a `cybrex-presence` command and desktop entry, and keeps the executable user-owned so the verified self-updater continues to work.
+
+To remove the installed application later while leaving your configuration/logs intact:
+
+```bash
+./install-user.sh --uninstall
+```
+
+If you prefer a portable build, the same Release also contains `CYBREX-DiscordRichPresence-linux-x86_64` plus its checksum.
+
+Every desktop installer/portable asset has a matching `.sha256` file. Tagged releases run release security checks before publication, and the in-app updater verifies the expected release asset before replacement.
 
 > If a stable Release has not been published for the branch you are testing, use the source instructions under [Development / source setup](#development--source-setup).
 
@@ -253,6 +264,8 @@ Pull requests are checked with:
 - Python compile + critical Ruff checks;
 - dependency audits and Linux Bandit high-severity scanning;
 - Windows EXE and Linux x86_64 PyInstaller builds + smoke tests;
+- Windows installer compile + silent install + installed-app smoke test + uninstall;
+- Linux user-level installer build + install + smoke test + uninstall;
 - Browser Companion manifest/permission/JavaScript/package validation;
 - Gamer Integration regression, Lua/JS and privacy-boundary checks;
 - Minecraft Java/Fabric compile/remap/JAR verification;
