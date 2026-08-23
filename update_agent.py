@@ -7,7 +7,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Iterable, Optional
 
 from config import Config
 from updater import (
@@ -22,6 +22,9 @@ from updater import (
 from version import __version__
 
 
+ProgressCallback = Callable[[int, int], None]
+
+
 @dataclass(frozen=True)
 class UpdateStatus:
     current_version: str
@@ -33,7 +36,7 @@ class UpdateStatus:
 
 def check_for_update(config: Config) -> UpdateStatus:
     if not config.get('updates.enabled', False):
-        return UpdateStatus(__version__, None, False, None, 'Updates are disabled')
+        return UpdateStatus(__version__, None, False, None, 'Update checks are off')
     manifest_url = str(config.get('updates.manifest_url', '')).strip()
     public_key = str(config.get('updates.public_key', '')).strip()
     manifest = fetch_signed_manifest(manifest_url, public_key)
@@ -45,18 +48,25 @@ def check_for_update(config: Config) -> UpdateStatus:
         available=available,
         asset=asset,
         message=(
-            f'Update {manifest.version} is available'
+            f'Version {manifest.version} is available'
             if available
-            else f'{__version__} is up to date'
+            else f'Version {__version__} is up to date'
         ),
     )
 
 
-def auto_stage_update(config: Config, wait_pid: Optional[int] = None) -> UpdateStatus:
-    """Verify, download, and schedule a portable self-update.
+def stage_update(
+    config: Config,
+    *,
+    wait_pids: Optional[Iterable[int]] = None,
+    restart_args: Optional[list[str]] = None,
+    progress: Optional[ProgressCallback] = None,
+) -> UpdateStatus:
+    """Verify, download, and schedule a user-approved portable self-update.
 
-    This never weakens verification: if signing, HTTPS, size, checksum, or write
-    permissions fail, the current executable is left untouched.
+    The currently installed executable is left untouched until signature, size,
+    and SHA-256 checks have all succeeded. The detached replacement helper keeps
+    a rollback copy and restores it if the restarted build exits immediately.
     """
     status = check_for_update(config)
     if not status.available or not status.asset:
@@ -67,35 +77,59 @@ def auto_stage_update(config: Config, wait_pid: Optional[int] = None) -> UpdateS
             status.latest_version,
             True,
             status.asset,
-            'Update verified, but source checkouts are never self-replaced',
+            'An update is available, but source checkouts are not self-updated',
         )
+
+    executable = Path(sys.executable).resolve()
+    if not os.access(executable.parent, os.W_OK):
+        return UpdateStatus(
+            status.current_version,
+            status.latest_version,
+            True,
+            status.asset,
+            'An update is available. This installation must be updated with its package manager',
+        )
+
+    update_dir = _update_dir(config)
+    update_dir.mkdir(parents=True, exist_ok=True)
+    staged = update_dir / (status.asset.name + '.staged')
+    download_verified_asset(status.asset, staged, progress=progress)
+
+    pids = [int(pid) for pid in (wait_pids or [os.getpid()]) if int(pid) > 0]
+    args = list(restart_args) if restart_args is not None else [
+        arg for arg in sys.argv[1:] if arg != '--check-update'
+    ]
+    schedule_self_replace(executable, staged, pids, restart_args=args)
+    return UpdateStatus(
+        status.current_version,
+        status.latest_version,
+        True,
+        status.asset,
+        f'Version {status.latest_version} is verified and ready to install',
+    )
+
+
+def auto_stage_update(
+    config: Config,
+    wait_pid: Optional[int] = None,
+    progress: Optional[ProgressCallback] = None,
+) -> UpdateStatus:
+    """Prepare an update only when automatic update installation is enabled."""
+    status = check_for_update(config)
+    if not status.available or not status.asset:
+        return status
     if not config.get('updates.auto_install', False):
         return UpdateStatus(
             status.current_version,
             status.latest_version,
             True,
             status.asset,
-            'Update verified; automatic installation is disabled',
+            'An update is available. Automatic installation is off',
         )
-
-    executable = Path(sys.executable).resolve()
-    update_dir = _update_dir(config)
-    update_dir.mkdir(parents=True, exist_ok=True)
-    staged = update_dir / (status.asset.name + '.staged')
-    download_verified_asset(status.asset, staged)
-    restart_args = [arg for arg in sys.argv[1:] if arg != '--check-update']
-    schedule_self_replace(
-        executable,
-        staged,
-        [wait_pid or os.getpid()],
-        restart_args=restart_args,
-    )
-    return UpdateStatus(
-        status.current_version,
-        status.latest_version,
-        True,
-        status.asset,
-        f'Update {status.latest_version} verified and staged; restart scheduled',
+    return stage_update(
+        config,
+        wait_pids=[wait_pid or os.getpid()],
+        progress=progress,
     )
 
 
@@ -107,9 +141,9 @@ def maybe_auto_stage(config: Config, wait_pid: Optional[int] = None) -> bool:
     try:
         status = auto_stage_update(config, wait_pid=wait_pid)
         logger.info('%s', status.message)
-        return bool(status.available and 'restart scheduled' in status.message)
+        return bool(status.available and 'ready to install' in status.message)
     except (UpdateError, OSError, ValueError) as exc:
-        logger.warning('Secure update check/install failed closed: %s', exc)
+        logger.warning('Secure update check/install failed: %s', exc)
         return False
     except Exception as exc:
         logger.warning('Unexpected update error; current version kept: %s', exc)
