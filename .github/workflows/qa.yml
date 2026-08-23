@@ -2,8 +2,12 @@ name: QA
 
 on:
   push:
-    branches: [main, "fix/**", "release/**"]
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: qa-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
