@@ -1,9 +1,10 @@
-"""Browser activity detection."""
+"""Browser activity detection with an optional privacy-preserving local companion."""
 
 import logging
 import urllib.parse
 from typing import Optional, Dict, Any
 
+from browser_companion import BrowserCompanionServer
 from config import Config
 
 
@@ -19,6 +20,9 @@ class BrowserDetector:
         'edge': 'Edge',
         'opera': 'Opera',
         'vivaldi': 'Vivaldi',
+        'floorp': 'Floorp',
+        'librewolf': 'LibreWolf',
+        'zen': 'Zen',
     }
 
     SERVICES = (
@@ -29,6 +33,28 @@ class BrowserDetector:
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.companion: Optional[BrowserCompanionServer] = None
+        self._sync_companion_state()
+
+    def close(self) -> None:
+        if self.companion:
+            self.companion.stop()
+            self.companion = None
+
+    def companion_status(self) -> Dict[str, Any]:
+        self._sync_companion_state()
+        if not self.companion:
+            return {'enabled': False, 'running': False}
+        server = self.companion._server
+        return {
+            'enabled': True,
+            'running': bool(server),
+            'host': '127.0.0.1',
+            'port': server.server_address[1] if server else int(
+                self.config.get('browser_companion.port', 17653) or 17653
+            ),
+            'token_path': str(self.companion.token_path),
+        }
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not window_info:
@@ -36,6 +62,7 @@ class BrowserDetector:
         if not self.config.get('rules.enabled_detectors.browser', True):
             return None
 
+        self._sync_companion_state()
         app_name = str(window_info.get('app_name', '')).lower()
         raw_title = str(window_info.get('title', ''))
 
@@ -55,20 +82,58 @@ class BrowserDetector:
                 'page_title': '',
                 'service': '',
                 'url': None,
+                'source': 'window',
             }
 
-        service = self._detect_service(raw_title)
-        page_title = self._extract_page_title(raw_title, browser_name, service)
-        url = self._generate_url(service, page_title)
+        companion = self.companion.snapshot(browser_name) if self.companion else None
+        if companion and companion.get('private'):
+            return {
+                'type': 'browser',
+                'browser_name': browser_name,
+                'is_private': True,
+                'page_title': '',
+                'service': '',
+                'url': None,
+                'source': 'companion',
+            }
+
+        service = str(companion.get('service') or '').strip() if companion else ''
+        if not service:
+            service = self._detect_service(raw_title) or ''
+        page_title = str(companion.get('title') or '').strip() if companion else ''
+        if not page_title:
+            page_title = self._extract_page_title(raw_title, browser_name, service or None)
+
+        url = companion.get('url') if companion else None
+        url_kind = 'companion' if url else 'generated'
+        if not url:
+            url = self._generate_url(service or None, page_title)
 
         return {
             'type': 'browser',
             'browser_name': browser_name,
             'is_private': False,
             'page_title': page_title,
-            'service': service or '',
+            'service': service,
             'url': url,
+            'url_kind': url_kind,
+            'source': 'companion' if companion else 'window',
         }
+
+    def _sync_companion_state(self) -> None:
+        enabled = bool(self.config.get('browser_companion.enabled', False))
+        if enabled and self.companion is None:
+            try:
+                self.companion = BrowserCompanionServer(self.config)
+                self.companion.start()
+            except Exception as exc:
+                self.logger.warning('Browser companion could not start: %s', exc)
+                if self.companion:
+                    self.companion.stop()
+                self.companion = None
+        elif not enabled and self.companion is not None:
+            self.companion.stop()
+            self.companion = None
 
     def _detect_service(self, raw_title: str) -> Optional[str]:
         title_lower = raw_title.lower()
@@ -81,7 +146,7 @@ class BrowserDetector:
         return None
 
     def _generate_url(self, service: Optional[str], title: str) -> Optional[str]:
-        """Generate a search/home URL. This is intentionally not presented as the exact tab URL."""
+        """Generate a search/home URL. This is intentionally not the exact tab URL."""
         if not service:
             return None
         query = urllib.parse.quote(title)
