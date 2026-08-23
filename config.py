@@ -44,10 +44,10 @@ DEFAULT_CONFIG = {
         'allow_exact_url': False,
     },
     'updates': {
-        'enabled': False,
+        'enabled': True,
         'auto_install': False,
         'manifest_url': 'https://github.com/imedkablavi/discord-rich-presence/releases/latest/download/update-manifest.json',
-        'public_key': '',
+        'public_key': 'zx3g5J29SZVSwcJ3pbux7VBorpZAOoCHJPfPz1KLXxk=',
     },
     'images': {
         'browser': 'browser',
