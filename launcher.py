@@ -35,8 +35,8 @@ def _setup_message(message: str, *, error: bool = False) -> None:
     if stream is not None:
         print(message, file=stream, flush=True)
         return
-    # PyInstaller windowed builds have no console streams. Keep the repair
-    # command usable there by falling back to a small native dialog.
+    # PyInstaller windowed builds have no console streams. Keep setup/repair
+    # commands usable there by falling back to a small native dialog.
     if getattr(sys, 'frozen', False):
         try:
             from tkinter import messagebox
@@ -77,7 +77,58 @@ def _handle_cs2_setup_command() -> Optional[int]:
     return 0
 
 
+def _handle_update_command() -> Optional[int]:
+    check_only = '--check-update' in sys.argv
+    install = '--update' in sys.argv
+    if not check_only and not install:
+        return None
+
+    from updater import UpdateError, check_for_update, install_update, update_summary
+
+    try:
+        info = check_for_update()
+        if check_only or info is None:
+            _setup_message(update_summary(info))
+            return 0
+
+        if not getattr(sys, 'frozen', False):
+            raise UpdateError('Automatic installation is only available in packaged builds.')
+
+        # Stop a separate tray/service instance before replacing the executable.
+        # The Windows helper still waits for this updater process itself to exit.
+        try:
+            from runtime_state import RuntimeState
+            runtime = RuntimeState()
+            if runtime.read_active():
+                runtime.terminate_active(timeout=5)
+        except Exception:
+            # Failing to find/stop a stale runtime record must not bypass checksum
+            # verification; the platform-specific replace step remains fail-safe.
+            pass
+
+        result = install_update(info, restart_args=['--gui'])
+        if result == 'scheduled':
+            _setup_message(
+                f'CYBREX {info.latest_version} verified. The update will finish after this process exits.'
+            )
+        else:
+            _setup_message(
+                f'CYBREX updated to {info.latest_version}. Restart the application to use the new build.'
+            )
+        return 0
+    except UpdateError as exc:
+        _setup_message(f'Update failed: {exc}', error=True)
+        return 1
+    except Exception as exc:
+        _setup_message(f'Unexpected update error: {exc}', error=True)
+        return 1
+
+
 def main() -> int:
+    update_result = _handle_update_command()
+    if update_result is not None:
+        return update_result
+
     setup_result = _handle_cs2_setup_command()
     if setup_result is not None:
         return setup_result
