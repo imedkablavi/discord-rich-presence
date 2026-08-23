@@ -41,13 +41,14 @@ browser_companion:
   allow_exact_url: false
 
 updates:
-  # Updates remain disabled until an Ed25519 public key is configured. Tagged
-  # releases must be signed by the matching private key in GitHub Actions.
-  enabled: false
+  # Verification is enabled for official releases. Automatic installation stays
+  # off unless the user explicitly enables it.
+  enabled: true
   auto_install: false
   manifest_url: "https://github.com/imedkablavi/discord-rich-presence/releases/latest/download/update-manifest.json"
-  # Base64-encoded 32-byte Ed25519 public key. Never put the private key here.
-  public_key: ""
+  # Public 32-byte Ed25519 verification key for official release manifests.
+  # Never put the matching private signing key in this file or in the app.
+  public_key: "zx3g5J29SZVSwcJ3pbux7VBorpZAOoCHJPfPz1KLXxk="
 
 images:
   browser: "browser"
