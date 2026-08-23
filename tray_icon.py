@@ -5,11 +5,21 @@ from typing import Optional, Callable
 
 
 class TrayIcon:
-    def __init__(self, on_exit: Optional[Callable] = None, on_toggle_privacy: Optional[Callable] = None, on_open_panel: Optional[Callable] = None, get_privacy_mode: Optional[Callable] = None):
+    def __init__(
+        self,
+        on_exit: Optional[Callable] = None,
+        on_toggle_privacy: Optional[Callable] = None,
+        on_open_panel: Optional[Callable] = None,
+        on_check_updates: Optional[Callable] = None,
+        on_install_update: Optional[Callable] = None,
+        get_privacy_mode: Optional[Callable] = None,
+    ):
         self.logger = logging.getLogger(__name__)
         self.on_exit = on_exit
         self.on_toggle_privacy = on_toggle_privacy
         self.on_open_panel = on_open_panel
+        self.on_check_updates = on_check_updates
+        self.on_install_update = on_install_update
         self.get_privacy_mode = get_privacy_mode or (lambda: 'balanced')
         self.icon = None
         self.available = False
@@ -50,6 +60,8 @@ class TrayIcon:
             self.pystray.MenuItem('Discord Rich Presence', lambda: None, enabled=False),
             self.pystray.Menu.SEPARATOR,
             self.pystray.MenuItem('Open Control Panel', lambda: self._open_panel()),
+            self.pystray.MenuItem('Check for updates', lambda: self._check_updates()),
+            self.pystray.MenuItem('Install latest update', lambda: self._install_update()),
             self.pystray.Menu.SEPARATOR,
             self.pystray.MenuItem('Privacy: Off', lambda: self._toggle_privacy('off'), radio=True, checked=lambda item: self._is_mode('off')),
             self.pystray.MenuItem('Privacy: Balanced', lambda: self._toggle_privacy('balanced'), radio=True, checked=lambda item: self._is_mode('balanced')),
@@ -70,6 +82,14 @@ class TrayIcon:
     def _open_panel(self):
         if self.on_open_panel:
             self.on_open_panel()
+
+    def _check_updates(self):
+        if self.on_check_updates:
+            self.on_check_updates()
+
+    def _install_update(self):
+        if self.on_install_update:
+            self.on_install_update()
 
     def _on_exit_clicked(self, icon, item):
         if self.on_exit:
@@ -116,6 +136,13 @@ def run_with_tray(service_run_func: Callable, config, stop_func: Optional[Callab
         if stop_func:
             stop_func()
 
+    def _launcher_command(argument: str):
+        if getattr(sys, 'frozen', False):
+            return [sys.executable, argument]
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        launcher_script = os.path.join(script_dir, 'launcher.py')
+        return [sys.executable, launcher_script, argument]
+
     def on_open_panel():
         try:
             if getattr(sys, 'frozen', False):
@@ -127,10 +154,30 @@ def run_with_tray(service_run_func: Callable, config, stop_func: Optional[Callab
         except Exception as e:
             logging.error('Failed to open control panel: %s', e)
 
+    def on_check_updates():
+        try:
+            subprocess.Popen(_launcher_command('--check-update'))
+        except Exception as e:
+            logging.error('Failed to launch update check: %s', e)
+
+    def on_install_update():
+        try:
+            subprocess.Popen(_launcher_command('--update'))
+            # Let the updater child take over, then end this process cleanly so
+            # Windows can replace the executable without force-killing the tray.
+            if stop_func:
+                stop_func()
+            if tray.icon:
+                tray.icon.stop()
+        except Exception as e:
+            logging.error('Failed to launch updater: %s', e)
+
     tray = TrayIcon(
         on_exit=on_exit,
         on_toggle_privacy=on_toggle_privacy,
         on_open_panel=on_open_panel,
+        on_check_updates=on_check_updates,
+        on_install_update=on_install_update,
         get_privacy_mode=lambda: config.get('privacy.mode', 'balanced'),
     )
     tray.create_icon()
