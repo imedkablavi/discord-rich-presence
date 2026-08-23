@@ -24,6 +24,7 @@ from detectors.window import WindowDetector
 from presence import PresenceBuilder
 from runtime_state import RuntimeState
 from tray_icon import run_with_tray
+from update_agent import check_for_update, maybe_auto_stage
 
 
 class DiscordRichPresenceService:
@@ -134,6 +135,7 @@ class DiscordRichPresenceService:
             return True
         except (DiscordNotFound, InvalidID, InvalidPipe) as e:
             self.logger.warning('Discord RPC unavailable: %s', e)
+            self.disconnect_discord()
             self._runtime_update(
                 connected=False,
                 state='discord_offline',
@@ -142,23 +144,24 @@ class DiscordRichPresenceService:
         except Exception as e:
             self.logger.error('Unexpected Discord connection error: %s', e)
             self.logger.debug(traceback.format_exc())
+            self.disconnect_discord()
             self._runtime_update(
                 connected=False,
                 state='rpc_error',
                 last_error=str(e)[:300],
             )
-        self.connected = False
-        self.rpc = None
         return False
 
     def disconnect_discord(self):
-        if self.rpc and self.connected:
+        """Best-effort close even after the RPC transport has become unhealthy."""
+        rpc = self.rpc
+        self.rpc = None
+        self.connected = False
+        if rpc:
             try:
-                self.rpc.close()
+                rpc.close()
             except Exception as e:
                 self.logger.debug('Error while closing Discord RPC: %s', e)
-        self.connected = False
-        self.rpc = None
         self._runtime_update(connected=False)
 
     def update_presence(self, payload: Dict[str, Any]) -> bool:
@@ -195,8 +198,7 @@ class DiscordRichPresenceService:
         except Exception as e:
             self.logger.error('Failed to update presence: %s', e)
             self.logger.debug(traceback.format_exc())
-            self.connected = False
-            self.rpc = None
+            self.disconnect_discord()
             self._runtime_update(
                 connected=False,
                 state='rpc_error',
@@ -232,8 +234,7 @@ class DiscordRichPresenceService:
             return True
         except Exception as e:
             self.logger.error('Failed to clear Discord presence: %s', e)
-            self.connected = False
-            self.rpc = None
+            self.disconnect_discord()
             self._runtime_update(
                 connected=False,
                 state='rpc_error',
@@ -431,6 +432,7 @@ class DiscordRichPresenceService:
             presence_active=False,
             activity=None,
             last_error=None,
+            foreground_capability=self.window_detector.capability(),
         )
         if not self.dry_run and not self.connect_discord():
             self.logger.warning('Discord is not available yet; service will retry')
@@ -477,6 +479,10 @@ class DiscordRichPresenceService:
                 self.clear_presence()
             finally:
                 self.disconnect_discord()
+                try:
+                    self.browser_detector.close()
+                except Exception as e:
+                    self.logger.debug('Browser companion shutdown failed: %s', e)
             self.logger.info('Discord Rich Presence Service stopped')
 
     def stop(self):
@@ -542,6 +548,7 @@ def main():
     parser.add_argument('--once', action='store_true', help='Perform one detection cycle and exit')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
     parser.add_argument('--tray', action='store_true', help='Show the system tray control')
+    parser.add_argument('--check-update', action='store_true', help='Verify the signed update manifest and exit')
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -558,6 +565,24 @@ def main():
         except Exception as e:
             logging.error('Failed to load configuration: %s', e)
             runtime.update(state='configuration_error', last_error=str(e)[:300])
+            return
+
+        if args.check_update:
+            try:
+                status = check_for_update(config)
+                logging.info('%s', status.message)
+                runtime.update(
+                    state='update_checked',
+                    update_available=status.available,
+                    latest_version=status.latest_version,
+                )
+            except Exception as e:
+                logging.error('Secure update check failed: %s', e)
+                runtime.update(state='update_error', last_error=str(e)[:300])
+            return
+
+        if not args.dry_run and maybe_auto_stage(config, wait_pid=os.getpid()):
+            runtime.update(state='update_staged')
             return
 
         service = DiscordRichPresenceService(
