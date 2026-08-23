@@ -13,11 +13,12 @@ from cs2_gsi import (
 )
 from epic_catalog import EpicGame, EpicGameCatalog
 from heroic_catalog import HeroicGame, HeroicGameCatalog
+from league_client import LeagueLiveClient
 from steam_catalog import SteamGame, SteamGameCatalog
 
 
 class GamingDetector:
-    """Detect foreground games and enrich Counter-Strike 2 through official GSI."""
+    """Detect foreground games and enrich supported games through safe local APIs."""
 
     GAME_LAUNCHERS = {
         'steam': 'Steam', 'steamwebhelper': 'Steam',
@@ -127,6 +128,7 @@ class GamingDetector:
         self.steam_catalog = SteamGameCatalog()
         self.epic_catalog = EpicGameCatalog()
         self.heroic_catalog = HeroicGameCatalog()
+        self.league_client = LeagueLiveClient()
         self.cs2_gsi = None
         self._last_gsi_signature: Optional[tuple[bool, bool, bool, int, float]] = None
         self._sync_cs2_gsi(force=True)
@@ -264,6 +266,8 @@ class GamingDetector:
                     'store_url': 'https://store.steampowered.com/app/730/',
                 })
                 self._enrich_cs2(activity)
+            elif game_name == 'League of Legends':
+                self._enrich_league(activity)
             return activity
 
         if self.cs2_gsi and ('counter-strike' in app_name or 'counter strike' in app_name):
@@ -340,6 +344,23 @@ class GamingDetector:
     def _is_cs2_name(name: str) -> bool:
         normalized = re.sub(r'[^a-z0-9]+', '', str(name or '').lower())
         return normalized in {'counterstrike2', 'counterstrikeglobaloffensive'}
+
+    def _enrich_league(self, activity: Dict[str, Any]) -> None:
+        snapshot = self.league_client.snapshot()
+        if not snapshot:
+            activity['launcher'] = 'Riot Client'
+            activity['game_source'] = 'Riot Client'
+            return
+        champion = str(snapshot.get('champion', '') or '').strip()
+        position = str(snapshot.get('position', '') or '').strip()
+        mode = str(snapshot.get('mode', '') or '').strip()
+        state_parts = [part for part in (champion, position, mode) if part]
+        activity.update({
+            'launcher': 'Riot Client',
+            'game_source': ' · '.join(state_parts) or 'Riot Client',
+            'league_live': True,
+            'league_game_time': int(snapshot.get('game_time', 0) or 0),
+        })
 
     def _enrich_cs2(self, activity: Dict[str, Any]) -> None:
         if not self.cs2_gsi:
