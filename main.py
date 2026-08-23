@@ -115,6 +115,11 @@ class DiscordRichPresenceService:
             'windows default lock screen', 'lock screen', 'screen locked'
         ))
 
+    def _detector_enabled(self, name: str) -> bool:
+        """Return the saved detector switch value; unknown detector keys default to off."""
+        enabled = self.config.get('rules.enabled_detectors', {}) or {}
+        return bool(enabled.get(name, False)) if isinstance(enabled, dict) else False
+
     def connect_discord(self) -> bool:
         try:
             client_id = str(self.config.get('discord.client_id', '')).strip()
@@ -356,33 +361,38 @@ class DiscordRichPresenceService:
         if not self._is_app_allowed(app_name):
             return None
 
-        gaming = self.gaming_detector.detect(window_info)
-        if gaming and gaming.get('is_game'):
-            game_name = str(gaming.get('game_name') or '').lower()
-            if not self._is_game_allowed(game_name):
-                return None
-            return self.presence_builder.build(gaming)
+        if self._detector_enabled('gaming'):
+            gaming = self.gaming_detector.detect(window_info)
+            if gaming and gaming.get('is_game'):
+                game_name = str(gaming.get('game_name') or '').lower()
+                if not self._is_game_allowed(game_name):
+                    return None
+                return self.presence_builder.build(gaming)
 
-        media = self.media_detector.detect(window_info)
-        if media and media.get('is_playing'):
-            return self.presence_builder.build(media)
+        if self._detector_enabled('media'):
+            media = self.media_detector.detect(window_info)
+            if media and media.get('is_playing'):
+                return self.presence_builder.build(media)
 
-        terminal = self.terminal_detector.detect(window_info)
-        if terminal and terminal.get('has_command'):
-            return self.presence_builder.build(terminal)
+        if self._detector_enabled('terminal'):
+            terminal = self.terminal_detector.detect(window_info)
+            if terminal and terminal.get('has_command'):
+                return self.presence_builder.build(terminal)
 
-        coding = self.coding_detector.detect(window_info)
-        if coding:
-            return self.presence_builder.build(coding)
+        if self._detector_enabled('coding'):
+            coding = self.coding_detector.detect(window_info)
+            if coding:
+                return self.presence_builder.build(coding)
 
-        browser = self.browser_detector.detect(window_info)
-        if browser:
-            searchable = f"{browser.get('service', '')} {browser.get('page_title', '')}".strip()
-            if not self._is_site_allowed(searchable):
-                return None
-            return self.presence_builder.build(browser)
+        if self._detector_enabled('browser'):
+            browser = self.browser_detector.detect(window_info)
+            if browser:
+                searchable = f"{browser.get('service', '')} {browser.get('page_title', '')}".strip()
+                if not self._is_site_allowed(searchable):
+                    return None
+                return self.presence_builder.build(browser)
 
-        if not self.config.get('rules.enabled_detectors.application', True):
+        if not self._detector_enabled('application'):
             return None
         generic = {
             'type': 'application',
