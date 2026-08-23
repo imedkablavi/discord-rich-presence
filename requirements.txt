@@ -5,6 +5,7 @@ customtkinter>=5.2,<6
 pystray>=0.19.5,<1
 Pillow>=10,<12
 psutil>=7.2.2,<8
+cryptography>=44,<47
 
 # Linux media integration
 pydbus>=0.6,<1; sys_platform == 'linux'

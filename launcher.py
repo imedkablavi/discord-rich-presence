@@ -16,20 +16,28 @@ def _normalize_packaged_args():
     """Translate source-style child launches into packaged service arguments."""
     if not getattr(sys, 'frozen', False):
         return
-
-    # The source GUI starts the service as `python main.py`. In a one-file build
-    # sys.executable is the application itself, so treat a trailing main.py
-    # argument as a request to start this executable in service/tray mode.
     sys.argv[:] = [
         arg for index, arg in enumerate(sys.argv)
         if index == 0 or _argument_name(arg) != 'main.py'
     ]
-
     if len(sys.argv) == 1:
         sys.argv.append('--tray')
 
 
+def _stop_active_service() -> int:
+    from runtime_state import RuntimeState
+
+    runtime = RuntimeState()
+    active = runtime.read_active()
+    if not active:
+        return 0
+    return 0 if runtime.terminate_active(timeout=8.0) else 1
+
+
 def main():
+    if '--stop-service' in sys.argv:
+        raise SystemExit(_stop_active_service())
+
     if '--gui' in sys.argv:
         sys.argv.remove('--gui')
         from config import Config

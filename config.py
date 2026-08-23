@@ -1,5 +1,6 @@
 """Configuration management for Discord Rich Presence Service."""
 
+import base64
 import copy
 import os
 import platform
@@ -33,6 +34,20 @@ DEFAULT_CONFIG = {
     'system': {
         'start_minimized': False,
         'auto_start': False
+    },
+    'browser_companion': {
+        'enabled': False,
+        'port': 17653,
+        'ttl_secs': 15,
+        'allow_titles': True,
+        'allow_origin': True,
+        'allow_exact_url': False,
+    },
+    'updates': {
+        'enabled': True,
+        'auto_install': False,
+        'manifest_url': 'https://github.com/imedkablavi/discord-rich-presence/releases/latest/download/update-manifest.json',
+        'public_key': 'zx3g5J29SZVSwcJ3pbux7VBorpZAOoCHJPfPz1KLXxk=',
     },
     'images': {
         'browser': 'browser',
@@ -176,12 +191,14 @@ class Config:
                 base[key] = copy.deepcopy(value)
 
     @staticmethod
-    def _validate_url(value: Any, name: str, allow_empty: bool = True):
+    def _validate_url(value: Any, name: str, allow_empty: bool = True, https_only: bool = False):
         url = str(value or '').strip()
         if not url and allow_empty:
             return
-        if not url.startswith(('https://', 'http://')):
-            raise ValueError(f'{name} must start with http:// or https://')
+        allowed = ('https://',) if https_only else ('https://', 'http://')
+        if not url.startswith(allowed):
+            expected = 'https://' if https_only else 'http:// or https://'
+            raise ValueError(f'{name} must start with {expected}')
         if len(url) > 512:
             raise ValueError(f'{name} must be at most 512 characters')
 
@@ -237,6 +254,44 @@ class Config:
         for key in ('start_minimized', 'auto_start'):
             if not isinstance(system.get(key, False), bool):
                 raise ValueError(f'system.{key} must be true or false')
+
+        companion = data.get('browser_companion', {})
+        if not isinstance(companion, dict):
+            raise ValueError('browser_companion must be an object')
+        for key in ('enabled', 'allow_titles', 'allow_origin', 'allow_exact_url'):
+            if not isinstance(companion.get(key, False), bool):
+                raise ValueError(f'browser_companion.{key} must be true or false')
+        port = companion.get('port', 17653)
+        if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+            raise ValueError('browser_companion.port must be an integer between 1024 and 65535')
+        ttl = companion.get('ttl_secs', 15)
+        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not 1 <= ttl <= 300:
+            raise ValueError('browser_companion.ttl_secs must be between 1 and 300 seconds')
+
+        updates = data.get('updates', {})
+        if not isinstance(updates, dict):
+            raise ValueError('updates must be an object')
+        for key in ('enabled', 'auto_install'):
+            if not isinstance(updates.get(key, False), bool):
+                raise ValueError(f'updates.{key} must be true or false')
+        Config._validate_url(
+            updates.get('manifest_url', ''),
+            'updates.manifest_url',
+            allow_empty=False,
+            https_only=True,
+        )
+        public_key = str(updates.get('public_key', '') or '').strip()
+        if public_key:
+            try:
+                decoded_key = base64.b64decode(public_key, validate=True)
+            except ValueError as e:
+                raise ValueError('updates.public_key must be valid base64') from e
+            if len(decoded_key) != 32:
+                raise ValueError('updates.public_key must contain a 32-byte Ed25519 public key')
+        if updates.get('enabled') and not public_key:
+            raise ValueError('updates.public_key is required when updates.enabled is true')
+        if updates.get('auto_install') and not updates.get('enabled'):
+            raise ValueError('updates.auto_install requires updates.enabled=true')
 
         discord = data.get('discord', {})
         if not isinstance(discord, dict):

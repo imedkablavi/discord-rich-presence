@@ -1,12 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 hiddenimports = []
 hiddenimports += collect_submodules('customtkinter')
 hiddenimports += collect_submodules('pystray')
 hiddenimports += collect_submodules('PIL')
-hiddenimports += collect_submodules('winsdk')
+hiddenimports += collect_submodules('cryptography')
+if sys.platform == 'win32':
+    hiddenimports += collect_submodules('winsdk')
+    hiddenimports += collect_submodules('win32com')
+elif sys.platform.startswith('linux'):
+    hiddenimports += collect_submodules('pydbus')
 
 datas = []
 datas += collect_data_files('customtkinter')

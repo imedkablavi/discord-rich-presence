@@ -24,6 +24,7 @@ from detectors.window import WindowDetector
 from presence import PresenceBuilder
 from runtime_state import RuntimeState
 from tray_icon import run_with_tray
+from update_agent import check_for_update, maybe_auto_stage
 
 
 class DiscordRichPresenceService:
@@ -114,6 +115,11 @@ class DiscordRichPresenceService:
             'windows default lock screen', 'lock screen', 'screen locked'
         ))
 
+    def _detector_enabled(self, name: str) -> bool:
+        """Return the saved detector switch value; unknown detector keys default to off."""
+        enabled = self.config.get('rules.enabled_detectors', {}) or {}
+        return bool(enabled.get(name, False)) if isinstance(enabled, dict) else False
+
     def connect_discord(self) -> bool:
         try:
             client_id = str(self.config.get('discord.client_id', '')).strip()
@@ -134,6 +140,7 @@ class DiscordRichPresenceService:
             return True
         except (DiscordNotFound, InvalidID, InvalidPipe) as e:
             self.logger.warning('Discord RPC unavailable: %s', e)
+            self.disconnect_discord()
             self._runtime_update(
                 connected=False,
                 state='discord_offline',
@@ -142,23 +149,24 @@ class DiscordRichPresenceService:
         except Exception as e:
             self.logger.error('Unexpected Discord connection error: %s', e)
             self.logger.debug(traceback.format_exc())
+            self.disconnect_discord()
             self._runtime_update(
                 connected=False,
                 state='rpc_error',
                 last_error=str(e)[:300],
             )
-        self.connected = False
-        self.rpc = None
         return False
 
     def disconnect_discord(self):
-        if self.rpc and self.connected:
+        """Best-effort close even after the RPC transport has become unhealthy."""
+        rpc = self.rpc
+        self.rpc = None
+        self.connected = False
+        if rpc:
             try:
-                self.rpc.close()
+                rpc.close()
             except Exception as e:
                 self.logger.debug('Error while closing Discord RPC: %s', e)
-        self.connected = False
-        self.rpc = None
         self._runtime_update(connected=False)
 
     def update_presence(self, payload: Dict[str, Any]) -> bool:
@@ -195,8 +203,7 @@ class DiscordRichPresenceService:
         except Exception as e:
             self.logger.error('Failed to update presence: %s', e)
             self.logger.debug(traceback.format_exc())
-            self.connected = False
-            self.rpc = None
+            self.disconnect_discord()
             self._runtime_update(
                 connected=False,
                 state='rpc_error',
@@ -232,8 +239,7 @@ class DiscordRichPresenceService:
             return True
         except Exception as e:
             self.logger.error('Failed to clear Discord presence: %s', e)
-            self.connected = False
-            self.rpc = None
+            self.disconnect_discord()
             self._runtime_update(
                 connected=False,
                 state='rpc_error',
@@ -355,33 +361,38 @@ class DiscordRichPresenceService:
         if not self._is_app_allowed(app_name):
             return None
 
-        gaming = self.gaming_detector.detect(window_info)
-        if gaming and gaming.get('is_game'):
-            game_name = str(gaming.get('game_name') or '').lower()
-            if not self._is_game_allowed(game_name):
-                return None
-            return self.presence_builder.build(gaming)
+        if self._detector_enabled('gaming'):
+            gaming = self.gaming_detector.detect(window_info)
+            if gaming and gaming.get('is_game'):
+                game_name = str(gaming.get('game_name') or '').lower()
+                if not self._is_game_allowed(game_name):
+                    return None
+                return self.presence_builder.build(gaming)
 
-        media = self.media_detector.detect(window_info)
-        if media and media.get('is_playing'):
-            return self.presence_builder.build(media)
+        if self._detector_enabled('media'):
+            media = self.media_detector.detect(window_info)
+            if media and media.get('is_playing'):
+                return self.presence_builder.build(media)
 
-        terminal = self.terminal_detector.detect(window_info)
-        if terminal and terminal.get('has_command'):
-            return self.presence_builder.build(terminal)
+        if self._detector_enabled('terminal'):
+            terminal = self.terminal_detector.detect(window_info)
+            if terminal and terminal.get('has_command'):
+                return self.presence_builder.build(terminal)
 
-        coding = self.coding_detector.detect(window_info)
-        if coding:
-            return self.presence_builder.build(coding)
+        if self._detector_enabled('coding'):
+            coding = self.coding_detector.detect(window_info)
+            if coding:
+                return self.presence_builder.build(coding)
 
-        browser = self.browser_detector.detect(window_info)
-        if browser:
-            searchable = f"{browser.get('service', '')} {browser.get('page_title', '')}".strip()
-            if not self._is_site_allowed(searchable):
-                return None
-            return self.presence_builder.build(browser)
+        if self._detector_enabled('browser'):
+            browser = self.browser_detector.detect(window_info)
+            if browser:
+                searchable = f"{browser.get('service', '')} {browser.get('page_title', '')}".strip()
+                if not self._is_site_allowed(searchable):
+                    return None
+                return self.presence_builder.build(browser)
 
-        if not self.config.get('rules.enabled_detectors.application', True):
+        if not self._detector_enabled('application'):
             return None
         generic = {
             'type': 'application',
@@ -431,6 +442,7 @@ class DiscordRichPresenceService:
             presence_active=False,
             activity=None,
             last_error=None,
+            foreground_capability=self.window_detector.capability(),
         )
         if not self.dry_run and not self.connect_discord():
             self.logger.warning('Discord is not available yet; service will retry')
@@ -477,6 +489,10 @@ class DiscordRichPresenceService:
                 self.clear_presence()
             finally:
                 self.disconnect_discord()
+                try:
+                    self.browser_detector.close()
+                except Exception as e:
+                    self.logger.debug('Browser companion shutdown failed: %s', e)
             self.logger.info('Discord Rich Presence Service stopped')
 
     def stop(self):
@@ -542,6 +558,7 @@ def main():
     parser.add_argument('--once', action='store_true', help='Perform one detection cycle and exit')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
     parser.add_argument('--tray', action='store_true', help='Show the system tray control')
+    parser.add_argument('--check-update', action='store_true', help='Verify the signed update manifest and exit')
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -558,6 +575,24 @@ def main():
         except Exception as e:
             logging.error('Failed to load configuration: %s', e)
             runtime.update(state='configuration_error', last_error=str(e)[:300])
+            return
+
+        if args.check_update:
+            try:
+                status = check_for_update(config)
+                logging.info('%s', status.message)
+                runtime.update(
+                    state='update_checked',
+                    update_available=status.available,
+                    latest_version=status.latest_version,
+                )
+            except Exception as e:
+                logging.error('Secure update check failed: %s', e)
+                runtime.update(state='update_error', last_error=str(e)[:300])
+            return
+
+        if not args.dry_run and maybe_auto_stage(config, wait_pid=os.getpid()):
+            runtime.update(state='update_staged')
             return
 
         service = DiscordRichPresenceService(

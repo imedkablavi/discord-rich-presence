@@ -14,13 +14,12 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from config import Config, DEFAULT_CONFIG
+from detectors.window import WindowDetector
 from runtime_state import RuntimeState
-
-try:
-    import winreg
-    _WINREG_AVAILABLE = True
-except ImportError:
-    _WINREG_AVAILABLE = False
+from startup import is_enabled as startup_is_enabled
+from startup import set_enabled as startup_set_enabled
+from update_agent import check_for_update, stage_update
+from version import __version__
 
 
 ctk.set_appearance_mode('System')
@@ -33,43 +32,76 @@ class ModernControlPanel(ctk.CTk):
         self.config = config
         self.runtime = RuntimeState()
         self.service_process: subprocess.Popen | None = None
-        self.title('Discord Rich Presence Manager')
-        self.geometry('1000x720')
-        self.minsize(850, 600)
-        self.protocol('WM_DELETE_WINDOW', self.destroy)
+        self.window_capability = WindowDetector().capability()
+        self.available_update = None
+        self.update_busy = False
 
+        self.title(f'Discord Rich Presence · {__version__}')
+        self.geometry('1120x790')
+        self.minsize(940, 660)
+        self.protocol('WM_DELETE_WINDOW', self.destroy)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+
         self._build_sidebar()
         self._build_pages()
         self.select_page('dashboard')
         self.after(500, self._poll_service)
 
     def _build_sidebar(self):
-        sidebar = ctk.CTkFrame(self, width=210, corner_radius=0)
+        sidebar = ctk.CTkFrame(self, width=232, corner_radius=0)
         sidebar.grid(row=0, column=0, sticky='nsew')
         sidebar.grid_rowconfigure(7, weight=1)
-        ctk.CTkLabel(sidebar, text='DRP Manager', font=ctk.CTkFont(size=23, weight='bold')).grid(row=0, column=0, padx=20, pady=(30, 20))
+        sidebar.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            sidebar,
+            text='Discord Presence',
+            font=ctk.CTkFont(size=23, weight='bold'),
+        ).grid(row=0, column=0, sticky='w', padx=22, pady=(30, 3))
+        ctk.CTkLabel(
+            sidebar,
+            text=f'Local activity · v{__version__}',
+            text_color='gray',
+        ).grid(row=1, column=0, sticky='w', padx=22, pady=(0, 20))
 
         self.nav = {}
-        for row, (name, label) in enumerate((
-            ('dashboard', 'Dashboard'), ('activity', 'Activity'),
-            ('privacy', 'Privacy'), ('settings', 'Settings'), ('about', 'About')
-        ), start=1):
+        pages = (
+            ('dashboard', 'Overview'),
+            ('activity', 'Activity'),
+            ('privacy', 'Privacy'),
+            ('settings', 'Preferences'),
+            ('about', 'About'),
+        )
+        for row, (name, label) in enumerate(pages, start=2):
             button = ctk.CTkButton(
-                sidebar, text=label, anchor='w', corner_radius=0,
-                fg_color='transparent', command=lambda n=name: self.select_page(n)
+                sidebar,
+                text=label,
+                anchor='w',
+                height=40,
+                corner_radius=8,
+                fg_color='transparent',
+                command=lambda n=name: self.select_page(n),
             )
-            button.grid(row=row, column=0, sticky='ew', padx=0, pady=2)
+            button.grid(row=row, column=0, sticky='ew', padx=12, pady=3)
             self.nav[name] = button
 
+        ctk.CTkLabel(sidebar, text='Appearance', text_color='gray').grid(
+            row=8, column=0, sticky='w', padx=22, pady=(8, 4)
+        )
         self.theme_menu = ctk.CTkOptionMenu(
-            sidebar, values=['System', 'Light', 'Dark'], command=ctk.set_appearance_mode
+            sidebar,
+            values=['System', 'Light', 'Dark'],
+            command=ctk.set_appearance_mode,
+            height=36,
         )
-        self.theme_menu.grid(row=8, column=0, padx=20, pady=10)
-        ctk.CTkButton(sidebar, text='Save Changes', command=self.save_settings).grid(
-            row=9, column=0, padx=20, pady=(10, 25)
-        )
+        self.theme_menu.grid(row=9, column=0, sticky='ew', padx=16, pady=(0, 8))
+        ctk.CTkButton(
+            sidebar,
+            text='Save settings',
+            height=40,
+            command=self.save_settings,
+        ).grid(row=10, column=0, sticky='ew', padx=16, pady=(8, 24))
 
     def _build_pages(self):
         self.pages = {}
@@ -79,40 +111,149 @@ class ModernControlPanel(ctk.CTk):
         self._build_settings()
         self._build_about()
 
-    def _page(self, name: str, title: str):
+    def _page(self, name: str, title: str, subtitle: str = ''):
         page = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color='transparent')
         self.pages[name] = page
-        ctk.CTkLabel(page, text=title, font=ctk.CTkFont(size=28, weight='bold')).pack(
-            anchor='w', padx=30, pady=(25, 15)
-        )
+        ctk.CTkLabel(
+            page,
+            text=title,
+            font=ctk.CTkFont(size=30, weight='bold'),
+        ).pack(anchor='w', padx=34, pady=(28, 4))
+        if subtitle:
+            ctk.CTkLabel(
+                page,
+                text=subtitle,
+                text_color='gray',
+                justify='left',
+                wraplength=800,
+            ).pack(anchor='w', padx=34, pady=(0, 14))
         return page
 
-    def _build_dashboard(self):
-        page = self._page('dashboard', 'Service Dashboard')
+    @staticmethod
+    def _card(page, title: str, description: str = ''):
         card = ctk.CTkFrame(page)
-        card.pack(fill='x', padx=30, pady=10)
-        self.status_label = ctk.CTkLabel(
-            card, text='● Service stopped', font=ctk.CTkFont(size=16, weight='bold')
+        card.pack(fill='x', padx=34, pady=9)
+        ctk.CTkLabel(
+            card,
+            text=title,
+            font=ctk.CTkFont(size=17, weight='bold'),
+        ).pack(anchor='w', padx=22, pady=(18, 3))
+        if description:
+            ctk.CTkLabel(
+                card,
+                text=description,
+                text_color='gray',
+                justify='left',
+                wraplength=790,
+            ).pack(anchor='w', padx=22, pady=(0, 10))
+        return card
+
+    @staticmethod
+    def _field(parent, title: str, description: str = ''):
+        ctk.CTkLabel(
+            parent,
+            text=title,
+            font=ctk.CTkFont(size=13, weight='bold'),
+        ).pack(anchor='w', padx=22, pady=(10, 3))
+        if description:
+            ctk.CTkLabel(
+                parent,
+                text=description,
+                text_color='gray',
+                justify='left',
+                wraplength=790,
+            ).pack(anchor='w', padx=22, pady=(0, 5))
+
+    def _build_dashboard(self):
+        page = self._page(
+            'dashboard',
+            'Overview',
+            'See what is running and what your Discord profile is actually showing.',
         )
-        self.status_label.pack(anchor='w', padx=20, pady=(20, 5))
-        self.rpc_label = ctk.CTkLabel(card, text='Discord RPC: —')
-        self.rpc_label.pack(anchor='w', padx=20, pady=3)
-        self.activity_label = ctk.CTkLabel(card, text='Activity: —', justify='left', wraplength=780)
-        self.activity_label.pack(anchor='w', padx=20, pady=3)
-        self.heartbeat_label = ctk.CTkLabel(card, text='Heartbeat: —', text_color='gray')
-        self.heartbeat_label.pack(anchor='w', padx=20, pady=(3, 15))
+
+        card = self._card(page, 'Service')
+        self.status_label = ctk.CTkLabel(
+            card,
+            text='● Stopped',
+            font=ctk.CTkFont(size=18, weight='bold'),
+        )
+        self.status_label.pack(anchor='w', padx=22, pady=(4, 7))
+        self.rpc_label = ctk.CTkLabel(card, text='Discord: Not connected', wraplength=790)
+        self.rpc_label.pack(anchor='w', padx=22, pady=3)
+        self.activity_label = ctk.CTkLabel(card, text='Now showing: Nothing', wraplength=790)
+        self.activity_label.pack(anchor='w', padx=22, pady=3)
+        self.capability_label = ctk.CTkLabel(
+            card,
+            text=self._capability_text(self.window_capability),
+            wraplength=790,
+            text_color='gray',
+        )
+        self.capability_label.pack(anchor='w', padx=22, pady=3)
+        self.heartbeat_label = ctk.CTkLabel(card, text='Last update: —', text_color='gray')
+        self.heartbeat_label.pack(anchor='w', padx=22, pady=(3, 13))
 
         controls = ctk.CTkFrame(card, fg_color='transparent')
-        controls.pack(fill='x', padx=15, pady=(0, 20))
-        self.start_button = ctk.CTkButton(controls, text='Start Service', command=self.start_service)
+        controls.pack(fill='x', padx=17, pady=(0, 20))
+        self.start_button = ctk.CTkButton(controls, text='Start', width=115, command=self.start_service)
         self.start_button.pack(side='left', padx=5)
-        self.stop_button = ctk.CTkButton(controls, text='Stop Service', command=self.stop_service)
+        self.stop_button = ctk.CTkButton(controls, text='Stop', width=115, command=self.stop_service)
         self.stop_button.pack(side='left', padx=5)
-        ctk.CTkButton(controls, text='Test Discord RPC', command=self.test_rpc).pack(side='left', padx=5)
-        ctk.CTkButton(controls, text='Open Logs', command=self.open_logs).pack(side='left', padx=5)
+        ctk.CTkButton(controls, text='Test Discord', width=130, command=self.test_rpc).pack(
+            side='left', padx=5
+        )
+        ctk.CTkButton(controls, text='Open logs', width=120, command=self.open_logs).pack(
+            side='left', padx=5
+        )
+
+        update_card = self._card(
+            page,
+            'Updates',
+            'New builds are verified before the installed application is replaced.',
+        )
+        self.update_status_label = ctk.CTkLabel(
+            update_card,
+            text=self._initial_update_text(),
+            justify='left',
+            wraplength=790,
+            text_color='gray',
+        )
+        self.update_status_label.pack(anchor='w', padx=22, pady=(1, 8))
+        self.update_progress = ctk.CTkProgressBar(update_card, width=500)
+        self.update_progress.set(0)
+        self.update_progress.pack(anchor='w', padx=22, pady=(2, 12))
+
+        update_controls = ctk.CTkFrame(update_card, fg_color='transparent')
+        update_controls.pack(fill='x', padx=17, pady=(0, 18))
+        self.check_update_button = ctk.CTkButton(
+            update_controls,
+            text='Check for updates',
+            width=155,
+            command=self.check_update,
+        )
+        self.check_update_button.pack(side='left', padx=5)
+        self.install_update_button = ctk.CTkButton(
+            update_controls,
+            text='Update now',
+            width=130,
+            state='disabled',
+            command=self.install_update,
+        )
+        self.install_update_button.pack(side='left', padx=5)
+        ctk.CTkButton(
+            update_controls,
+            text="What's new",
+            width=120,
+            fg_color='transparent',
+            border_width=1,
+            command=self.open_release_notes,
+        ).pack(side='left', padx=5)
 
     def _build_activity(self):
-        page = self._page('activity', 'Activity Detectors')
+        page = self._page(
+            'activity',
+            'Activity',
+            'Choose which activity types are allowed to appear on Discord.',
+        )
         enabled = self.config.get('rules.enabled_detectors', {}) or {}
         self.detector_vars = {}
         labels = {
@@ -120,104 +261,257 @@ class ModernControlPanel(ctk.CTk):
             'coding': 'Code editors',
             'browser': 'Browsers',
             'media': 'Media players',
-            'terminal': 'Terminal / console',
-            'application': 'Other applications',
+            'terminal': 'Terminal',
+            'application': 'Other apps',
         }
-        box = ctk.CTkFrame(page)
-        box.pack(fill='x', padx=30, pady=10)
+        box = self._card(
+            page,
+            'Detection',
+            'These switches control the detector itself. Turning one off prevents that detector from running.',
+        )
         for key, label in labels.items():
             var = ctk.BooleanVar(value=bool(enabled.get(key, True)))
             self.detector_vars[key] = var
-            ctk.CTkCheckBox(box, text=label, variable=var).pack(anchor='w', padx=20, pady=10)
+            ctk.CTkSwitch(box, text=label, variable=var).pack(anchor='w', padx=22, pady=8)
         ctk.CTkLabel(
             box,
-            text='Disable “Other applications” to publish only recognized activity types.',
+            text=(
+                'On Wayland, app detection only runs when the desktop provides a reliable active-window source. '
+                'Background processes are never used to guess what you are using.'
+            ),
             text_color='gray',
-        ).pack(anchor='w', padx=20, pady=(5, 15))
+            justify='left',
+            wraplength=790,
+        ).pack(anchor='w', padx=22, pady=(7, 18))
 
     def _build_privacy(self):
-        page = self._page('privacy', 'Privacy & Security')
-        box = ctk.CTkFrame(page)
-        box.pack(fill='x', padx=30, pady=10)
+        page = self._page(
+            'privacy',
+            'Privacy',
+            'Choose how much activity detail can be sent to Discord.',
+        )
+        box = self._card(page, 'Activity details', 'Balanced is the recommended everyday setting.')
         self.privacy_mode = tk.StringVar(value=str(self.config.get('privacy.mode', 'balanced')))
         descriptions = (
-            ('off', 'Off — no activity redaction'),
-            ('balanced', 'Balanced — redact secrets and reduce path exposure'),
-            ('strict', 'Strict — generic activity only, no browser URLs/buttons'),
+            ('off', 'Off — show detected details as-is'),
+            ('balanced', 'Balanced — hide secrets and shorten personal paths'),
+            ('strict', 'Strict — share general activity only, without browser links or buttons'),
         )
         for value, label in descriptions:
             ctk.CTkRadioButton(box, text=label, variable=self.privacy_mode, value=value).pack(
-                anchor='w', padx=20, pady=10
+                anchor='w', padx=22, pady=9
             )
+
         self.hide_home = ctk.BooleanVar(value=bool(self.config.get('privacy.hide_home_paths', True)))
         ctk.CTkSwitch(
-            box, text='Redact home directory in Balanced mode', variable=self.hide_home
-        ).pack(anchor='w', padx=20, pady=(15, 8))
+            box,
+            text='Hide my home folder from activity details',
+            variable=self.hide_home,
+        ).pack(anchor='w', padx=22, pady=(15, 8))
         self.clear_on_lock = ctk.BooleanVar(
             value=bool(self.config.get('rules.clear_on_lock_screen', True))
         )
         ctk.CTkSwitch(
             box,
-            text='Clear Rich Presence when a lock screen is detected',
+            text='Clear my Discord status when the screen locks',
             variable=self.clear_on_lock,
-        ).pack(anchor='w', padx=20, pady=(8, 20))
+        ).pack(anchor='w', padx=22, pady=(8, 20))
+
+        companion = self._card(
+            page,
+            'Browser details',
+            'Optional browser details stay on this computer until the selected Rich Presence data is sent to Discord.',
+        )
+        self.companion_enabled = ctk.BooleanVar(
+            value=bool(self.config.get('browser_companion.enabled', False))
+        )
+        self.companion_titles = ctk.BooleanVar(
+            value=bool(self.config.get('browser_companion.allow_titles', True))
+        )
+        self.companion_origin = ctk.BooleanVar(
+            value=bool(self.config.get('browser_companion.allow_origin', True))
+        )
+        self.companion_exact_url = ctk.BooleanVar(
+            value=bool(self.config.get('browser_companion.allow_exact_url', False))
+        )
+        ctk.CTkSwitch(companion, text='Use browser companion', variable=self.companion_enabled).pack(
+            anchor='w', padx=22, pady=8
+        )
+        ctk.CTkSwitch(companion, text='Share page title', variable=self.companion_titles).pack(
+            anchor='w', padx=22, pady=8
+        )
+        ctk.CTkSwitch(companion, text='Share website address', variable=self.companion_origin).pack(
+            anchor='w', padx=22, pady=8
+        )
+        ctk.CTkSwitch(
+            companion,
+            text='Share full page path and query',
+            variable=self.companion_exact_url,
+        ).pack(anchor='w', padx=22, pady=8)
+        ctk.CTkLabel(
+            companion,
+            text=(
+                'Private and incognito tabs are always hidden. Full URLs can contain private information, '
+                'so full-path sharing stays off by default.'
+            ),
+            text_color='gray',
+            justify='left',
+            wraplength=790,
+        ).pack(anchor='w', padx=22, pady=(7, 18))
 
     def _build_settings(self):
-        page = self._page('settings', 'Application Settings')
-        box = ctk.CTkFrame(page)
-        box.pack(fill='x', padx=30, pady=10)
+        page = self._page('settings', 'Preferences', 'Discord, startup, and update settings.')
 
-        ctk.CTkLabel(box, text='Discord Client ID').pack(anchor='w', padx=20, pady=(20, 5))
+        discord_box = self._card(page, 'Discord', 'Connection settings used by the background service.')
+        self._field(discord_box, 'Client ID', 'The numeric application ID from the Discord Developer Portal.')
         self.client_id = tk.StringVar(value=str(self.config.get('discord.client_id', '')))
-        ctk.CTkEntry(box, textvariable=self.client_id, width=380).pack(
-            anchor='w', padx=20, pady=(0, 15)
-        )
-
-        ctk.CTkLabel(box, text='Update interval (seconds)').pack(anchor='w', padx=20, pady=(5, 5))
+        ctk.CTkEntry(
+            discord_box,
+            textvariable=self.client_id,
+            width=390,
+            placeholder_text='Discord application ID',
+        ).pack(anchor='w', padx=22, pady=(0, 10))
+        self._field(discord_box, 'Refresh every', 'How often the service checks for a new activity.')
+        interval_row = ctk.CTkFrame(discord_box, fg_color='transparent')
+        interval_row.pack(fill='x', padx=17, pady=(0, 18))
         self.update_interval = tk.StringVar(value=str(self.config.get('update_interval_secs', 5)))
-        ctk.CTkEntry(box, textvariable=self.update_interval, width=150).pack(
-            anchor='w', padx=20, pady=(0, 15)
-        )
+        ctk.CTkEntry(interval_row, textvariable=self.update_interval, width=100).pack(side='left', padx=5)
+        ctk.CTkLabel(interval_row, text='seconds', text_color='gray').pack(side='left', padx=4)
 
+        buttons_box = self._card(
+            page,
+            'Profile buttons',
+            'Optional links shown with Rich Presence. Discord allows up to two.',
+        )
         buttons = self.config.get('discord.buttons', []) or []
         self.button_fields = []
-        ctk.CTkLabel(box, text='Custom Rich Presence buttons (up to 2)').pack(
-            anchor='w', padx=20, pady=(10, 5)
-        )
         for index in range(2):
             current = buttons[index] if index < len(buttons) else {}
-            row = ctk.CTkFrame(box, fg_color='transparent')
-            row.pack(fill='x', padx=15, pady=5)
+            row = ctk.CTkFrame(buttons_box, fg_color='transparent')
+            row.pack(fill='x', padx=17, pady=(5, 6))
             label_var = tk.StringVar(value=str(current.get('label', '')))
             url_var = tk.StringVar(value=str(current.get('url', '')))
-            ctk.CTkEntry(row, textvariable=label_var, placeholder_text='Label', width=200).pack(
-                side='left', padx=5
-            )
-            ctk.CTkEntry(row, textvariable=url_var, placeholder_text='https://...', width=430).pack(
-                side='left', padx=5
-            )
+            ctk.CTkEntry(
+                row,
+                textvariable=label_var,
+                placeholder_text=f'Button {index + 1} text',
+                width=220,
+            ).pack(side='left', padx=5)
+            ctk.CTkEntry(
+                row,
+                textvariable=url_var,
+                placeholder_text='https://example.com',
+                width=480,
+            ).pack(side='left', padx=5)
             self.button_fields.append((label_var, url_var))
+        ctk.CTkLabel(
+            buttons_box,
+            text='Leave a row empty if you do not need that button.',
+            text_color='gray',
+        ).pack(anchor='w', padx=22, pady=(5, 18))
 
-        self.autostart = ctk.BooleanVar(value=self._registry_autostart_enabled())
-        if _WINREG_AVAILABLE:
-            ctk.CTkSwitch(box, text='Start with Windows', variable=self.autostart).pack(
-                anchor='w', padx=20, pady=(15, 20)
-            )
+        behavior_box = self._card(page, 'App behavior')
+        self.autostart = ctk.BooleanVar(value=startup_is_enabled())
+        if sys.platform == 'win32' or sys.platform.startswith('linux'):
+            ctk.CTkSwitch(
+                behavior_box,
+                text='Start automatically when I sign in',
+                variable=self.autostart,
+            ).pack(anchor='w', padx=22, pady=(8, 18))
+        else:
+            ctk.CTkLabel(
+                behavior_box,
+                text='Automatic startup is not available on this platform yet.',
+                text_color='gray',
+            ).pack(anchor='w', padx=22, pady=(8, 18))
 
-        ctk.CTkButton(page, text='Reset to Defaults', command=self.reset_settings).pack(
-            anchor='w', padx=30, pady=25
+        update_box = self._card(
+            page,
+            'Updates',
+            'Updates are accepted only when the release signature, signed size, and file checksum match.',
         )
+        self.updates_enabled = ctk.BooleanVar(value=bool(self.config.get('updates.enabled', False)))
+        self.auto_install_updates = ctk.BooleanVar(
+            value=bool(self.config.get('updates.auto_install', False))
+        )
+        ctk.CTkSwitch(
+            update_box,
+            text='Check for verified updates',
+            variable=self.updates_enabled,
+        ).pack(anchor='w', padx=22, pady=8)
+        ctk.CTkSwitch(
+            update_box,
+            text='Prepare verified portable updates when the app starts',
+            variable=self.auto_install_updates,
+        ).pack(anchor='w', padx=22, pady=8)
+        self._field(
+            update_box,
+            'Advanced update source',
+            'Change these only if you manage the release feed for this app.',
+        )
+        self.update_manifest_url = tk.StringVar(value=str(self.config.get('updates.manifest_url', '')))
+        ctk.CTkEntry(
+            update_box,
+            textvariable=self.update_manifest_url,
+            width=735,
+            placeholder_text='Signed manifest URL',
+        ).pack(anchor='w', padx=22, pady=(0, 8))
+        self.update_public_key = tk.StringVar(value=str(self.config.get('updates.public_key', '')))
+        ctk.CTkEntry(
+            update_box,
+            textvariable=self.update_public_key,
+            width=735,
+            placeholder_text='Release public key (base64)',
+        ).pack(anchor='w', padx=22, pady=(0, 8))
+        ctk.CTkLabel(
+            update_box,
+            text='Only the public key belongs here. The private release key must never be stored in the app.',
+            text_color='gray',
+            justify='left',
+            wraplength=790,
+        ).pack(anchor='w', padx=22, pady=(3, 18))
+
+        reset_box = ctk.CTkFrame(page, fg_color='transparent')
+        reset_box.pack(fill='x', padx=34, pady=(8, 28))
+        ctk.CTkButton(
+            reset_box,
+            text='Restore defaults',
+            fg_color='transparent',
+            border_width=1,
+            command=self.reset_settings,
+        ).pack(anchor='w')
 
     def _build_about(self):
-        page = self._page('about', 'About')
+        page = self._page('about', 'About', 'Version, project links, and platform behavior.')
+        info = self._card(page, f'Discord Rich Presence {__version__}')
         ctk.CTkLabel(
-            page,
-            text='Discord Rich Presence Service\nLocal activity detection with configurable privacy controls.',
+            info,
+            text=(
+                'Runs locally and sends only the activity details you allow to Discord.\n'
+                'If the desktop cannot provide a reliable active window, app detection stays off instead of guessing.'
+            ),
             justify='left',
-        ).pack(anchor='w', padx=30, pady=10)
-        link = ctk.CTkLabel(page, text='GitHub repository', text_color='#3b8ed0', cursor='hand2')
-        link.pack(anchor='w', padx=30, pady=10)
-        link.bind('<Button-1>', lambda _: webbrowser.open('https://github.com/imedkablavi/discord-rich-presence'))
+            wraplength=790,
+        ).pack(anchor='w', padx=22, pady=(5, 15))
+        links = ctk.CTkFrame(info, fg_color='transparent')
+        links.pack(fill='x', padx=17, pady=(0, 18))
+        ctk.CTkButton(
+            links,
+            text='Open GitHub',
+            width=130,
+            command=lambda: webbrowser.open('https://github.com/imedkablavi/discord-rich-presence'),
+        ).pack(side='left', padx=5)
+        ctk.CTkButton(links, text='Release notes', width=130, command=self.open_release_notes).pack(
+            side='left', padx=5
+        )
+
+        platform_card = self._card(page, 'App detection on this computer')
+        ctk.CTkLabel(
+            platform_card,
+            text=self._capability_text(self.window_capability),
+            justify='left',
+            wraplength=790,
+        ).pack(anchor='w', padx=22, pady=(4, 18))
 
     def select_page(self, name: str):
         for page_name, page in self.pages.items():
@@ -226,7 +520,9 @@ class ModernControlPanel(ctk.CTk):
             else:
                 page.grid_forget()
         for button_name, button in self.nav.items():
-            button.configure(fg_color=('gray75', 'gray25') if button_name == name else 'transparent')
+            button.configure(
+                fg_color=('gray75', 'gray25') if button_name == name else 'transparent'
+            )
 
     def save_settings(self):
         snapshot = copy.deepcopy(self.config.data)
@@ -240,6 +536,15 @@ class ModernControlPanel(ctk.CTk):
                 'rules.enabled_detectors',
                 {key: var.get() for key, var in self.detector_vars.items()},
             )
+            self.config.set('browser_companion.enabled', self.companion_enabled.get())
+            self.config.set('browser_companion.allow_titles', self.companion_titles.get())
+            self.config.set('browser_companion.allow_origin', self.companion_origin.get())
+            self.config.set('browser_companion.allow_exact_url', self.companion_exact_url.get())
+            self.config.set('updates.enabled', self.updates_enabled.get())
+            self.config.set('updates.auto_install', self.auto_install_updates.get())
+            self.config.set('updates.manifest_url', self.update_manifest_url.get().strip())
+            self.config.set('updates.public_key', self.update_public_key.get().strip())
+            self.config.set('system.auto_start', self.autostart.get())
 
             buttons = []
             for label_var, url_var in self.button_fields:
@@ -249,63 +554,86 @@ class ModernControlPanel(ctk.CTk):
                     buttons.append({'label': label, 'url': url})
             self.config.set('discord.buttons', buttons)
             self.config.save()
-            if _WINREG_AVAILABLE:
-                self._set_registry_autostart(self.autostart.get())
+            if sys.platform == 'win32' or sys.platform.startswith('linux'):
+                startup_set_enabled(self.autostart.get())
+            self.available_update = None
+            self.install_update_button.configure(state='disabled')
+            self.update_progress.set(0)
+            self.update_status_label.configure(text=self._initial_update_text())
             messagebox.showinfo(
-                'Saved', 'Settings saved and validated. The service will hot-reload the file.'
+                'Settings saved',
+                'Your changes are saved. The running service will pick them up automatically.',
             )
         except Exception as e:
-            # GUI edits are transactional: a failed validation must not poison the
-            # in-memory Config object used by the rest of this panel.
             self.config.data = snapshot
-            messagebox.showerror('Validation Error', str(e))
+            messagebox.showerror('Could not save settings', str(e))
 
     def reset_settings(self):
-        if not messagebox.askyesno('Reset Settings', 'Reset all settings to defaults?'):
+        if not messagebox.askyesno(
+            'Restore defaults',
+            'Restore the default settings? Your current preferences will be replaced.',
+        ):
             return
         snapshot = copy.deepcopy(self.config.data)
         self.config.data = copy.deepcopy(DEFAULT_CONFIG)
         try:
             self.config.save()
-            messagebox.showinfo('Reset Complete', 'Defaults restored. Reopen the panel to refresh all controls.')
+            messagebox.showinfo(
+                'Defaults restored',
+                'Default settings are back. Reopen this window to refresh every control.',
+            )
         except Exception as e:
             self.config.data = snapshot
-            messagebox.showerror('Reset Error', str(e))
+            messagebox.showerror('Could not restore defaults', str(e))
+
+    def _service_command(self):
+        if getattr(sys, 'frozen', False):
+            return [sys.executable, '--tray'], str(Path(sys.executable).resolve().parent)
+        script = Path(__file__).with_name('main.py')
+        python = sys.executable
+        if sys.platform == 'win32' and python.lower().endswith('python.exe'):
+            pythonw = python[:-10] + 'pythonw.exe'
+            if os.path.exists(pythonw):
+                python = pythonw
+        return [python, str(script)], str(script.parent)
+
+    def _launch_service(self, show_error: bool = True) -> bool:
+        try:
+            command, cwd = self._service_command()
+            self.service_process = subprocess.Popen(command, cwd=cwd)
+            return True
+        except Exception as e:
+            if show_error:
+                messagebox.showerror('Could not start', str(e))
+            return False
 
     def start_service(self):
-        active = self.runtime.read_active()
-        if active:
-            messagebox.showinfo('Service', f"Service is already running (PID {active.get('pid', '?')}).")
+        if self.runtime.read_active():
+            messagebox.showinfo('Already running', 'The service is already running.')
             return
-        try:
-            script = Path(__file__).with_name('main.py')
-            python = sys.executable
-            if sys.platform == 'win32' and python.lower().endswith('python.exe'):
-                pythonw = python[:-10] + 'pythonw.exe'
-                if os.path.exists(pythonw):
-                    python = pythonw
-            self.service_process = subprocess.Popen([python, str(script)], cwd=str(script.parent))
-        except Exception as e:
-            messagebox.showerror('Start Error', str(e))
+        self._launch_service()
 
     def stop_service(self):
         active = self.runtime.read_active()
         if not active:
-            messagebox.showinfo('Service', 'No running service instance was found.')
+            messagebox.showinfo('Already stopped', 'The service is not running.')
             return
         if not self.runtime.terminate_active(timeout=5):
             messagebox.showerror(
-                'Stop Error', 'The service could not be stopped. Check permissions or the log file.'
+                'Could not stop',
+                'The service did not stop. Check the logs or your permissions and try again.',
             )
+            return
         self.service_process = None
 
     def _poll_service(self):
         active = self.runtime.read_active()
         if not active:
-            self.status_label.configure(text='● Service stopped', text_color='gray')
-            self.rpc_label.configure(text='Discord RPC: —')
-            self.activity_label.configure(text='Activity: —')
-            self.heartbeat_label.configure(text='Heartbeat: —')
+            self.status_label.configure(text='● Stopped', text_color='gray')
+            self.rpc_label.configure(text='Discord: Not connected')
+            self.activity_label.configure(text='Now showing: Nothing')
+            self.capability_label.configure(text=self._capability_text(self.window_capability))
+            self.heartbeat_label.configure(text='Last update: —')
             self.start_button.configure(state='normal')
             self.stop_button.configure(state='disabled')
         else:
@@ -313,9 +641,6 @@ class ModernControlPanel(ctk.CTk):
             pid = active.get('pid', '?')
             connected = bool(active.get('connected', False))
             presence_active = bool(active.get('presence_active', False))
-            activity = active.get('activity') or (
-                'No publishable activity' if not presence_active else 'Active'
-            )
             updated = float(active.get('updated_at') or 0)
             age = max(0.0, time.time() - updated) if updated else 0.0
             stale = bool(
@@ -324,28 +649,35 @@ class ModernControlPanel(ctk.CTk):
             )
 
             if stale:
-                self.status_label.configure(
-                    text=f'● Service heartbeat stale (PID {pid})', text_color='#f39c12'
-                )
-            elif state in {'rpc_error', 'loop_error', 'configuration_error'}:
-                self.status_label.configure(
-                    text=f'● Service running with error (PID {pid})', text_color='#e74c3c'
-                )
+                self.status_label.configure(text='● Needs attention', text_color='#f39c12')
+            elif state == 'starting' or state == 'reconnecting':
+                self.status_label.configure(text='● Starting', text_color='gray')
+            elif state in {'rpc_error', 'loop_error', 'configuration_error', 'update_error'}:
+                self.status_label.configure(text='● Running with an error', text_color='#e74c3c')
             else:
-                self.status_label.configure(
-                    text=f'● Service running (PID {pid})', text_color='#2ecc71'
-                )
+                self.status_label.configure(text='● Running', text_color='#2ecc71')
 
             if state == 'dry_run':
-                rpc_text = 'Discord RPC: dry-run mode'
+                rpc_text = 'Discord: Test mode'
             else:
-                rpc_text = 'Discord RPC: connected' if connected else 'Discord RPC: disconnected'
+                rpc_text = 'Discord: Connected' if connected else 'Discord: Disconnected'
             last_error = str(active.get('last_error') or '').strip()
             if last_error:
                 rpc_text += f' — {last_error[:150]}'
             self.rpc_label.configure(text=rpc_text)
-            self.activity_label.configure(text=f'Activity: {activity}')
-            self.heartbeat_label.configure(text=f'Heartbeat: {age:.1f}s ago · state={state}')
+
+            can_claim_published = state == 'dry_run' or connected
+            if presence_active and can_claim_published:
+                activity = str(active.get('activity') or 'Active')
+                self.activity_label.configure(text=f'Now showing: {activity}')
+            elif connected:
+                self.activity_label.configure(text='Now showing: Nothing')
+            else:
+                self.activity_label.configure(text='Now showing: Nothing sent to Discord')
+
+            capability = active.get('foreground_capability') or self.window_capability
+            self.capability_label.configure(text=self._capability_text(capability))
+            self.heartbeat_label.configure(text=f'Last update: {age:.1f}s ago · PID {pid}')
             self.start_button.configure(state='disabled')
             self.stop_button.configure(state='normal')
 
@@ -353,24 +685,142 @@ class ModernControlPanel(ctk.CTk):
 
     def test_rpc(self):
         client_id = self.client_id.get().strip()
+        if not client_id:
+            messagebox.showwarning('Discord connection', 'Enter a Discord Client ID first.')
+            return
 
         def worker():
+            rpc = None
             try:
                 from pypresence import Presence
                 rpc = Presence(client_id)
                 rpc.connect()
-                rpc.close()
-                self.after(0, lambda: messagebox.showinfo('Discord RPC', 'RPC connection succeeded.'))
+                self.after(0, lambda: messagebox.showinfo('Discord connection', 'Connection successful.'))
             except Exception as e:
                 error_message = str(e)
                 self.after(
                     0,
                     lambda msg=error_message: messagebox.showerror(
-                        'Discord RPC', f'Connection failed: {msg}'
+                        'Discord connection', f'Could not connect: {msg}'
                     ),
                 )
+            finally:
+                if rpc:
+                    try:
+                        rpc.close()
+                    except Exception:
+                        pass
 
-        threading.Thread(target=worker, daemon=True).start()
+        threading.Thread(target=worker, daemon=True, name='rpc-test').start()
+
+    def _set_update_busy(self, busy: bool):
+        self.update_busy = busy
+        self.check_update_button.configure(state='disabled' if busy else 'normal')
+        install_state = 'normal' if (not busy and self.available_update) else 'disabled'
+        self.install_update_button.configure(state=install_state)
+
+    def check_update(self):
+        if self.update_busy:
+            return
+        self._set_update_busy(True)
+        self.update_progress.set(0)
+        self.update_status_label.configure(text='Checking for updates…')
+
+        def worker():
+            try:
+                status = check_for_update(self.config)
+                self.available_update = status if status.available and status.asset else None
+                text = status.message
+                if status.available and status.asset:
+                    size_mb = status.asset.size / (1024 * 1024)
+                    text += f' · {size_mb:.1f} MB'
+                self.after(0, lambda value=text: self.update_status_label.configure(text=value))
+            except Exception as e:
+                self.available_update = None
+                error = str(e)
+                self.after(
+                    0,
+                    lambda value=error: self.update_status_label.configure(
+                        text=f'Could not check for updates: {value}'
+                    ),
+                )
+            finally:
+                self.after(0, lambda: self._set_update_busy(False))
+
+        threading.Thread(target=worker, daemon=True, name='update-check').start()
+
+    def install_update(self):
+        status = self.available_update
+        if self.update_busy or not status or not status.available:
+            return
+        version = status.latest_version or 'the new version'
+        if not messagebox.askyesno(
+            'Install update',
+            f'Install {version} now? The app will restart when the verified update is ready.',
+        ):
+            return
+
+        self._set_update_busy(True)
+        self.update_progress.set(0)
+        self.update_status_label.configure(text=f'Preparing version {version}…')
+
+        def progress(done: int, total: int):
+            fraction = (done / total) if total > 0 else 0.0
+            percent = int(max(0.0, min(1.0, fraction)) * 100)
+            self.after(0, lambda value=fraction: self.update_progress.set(value))
+            self.after(
+                0,
+                lambda value=percent: self.update_status_label.configure(
+                    text=f'Downloading and verifying update… {value}%'
+                ),
+            )
+
+        def worker():
+            had_service = bool(self.runtime.read_active())
+            try:
+                if had_service:
+                    self.after(0, lambda: self.update_status_label.configure(text='Stopping background service…'))
+                    if not self.runtime.terminate_active(timeout=5):
+                        raise RuntimeError('The background service could not be stopped safely')
+
+                result = stage_update(
+                    self.config,
+                    wait_pids=[os.getpid()],
+                    restart_args=['--gui'],
+                    progress=progress,
+                )
+                if not result.staged:
+                    if had_service:
+                        self.after(0, lambda: self._launch_service(show_error=False))
+                    self.after(0, lambda value=result.message: self.update_status_label.configure(text=value))
+                    self.after(0, lambda: self._set_update_busy(False))
+                    return
+
+                self.after(0, lambda: self.update_progress.set(1.0))
+                self.after(
+                    0,
+                    lambda: self.update_status_label.configure(
+                        text=f'Version {result.latest_version} is ready. Restarting…'
+                    ),
+                )
+                self.after(350, self.destroy)
+            except Exception as e:
+                if had_service and not self.runtime.read_active():
+                    self.after(0, lambda: self._launch_service(show_error=False))
+                error = str(e)
+                self.after(
+                    0,
+                    lambda value=error: self.update_status_label.configure(
+                        text=f'Update was not installed: {value}'
+                    ),
+                )
+                self.after(0, lambda: self._set_update_busy(False))
+
+        threading.Thread(target=worker, daemon=True, name='update-install').start()
+
+    @staticmethod
+    def open_release_notes():
+        webbrowser.open('https://github.com/imedkablavi/discord-rich-presence/releases')
 
     def open_logs(self):
         if sys.platform == 'win32':
@@ -387,49 +837,43 @@ class ModernControlPanel(ctk.CTk):
             else:
                 subprocess.Popen(['xdg-open', str(path)])
         except Exception as e:
-            messagebox.showerror('Logs', str(e))
+            messagebox.showerror('Could not open logs', str(e))
 
-    def _registry_autostart_enabled(self) -> bool:
-        if not _WINREG_AVAILABLE:
-            return False
-        try:
-            with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r'Software\Microsoft\Windows\CurrentVersion\Run',
-                0,
-                winreg.KEY_READ,
-            ) as key:
-                winreg.QueryValueEx(key, 'DiscordRichPresence')
-                return True
-        except OSError:
-            return False
+    def _initial_update_text(self) -> str:
+        if not self.config.get('updates.enabled', False):
+            return f'Version {__version__} · Update checks are off'
+        if not self.config.get('updates.public_key', ''):
+            return f'Version {__version__} · Release public key is not configured'
+        mode = 'Automatic preparation on' if self.config.get('updates.auto_install', False) else 'Manual install'
+        return f'Version {__version__} · Verified updates on · {mode}'
 
-    def _set_registry_autostart(self, enabled: bool):
-        if not _WINREG_AVAILABLE:
-            return
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r'Software\Microsoft\Windows\CurrentVersion\Run',
-            0,
-            winreg.KEY_SET_VALUE,
-        ) as key:
-            if enabled:
-                root = Path(__file__).resolve().parent
-                if getattr(sys, 'frozen', False):
-                    command = f'"{sys.executable}" --tray'
-                else:
-                    python = sys.executable
-                    if python.lower().endswith('python.exe'):
-                        candidate = python[:-10] + 'pythonw.exe'
-                        if os.path.exists(candidate):
-                            python = candidate
-                    command = f'"{python}" "{root / "main.py"}" --tray'
-                winreg.SetValueEx(key, 'DiscordRichPresence', 0, winreg.REG_SZ, command)
-            else:
-                try:
-                    winreg.DeleteValue(key, 'DiscordRichPresence')
-                except FileNotFoundError:
-                    pass
+    @staticmethod
+    def _capability_text(capability) -> str:
+        if not isinstance(capability, dict):
+            return 'App detection: Status unavailable'
+        backend = str(capability.get('backend') or 'unavailable')
+        session = str(capability.get('session') or 'unknown')
+        reason = str(capability.get('reason') or '')
+        names = {
+            'win32': 'Windows',
+            'x11-xprop': 'X11',
+            'kdotool': 'KDE Wayland',
+            'swaymsg': 'Sway',
+        }
+        if capability.get('supported'):
+            return f'App detection: {names.get(backend, backend)}'
+        lower_reason = reason.lower()
+        if 'gnome wayland' in lower_reason:
+            return 'App detection: Not available on GNOME Wayland'
+        if 'kdotool' in lower_reason:
+            return 'App detection: Install kdotool to enable it on KDE Wayland'
+        if 'swaymsg' in lower_reason:
+            return 'App detection: Install swaymsg to enable it on Sway'
+        if 'xprop' in lower_reason:
+            return 'App detection: Install xprop (x11-utils) to enable it on X11'
+        if session and session != 'unknown':
+            return f'App detection: Not available on this {session} session'
+        return 'App detection: Not available on this desktop'
 
 
 if __name__ == '__main__':
