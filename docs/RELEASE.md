@@ -35,8 +35,9 @@ Windows:
 Linux:
 
 - `DiscordRichPresence-linux-x86_64` — raw portable executable used by the signed auto-updater when the install directory is user-writable.
-- `DiscordRichPresence-<version>-linux-x86_64.tar.gz` — portable bundle.
-- `discord-rich-presence_<version>_amd64.deb` — Debian package.
+- `DiscordRichPresence-<version>-linux-x86_64.tar.gz` — distribution-neutral portable bundle.
+- `discord-rich-presence_<version>_amd64.deb` — Debian/Ubuntu package.
+- `discord-rich-presence-<version>-*.x86_64.rpm` — Fedora/Bazzite/RPM-family package.
 
 Release metadata:
 
@@ -47,19 +48,19 @@ Release metadata:
 
 The self-updater is fail-closed:
 
-1. Fetch manifest over HTTPS.
+1. Fetch manifest over HTTPS and reject HTTPS-to-HTTP redirect downgrade.
 2. Verify Ed25519 signature using the configured public key.
 3. Choose an exact platform/architecture asset.
-4. Download to a staged file.
+4. Download to a staged file over HTTPS.
 5. Enforce the signed byte size.
 6. Verify SHA-256.
 7. Refuse source checkouts and unwritable/package-managed locations.
 8. Wait for the running process to exit.
 9. Rename the previous executable to a `.rollback` backup.
 10. Replace with the staged binary and restart.
-11. Restore the previous binary immediately if replacement/restart cannot be launched.
+11. Observe a short restart-health window; if the new process exits immediately, restore and restart the rollback executable.
 
-The rollback backup is intentionally retained after a successful replacement. Automated rollback based on a post-launch health timeout is not yet implemented; that remains a release-hardening follow-up.
+The `.rollback` backup is intentionally retained after a successful replacement. A longer application-level health handshake across multiple minutes is not yet implemented; the current automatic rollback protects replacement failures and immediate startup crashes.
 
 ## CI gates
 
@@ -71,7 +72,7 @@ Every pull request runs:
 - Windows PyInstaller portable smoke test.
 - Windows Inno Setup installer build.
 - Linux PyInstaller portable smoke test.
-- Linux `tar.gz` and Debian package creation/inspection.
+- Linux `tar.gz`, Debian, and RPM package creation/inspection.
 
 A separate `Soak` workflow supports a longer manual duration and runs on a weekly schedule on both operating systems.
 
@@ -84,11 +85,19 @@ The following cannot be proven reliably by hosted CI and must be checked on real
 - Install with Inno Setup and launch the control panel.
 - Start/stop/restart the service repeatedly.
 - Sign out/in with startup enabled and disabled.
-- Confirm uninstall removes the installed files and startup registration.
+- Confirm uninstall requests a graceful service stop and removes installed files plus startup registration.
 - Start Discord before and after the service; verify reconnect without restarting the app.
 - Kill Discord while Presence is active; restart Discord and verify recovery.
 - Run a signed update from a user-writable portable install and verify `.rollback` preservation.
+- Force an immediately crashing test build in an isolated release-candidate environment and verify automatic rollback.
 - Verify Windows Defender/SmartScreen behavior. Authenticode signing is recommended before broad distribution.
+
+### Fedora/Bazzite and Debian-family Linux
+
+- Install/remove the native package and confirm the desktop entry resolves the packaged executable.
+- Confirm package removal leaves user configuration intact by design.
+- Enable and disable per-user desktop-session autostart before package removal.
+- Validate the distribution-neutral portable bundle separately from the native package.
 
 ### KDE Plasma Wayland
 
