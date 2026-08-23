@@ -43,6 +43,7 @@
 - Add per-user startup registration for Windows and Linux desktop sessions.
 - Add control-panel settings for browser companion privacy and signed updates.
 - Show application version and signed-update status in the control panel.
+- Add graceful packaged-service shutdown for the Windows uninstaller and unconditional autostart registry cleanup.
 
 ### Release, updater, and QA
 
@@ -50,10 +51,11 @@
 - Add pytest regression tests and GitHub Actions QA on Windows/Ubuntu with Python 3.10/3.12.
 - Build and smoke-test Windows and Linux PyInstaller executables in CI.
 - Add Windows Inno Setup installer packaging in addition to the portable executable.
-- Add Linux portable `tar.gz` and Debian `.deb` packages.
+- Add Linux portable `tar.gz`, Debian `.deb`, and Fedora/Bazzite-compatible RPM packages.
 - Add tagged GitHub Releases with SHA-256 checksums.
 - Add Ed25519-signed update manifests with HTTPS, signed-size, and SHA-256 verification.
-- Add staged portable self-update with rollback backup and fail-closed behavior.
+- Reject HTTPS-to-HTTP redirect downgrade for manifests and update assets.
+- Add staged portable self-update with rollback backup, immediate restart-health rollback, and fail-closed behavior.
 - Never self-replace source checkouts or unwritable/package-managed installs.
 - Require the update signing private key secret before a tagged release can publish.
 - Add short cross-platform resource-leak soak tests to PR QA and a scheduled/manual long soak workflow.
@@ -77,5 +79,5 @@ Initial Linux/X11 activity detection, browser/media/coding/terminal detectors, D
 - Native macOS foreground-window support.
 - Reliable trusted integrations for additional Wayland compositors when stable APIs exist.
 - Browser extension packages that implement the documented local companion protocol.
-- RPM/AppImage packaging after distribution-specific validation.
+- AppImage packaging after distribution-specific validation.
 - Detector/plugin extension API.
