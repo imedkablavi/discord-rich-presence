@@ -18,7 +18,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from config import Config, DEFAULT_CONFIG
+from config import Config, DEFAULT_CONFIG, resolve_discord_application_id
 from runtime_state import RuntimeState
 
 try:
@@ -423,7 +423,7 @@ class ModernControlPanel(ctk.CTk):
             value=bool(self.config.get('rules.clear_on_lock_screen', True))
         )
         ctk.CTkSwitch(system, text='Clear Presence on lock screen', variable=self.clear_on_lock).pack(
-            anchor='w', padx=20, pady=(8, 18)
+            anchor='w', padx=20, pady=(8, 18))
         )
 
     # ---------------------------------------------------------------- settings
@@ -765,12 +765,12 @@ class ModernControlPanel(ctk.CTk):
 
     # ------------------------------------------------------------- diagnostics
     def test_rpc(self):
-        client_id = str(self.config.get('discord.client_id', '')).strip()
+        application_id = resolve_discord_application_id(self.config)
 
         def worker():
             try:
                 from pypresence import Presence
-                rpc = Presence(client_id)
+                rpc = Presence(application_id)
                 rpc.connect()
                 rpc.close()
                 self.after(0, lambda: messagebox.showinfo('Discord RPC', 'Connection succeeded.'))
@@ -808,7 +808,7 @@ class ModernControlPanel(ctk.CTk):
 
             try:
                 from pypresence import Presence
-                rpc = Presence(str(self.config.get('discord.client_id', '')).strip())
+                rpc = Presence(resolve_discord_application_id(self.config))
                 rpc.connect()
                 rpc.close()
                 results['discord'] = ('Connected', '#2ecc71')
