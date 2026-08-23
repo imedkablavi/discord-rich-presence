@@ -1,0 +1,94 @@
+name: Game support request
+description: Request standard or enhanced Discord Presence support for a game.
+title: "[Game] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping expand game support. Do not upload game logs containing account IDs, server IPs, chat, tokens, or other private data.
+
+        Standard support can often be added through an exact executable-name community pack. Enhanced live state requires a documented/safe local source; memory injection, input automation, and packet manipulation are out of scope.
+
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      placeholder: e.g. PUBG: BATTLEGROUNDS
+    validations:
+      required: true
+
+  - type: dropdown
+    id: launcher
+    attributes:
+      label: Launcher / store
+      options:
+        - Steam
+        - Epic Games
+        - Heroic / Legendary
+        - Riot Client
+        - EA app
+        - Ubisoft Connect
+        - Battle.net
+        - Xbox / Microsoft Store
+        - Standalone
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options:
+        - Windows 10
+        - Windows 11
+        - Linux X11
+        - Linux Wayland / KDE Plasma
+        - Linux Wayland / Sway
+        - Linux Wayland / other compositor
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: executable
+    attributes:
+      label: Exact game executable / process name
+      description: If known. Please provide only the basename, not your full install path.
+      placeholder: e.g. TslGame.exe
+
+  - type: dropdown
+    id: level
+    attributes:
+      label: Requested support level
+      options:
+        - Standard presence (game name / artwork / store link)
+        - Enhanced presence (documented live game state)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired
+    attributes:
+      label: What should Discord show?
+      description: Describe the useful Presence fields without including private player data.
+      placeholder: Game mode, map, party size, match timer, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: source
+    attributes:
+      label: Official / documented local data source
+      description: For enhanced support, link or name an official API, game-state integration, plugin/mod API, or server resource if one exists.
+
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Safety boundary
+      options:
+        - label: I understand CYBREX will not use process-memory reading, DLL injection, input automation, packet manipulation, or anti-cheat bypass techniques for game enrichment.
+          required: true
