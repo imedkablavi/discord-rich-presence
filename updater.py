@@ -292,6 +292,16 @@ def _install_linux(target: Path, staged: Path) -> None:
         pass
 
 
+def _relaunch_linux(target: Path, restart_args: list[str]) -> None:
+    if not restart_args:
+        return
+    subprocess.Popen(
+        [str(target), *restart_args],
+        close_fds=True,
+        start_new_session=True,
+    )
+
+
 def _schedule_windows_replace(target: Path, staged: Path, restart_args: list[str]) -> None:
     script_fd, script_name = tempfile.mkstemp(prefix="cybrex-update-", suffix=".ps1")
     os.close(script_fd)
@@ -351,7 +361,7 @@ def install_update(
 
     Windows schedules replacement after the updater process exits because a
     running PE file cannot be replaced reliably. Linux uses an atomic rename in
-    the executable directory; the already-running process can finish normally.
+    the executable directory and can relaunch the verified replacement directly.
     """
     if target_path is None:
         if not getattr(sys, "frozen", False):
@@ -375,6 +385,8 @@ def install_update(
         return "scheduled"
     try:
         _install_linux(target, staged)
+        if target_path is None:
+            _relaunch_linux(target, args)
     except Exception as exc:
         try:
             staged.unlink(missing_ok=True)
