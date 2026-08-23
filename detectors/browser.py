@@ -25,7 +25,9 @@ class BrowserDetector:
 
     SERVICES = (
         'YouTube Music', 'YouTube', 'Netflix', 'Prime Video', 'Disney+', 'Hulu',
-        'SoundCloud', 'Spotify', 'Twitch', 'GitHub', 'Reddit', 'ChatGPT', 'X'
+        'SoundCloud', 'Spotify', 'Twitch', 'GitHub', 'Reddit', 'ChatGPT', 'X',
+        'WhatsApp', 'Facebook', 'Messenger', 'Instagram', 'LinkedIn', 'Threads',
+        'TikTok', 'Telegram', 'Snapchat', 'Discord Web', 'Pinterest', 'Bluesky',
     )
 
     SERVICE_URL_MARKERS = {
@@ -42,6 +44,41 @@ class BrowserDetector:
         'Reddit': ('reddit.com',),
         'ChatGPT': ('chatgpt.com',),
         'X': ('x.com', 'twitter.com'),
+        'WhatsApp': ('web.whatsapp.com',),
+        'Facebook': ('facebook.com',),
+        'Messenger': ('messenger.com',),
+        'Instagram': ('instagram.com',),
+        'LinkedIn': ('linkedin.com',),
+        'Threads': ('threads.com', 'threads.net'),
+        'TikTok': ('tiktok.com',),
+        'Telegram': ('web.telegram.org',),
+        'Snapchat': ('web.snapchat.com',),
+        'Discord Web': ('discord.com/app', 'discord.com/channels'),
+        'Pinterest': ('pinterest.com',),
+        'Bluesky': ('bsky.app',),
+    }
+
+    SOCIAL_SERVICES = frozenset({
+        'Reddit', 'X', 'WhatsApp', 'Facebook', 'Messenger', 'Instagram',
+        'LinkedIn', 'Threads', 'TikTok', 'Telegram', 'Snapchat', 'Discord Web',
+        'Pinterest', 'Bluesky',
+    })
+
+    SOCIAL_HOME_URLS = {
+        'Reddit': 'https://www.reddit.com',
+        'X': 'https://x.com',
+        'WhatsApp': 'https://web.whatsapp.com',
+        'Facebook': 'https://www.facebook.com',
+        'Messenger': 'https://www.messenger.com',
+        'Instagram': 'https://www.instagram.com',
+        'LinkedIn': 'https://www.linkedin.com',
+        'Threads': 'https://www.threads.com',
+        'TikTok': 'https://www.tiktok.com',
+        'Telegram': 'https://web.telegram.org',
+        'Snapchat': 'https://web.snapchat.com',
+        'Discord Web': 'https://discord.com/app',
+        'Pinterest': 'https://www.pinterest.com',
+        'Bluesky': 'https://bsky.app',
     }
 
     def __init__(self, config: Config):
@@ -74,6 +111,9 @@ class BrowserDetector:
             return companion_activity
 
         service = self._detect_service(raw_title)
+        if service in self.SOCIAL_SERVICES:
+            return self._social_activity(browser_name, service, source='window')
+
         page_title = self._extract_page_title(raw_title, browser_name, service)
         url = self._generate_url(service, page_title)
 
@@ -113,6 +153,13 @@ class BrowserDetector:
         else:
             service = snapshot_service or self._detect_service(raw_title) or ''
 
+        # Social/messaging titles and deep links routinely contain account names,
+        # conversation names, profile IDs, post IDs, or message context. Never
+        # forward those fields to Presence. Keep only a generic service identity
+        # and a public homepage link, even when browser_url_mode is path/full.
+        if service in self.SOCIAL_SERVICES:
+            return self._social_activity(browser_name, service, source='companion')
+
         page_title = self._extract_page_title(raw_title, browser_name, service or None)
         media = snapshot.get('media') if isinstance(snapshot.get('media'), dict) else {}
 
@@ -126,6 +173,27 @@ class BrowserDetector:
             'url_is_exact': bool(exact_url),
             'source': 'companion',
             'media': media,
+        }
+
+    @classmethod
+    def _social_activity(
+        cls,
+        browser_name: str,
+        service: str,
+        *,
+        source: str,
+    ) -> Dict[str, Any]:
+        return {
+            'type': 'browser',
+            'browser_name': browser_name,
+            'is_private': False,
+            'page_title': f'Using {service}',
+            'service': service,
+            'url': cls.SOCIAL_HOME_URLS.get(service),
+            'url_is_exact': False,
+            'source': source,
+            'social': True,
+            'media': {},
         }
 
     @staticmethod
@@ -242,6 +310,11 @@ class BrowserDetector:
         """Generate a search/home URL only when the companion has no exact tab URL."""
         if not service:
             return None
+
+        social_url = self.SOCIAL_HOME_URLS.get(service)
+        if social_url:
+            return social_url
+
         query = urllib.parse.quote(title)
 
         if service == 'YouTube':
@@ -260,12 +333,8 @@ class BrowserDetector:
             return f"https://open.spotify.com/search/{query}" if title else 'https://open.spotify.com'
         if service == 'GitHub':
             return 'https://github.com'
-        if service == 'Reddit':
-            return 'https://www.reddit.com'
         if service == 'ChatGPT':
             return 'https://chatgpt.com'
-        if service == 'X':
-            return 'https://x.com'
         if service == 'Disney+':
             return 'https://www.disneyplus.com'
         if service == 'Hulu':
