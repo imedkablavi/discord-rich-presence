@@ -10,8 +10,9 @@ AppId={{A63A8D54-2B2F-4A18-A8A8-89A6B00A0F5A}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\Discord Rich Presence
+DefaultDirName={localappdata}\Programs\Discord Rich Presence
 DefaultGroupName={#MyAppName}
+DisableProgramGroupPage=yes
 OutputDir=..\..\release-dist
 OutputBaseFilename=DiscordRichPresence-Setup-{#MyAppVersion}-windows-x86_64
 Compression=lzma2
@@ -25,7 +26,7 @@ CloseApplications=yes
 RestartApplications=no
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 Name: "startup"; Description: "Start Discord Rich Presence when I sign in"; GroupDescription: "Startup:"; Flags: unchecked
 
 [Files]
