@@ -46,7 +46,7 @@ class BrowserDetector:
         'X': ('x.com', 'twitter.com'),
         'WhatsApp': ('web.whatsapp.com',),
         'Facebook': ('facebook.com',),
-        'Messenger': ('messenger.com',),
+        'Messenger': ('messenger.com', 'facebook.com/messages'),
         'Instagram': ('instagram.com',),
         'LinkedIn': ('linkedin.com',),
         'Threads': ('threads.com', 'threads.net'),
@@ -254,6 +254,13 @@ class BrowserDetector:
         normalized_path = path.rstrip('/') or '/'
         return normalized_path == expected_path or normalized_path.startswith(expected_path + '/')
 
+    @staticmethod
+    def _marker_specificity(marker: str) -> tuple[int, int]:
+        """Rank route-specific markers ahead of generic host-only markers."""
+        normalized = str(marker or '').strip().lower().lstrip('/')
+        _, separator, marker_path = normalized.partition('/')
+        return (1 if separator and marker_path else 0, len(normalized))
+
     def _detect_service_from_url(self, raw_url: Any) -> Optional[str]:
         url = str(raw_url or '').strip()
         if not url:
@@ -267,9 +274,16 @@ class BrowserDetector:
         if parsed.scheme.lower() not in {'http', 'https'} or not hostname:
             return None
 
-        for service, markers in self.SERVICE_URL_MARKERS.items():
-            if any(self._url_matches_marker(hostname, path, marker) for marker in markers):
+        candidates = [
+            (service, marker)
+            for service, markers in self.SERVICE_URL_MARKERS.items()
+            for marker in markers
+        ]
+        candidates.sort(key=lambda item: self._marker_specificity(item[1]), reverse=True)
+        for service, marker in candidates:
+            if self._url_matches_marker(hostname, path, marker):
                 return service
+
         youtube_markers = self.config.get('rules.youtube_domains', []) or []
         if any(
             self._url_matches_marker(hostname, path, str(marker))
