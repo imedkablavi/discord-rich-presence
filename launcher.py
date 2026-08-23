@@ -113,7 +113,7 @@ def _handle_update_command() -> Optional[int]:
             )
         else:
             _setup_message(
-                f'CYBREX updated to {info.latest_version}. Restart the application to use the new build.'
+                f'CYBREX updated to {info.latest_version}. The new build is relaunching now.'
             )
         return 0
     except UpdateError as exc:
@@ -121,6 +121,21 @@ def _handle_update_command() -> Optional[int]:
         return 1
     except Exception as exc:
         _setup_message(f'Unexpected update error: {exc}', error=True)
+        return 1
+
+
+def _handle_game_library_command() -> Optional[int]:
+    if '--game-library' not in sys.argv:
+        return None
+    try:
+        from config import Config
+        from game_library_gui import GameLibraryWindow
+
+        app = GameLibraryWindow(Config())
+        app.mainloop()
+        return 0
+    except Exception as exc:
+        _setup_message(f'Could not open Game Library: {exc}', error=True)
         return 1
 
 
@@ -132,6 +147,10 @@ def main() -> int:
     setup_result = _handle_cs2_setup_command()
     if setup_result is not None:
         return setup_result
+
+    library_result = _handle_game_library_command()
+    if library_result is not None:
+        return library_result
 
     if '--gui' in sys.argv:
         sys.argv.remove('--gui')
