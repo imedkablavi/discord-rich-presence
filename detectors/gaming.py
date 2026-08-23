@@ -13,6 +13,7 @@ from cs2_gsi import (
 )
 from epic_catalog import EpicGame, EpicGameCatalog
 from fivem_bridge import get_fivem_bridge
+from game_packs import GamePackRegistry
 from heroic_catalog import HeroicGame, HeroicGameCatalog
 from league_client import LeagueLiveClient
 from minecraft_bridge import get_minecraft_bridge
@@ -139,6 +140,7 @@ class GamingDetector:
         self.steam_catalog = SteamGameCatalog()
         self.epic_catalog = EpicGameCatalog()
         self.heroic_catalog = HeroicGameCatalog()
+        self.game_packs = GamePackRegistry()
         self.league_client = LeagueLiveClient()
         self.fivem_bridge = get_fivem_bridge(config, start=False)
         self.minecraft_bridge = get_minecraft_bridge(config, start=False)
@@ -288,6 +290,12 @@ class GamingDetector:
         heroic_game = self.heroic_catalog.resolve(window_info)
         if heroic_game:
             return self._heroic_activity(heroic_game)
+
+        # Community packs are an exact-process fallback only. Launcher catalogs
+        # stay authoritative; packs never override a resolved installed title.
+        packed_activity = self.game_packs.activity(app_name)
+        if packed_activity:
+            return packed_activity
 
         game_name = self._match(app_name, self.KNOWN_GAMES)
         launcher_name = self._match(app_name, self.GAME_LAUNCHERS)
