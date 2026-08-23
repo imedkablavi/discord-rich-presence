@@ -169,16 +169,45 @@ class BrowserDetector:
                 return name
         return None
 
+    @staticmethod
+    def _url_matches_marker(hostname: str, path: str, marker: str) -> bool:
+        """Match a known service marker against URL structure, never query text."""
+        marker = str(marker or '').strip().lower().lstrip('/')
+        if not marker:
+            return False
+        marker_host, separator, marker_path = marker.partition('/')
+        if '.' not in marker_host:
+            return False
+        if hostname != marker_host and not hostname.endswith('.' + marker_host):
+            return False
+        if not separator or not marker_path:
+            return True
+        expected_path = '/' + marker_path.rstrip('/')
+        normalized_path = path.rstrip('/') or '/'
+        return normalized_path == expected_path or normalized_path.startswith(expected_path + '/')
+
     def _detect_service_from_url(self, raw_url: Any) -> Optional[str]:
         url = str(raw_url or '').strip()
         if not url:
             return None
-        lowered = url.lower()
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            hostname = (parsed.hostname or '').lower().rstrip('.')
+            path = parsed.path.lower() or '/'
+        except ValueError:
+            return None
+        if parsed.scheme.lower() not in {'http', 'https'} or not hostname:
+            return None
+
         for service, markers in self.SERVICE_URL_MARKERS.items():
-            if any(marker in lowered for marker in markers):
+            if any(self._url_matches_marker(hostname, path, marker) for marker in markers):
                 return service
         youtube_markers = self.config.get('rules.youtube_domains', []) or []
-        if any(str(marker).lower() in lowered for marker in youtube_markers if marker):
+        if any(
+            self._url_matches_marker(hostname, path, str(marker))
+            for marker in youtube_markers
+            if marker
+        ):
             return 'YouTube'
         return None
 
