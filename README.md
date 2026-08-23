@@ -2,7 +2,7 @@
 
 # CYBREX Presence
 
-**Automatic Discord Rich Presence for games, browsers, coding, terminals and media — local-first, privacy-aware, and built for Windows + Linux.**
+**Automatic Discord Rich Presence for games, social web apps, browsers, coding, terminals and media — local-first, privacy-aware, and built for Windows + Linux.**
 
 [![QA](https://github.com/imedkablavi/discord-rich-presence/actions/workflows/qa.yml/badge.svg)](https://github.com/imedkablavi/discord-rich-presence/actions/workflows/qa.yml)
 [![Gamer Integrations](https://github.com/imedkablavi/discord-rich-presence/actions/workflows/gamer-integrations.yml/badge.svg)](https://github.com/imedkablavi/discord-rich-presence/actions/workflows/gamer-integrations.yml)
@@ -26,8 +26,9 @@ CYBREX Presence watches the activity you are actually using and updates Discord 
 
 ## Why use it?
 
-- **One app for more than games.** Games, browsers, editors, terminals, Spotify/media and normal desktop apps can all become Rich Presence.
+- **One app for more than games.** Games, social web apps, browsers, editors, terminals, Spotify/media and normal desktop apps can all become Rich Presence.
 - **Built for gamers.** Steam/Epic/Heroic discovery, Game Library, Gamer Mode, CS2 GSI, League live state, FiveM and Minecraft companions.
+- **Privacy-safe social presence.** WhatsApp, Facebook, Messenger, Instagram, LinkedIn, Threads, TikTok, Telegram, Snapchat, Discord Web, Pinterest, Bluesky, X and Reddit are reduced to generic service state before Discord sees them.
 - **Actually local-first.** Detection happens on your machine. Browser, game and companion bridges bind to loopback only.
 - **Privacy controls are part of the product.** Balanced/Strict modes, URL reduction, secret/path redaction and conservative game detection.
 - **Windows and Linux are first-class targets.** Windows desktop integration plus KDE Plasma Wayland, Sway and X11 support on Linux.
@@ -92,11 +93,21 @@ Multiplayer · Overworld
 ```
 
 ```text
+Using Instagram
+Instagram · Firefox
+```
+
+```text
+Using WhatsApp
+WhatsApp · Chrome
+```
+
+```text
 Visual Studio Code
 Working in Python · main.py
 ```
 
-The project intentionally does not promise live details for a game unless there is a documented/safe source for them.
+The project intentionally does not promise live details for a game unless there is a documented/safe source for them. Social/messaging integrations intentionally do the opposite of “rich private context”: they publish the service identity but discard conversation/profile/post details before Presence building.
 
 ## Supported integrations
 
@@ -109,6 +120,7 @@ The project intentionally does not promise live details for a game unless there 
 | League of Legends | Automatic | **Enhanced** | Riot local Live Client Data API |
 | FiveM | Automatic process detection | **Enhanced with companion** | Optional server resource + loopback bridge |
 | Minecraft Java | Window detection | **Enhanced with Fabric companion** | Mode + dimension; server label opt-in |
+| Social web apps | Browser Companion / title fallback | **Privacy-safe generic** | WhatsApp, Facebook, Messenger, Instagram, LinkedIn, Threads, TikTok, Telegram, Snapchat, Discord Web, Pinterest, Bluesky, X, Reddit |
 | Browser Companion | Chrome-family + Firefox | **Enhanced** | Exact focused service/tab/media state locally |
 | Spotify / media | Local media APIs | Enhanced | MPRIS / Windows Media Control where available |
 | Coding / terminals | Foreground detection | Enhanced | IDE/editor/shell aware |
@@ -174,7 +186,9 @@ The optional Browser Companion improves browser activity beyond window-title heu
 127.0.0.1:32191
 ```
 
-Balanced privacy reduces browser URLs to the origin/domain by default. Records are memory-only and expire.
+Balanced privacy reduces ordinary browser URLs to the origin/domain by default. Records are memory-only and expire.
+
+Social and messaging pages use a stricter contract: the exact tab URL is used only to identify the service, then the page title, deep path/query, conversation/profile/post identifiers and social-page media metadata are discarded. Discord receives only generic state such as `Using Instagram`, and any automatic Open button points to the service homepage rather than the current private page. This remains true even if ordinary browser URL mode is `path` or `full`.
 
 To prepare a clean unpacked development build:
 
@@ -184,7 +198,7 @@ bash scripts/prepare-browser-companion.sh
 
 Then load the generated `CYBREX-Browser-Companion` directory — **not the repository root** — in your browser's extension developer page.
 
-See [Browser Companion](docs/BROWSER_COMPANION.md).
+See [Browser Companion](docs/BROWSER_COMPANION.md) and [Social web presence](docs/SOCIAL_PRESENCE.md).
 
 ## Privacy by default
 
@@ -199,7 +213,8 @@ CYBREX Presence is designed around local activity, so privacy failures would be 
 Additional safeguards include:
 
 - loopback-only companion listeners;
-- browser URL modes: `none`, `domain`, `path`, `full`;
+- social/messaging title and deep-link suppression before Presence building;
+- browser URL modes: `none`, `domain`, `path`, `full` for ordinary pages;
 - configurable secret/path redaction;
 - no full Rich Presence payloads in persistent logs;
 - conservative foreground/game matching;
@@ -207,7 +222,7 @@ Additional safeguards include:
 - short TTLs for companion state;
 - no project-operated telemetry/activity backend.
 
-See [Privacy](docs/PRIVACY.md) and [Security](SECURITY.md).
+See [Privacy](docs/PRIVACY.md), [Social web presence](docs/SOCIAL_PRESENCE.md), and [Security](SECURITY.md).
 
 ## Linux desktop support
 
@@ -267,6 +282,7 @@ Pull requests are checked with:
 - Windows installer compile + silent install + installed-app smoke test + uninstall;
 - Linux user-level installer build + install + smoke test + uninstall;
 - Browser Companion manifest/permission/JavaScript/package validation;
+- social-site structural matching and privacy-regression tests;
 - Gamer Integration regression, Lua/JS and privacy-boundary checks;
 - Minecraft Java/Fabric compile/remap/JAR verification;
 - shell-hook syntax and private-cache-permission checks.
