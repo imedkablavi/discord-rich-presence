@@ -25,6 +25,30 @@ system:
   start_minimized: false
   auto_start: false
 
+browser_companion:
+  # Optional local browser-extension bridge. It binds only to 127.0.0.1 and
+  # requires a random per-user bearer token stored next to the config file.
+  enabled: false
+  port: 17653
+  # Ignore extension state after this many seconds.
+  ttl_secs: 15
+  # Titles can reveal sensitive content. Disable if only service/origin is needed.
+  allow_titles: true
+  # Default URL policy exposes only scheme + host, never path/query/fragment.
+  allow_origin: true
+  # Explicit opt-in. Even when true, URL fragments are removed and private tabs
+  # are always stripped of title/service/URL before they reach the detector.
+  allow_exact_url: false
+
+updates:
+  # Updates remain disabled until an Ed25519 public key is configured. Tagged
+  # releases must be signed by the matching private key in GitHub Actions.
+  enabled: false
+  auto_install: false
+  manifest_url: "https://github.com/imedkablavi/discord-rich-presence/releases/latest/download/update-manifest.json"
+  # Base64-encoded 32-byte Ed25519 public key. Never put the private key here.
+  public_key: ""
+
 images:
   browser: "browser"
   video: "video"
