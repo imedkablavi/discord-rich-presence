@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "games": [
+    {
+      "name": "PUBG: BATTLEGROUNDS",
+      "launcher": "Steam",
+      "steam_appid": 578080,
+      "processes": ["tslgame"]
+    },
+    {
+      "name": "Palworld",
+      "launcher": "Steam",
+      "steam_appid": 1623730,
+      "processes": ["palworld-win64-shipping"]
+    },
+    {
+      "name": "Rust",
+      "launcher": "Steam",
+      "steam_appid": 252490,
+      "processes": ["rustclient"]
+    },
+    {
+      "name": "HELLDIVERS 2",
+      "launcher": "Steam",
+      "steam_appid": 553850,
+      "processes": ["helldivers2"]
+    },
+    {
+      "name": "Dead by Daylight",
+      "launcher": "Steam",
+      "steam_appid": 381210,
+      "processes": ["deadbydaylight-win64-shipping"]
+    },
+    {
+      "name": "Delta Force",
+      "launcher": "Steam",
+      "steam_appid": 2507950,
+      "processes": ["deltaforceclient", "deltaforceclient-win64-shipping"]
+    }
+  ]
+}
