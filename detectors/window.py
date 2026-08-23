@@ -36,6 +36,47 @@ class WindowDetector:
                 self.platform_name or 'this platform',
             )
 
+    def capability(self) -> Dict[str, Any]:
+        """Describe detector support without claiming unsupported Wayland access."""
+        if self.platform_name == 'windows':
+            return {
+                'supported': bool(self.windows_detector),
+                'backend': 'win32' if self.windows_detector else 'unavailable',
+                'session': 'windows',
+                'reason': '' if self.windows_detector else 'Win32 detector unavailable',
+            }
+        if self.platform_name != 'linux':
+            return {
+                'supported': False,
+                'backend': 'unavailable',
+                'session': self.platform_name or 'unknown',
+                'reason': 'No trusted foreground-window API is implemented for this platform',
+            }
+        if self.session_type != 'wayland':
+            available = self._command_exists('xprop')
+            return {
+                'supported': available,
+                'backend': 'x11-xprop' if available else 'unavailable',
+                'session': self.session_type or 'x11',
+                'reason': '' if available else 'xprop is required for X11 foreground detection',
+            }
+        if self._is_sway_session() and self._command_exists('swaymsg'):
+            return {'supported': True, 'backend': 'swaymsg', 'session': 'wayland', 'reason': ''}
+        if 'kde' in self.desktop and self._command_exists('kdotool'):
+            return {'supported': True, 'backend': 'kdotool', 'session': 'wayland', 'reason': ''}
+        if 'gnome' in self.desktop:
+            reason = (
+                'GNOME Wayland does not expose a stable global active-window API; '
+                'foreground activity stays disabled rather than being guessed'
+            )
+        elif 'kde' in self.desktop:
+            reason = 'KDE Plasma Wayland requires kdotool for trusted foreground detection'
+        elif self._is_sway_session():
+            reason = 'Sway requires swaymsg for trusted foreground detection'
+        else:
+            reason = 'No trusted foreground-window API is configured for this Wayland compositor'
+        return {'supported': False, 'backend': 'unavailable', 'session': 'wayland', 'reason': reason}
+
     def get_active_window(self) -> Optional[Dict[str, Any]]:
         if self.platform_name == 'windows':
             return self.windows_detector.get_active_window() if self.windows_detector else None
@@ -89,19 +130,16 @@ class WindowDetector:
 
     def _get_active_window_wayland(self) -> Optional[Dict[str, Any]]:
         """Use compositor-native tools and never guess foreground state from process lists."""
-        if self._command_exists('swaymsg'):
+        if self._is_sway_session() and self._command_exists('swaymsg'):
             return self._get_sway_window()
         if 'kde' in self.desktop and self._command_exists('kdotool'):
             return self._get_kde_window()
-        if 'kde' in self.desktop:
-            self.logger.debug(
-                'KDE Plasma Wayland detected but kdotool is unavailable; install kdotool for foreground-window detection'
-            )
-            return None
-        self.logger.debug(
-            'Reliable foreground-window detection is unavailable for this Wayland compositor'
-        )
+        capability = self.capability()
+        self.logger.debug('Wayland foreground detection unavailable: %s', capability['reason'])
         return None
+
+    def _is_sway_session(self) -> bool:
+        return bool(os.environ.get('SWAYSOCK')) or 'sway' in self.desktop
 
     def _get_sway_window(self) -> Optional[Dict[str, Any]]:
         try:
@@ -123,6 +161,9 @@ class WindowDetector:
                 'title': focused.get('name', ''),
                 'pid': focused.get('pid'),
             }
+        except (json.JSONDecodeError, subprocess.TimeoutExpired) as e:
+            self.logger.debug('Sway detection failed: %s', e)
+            return None
         except Exception as e:
             self.logger.debug('Sway detection failed: %s', e)
             return None
