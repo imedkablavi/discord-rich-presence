@@ -47,8 +47,11 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Verify dependencies
         run: python -m pip check
+      - name: Stamp release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/write-version.py "${{ github.ref_name }}"
       - name: Import desktop entry points
-        run: python -c "import customtkinter, gui_modern, launcher, tray_icon"
+        run: python -c "import app_version, customtkinter, gui_modern, launcher, tray_icon, updater"
       - name: Build Windows executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
       - name: Detect Windows signing configuration
@@ -184,8 +187,11 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Verify dependencies
         run: python -m pip check
+      - name: Stamp release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/write-version.py "${{ github.ref_name }}"
       - name: Import desktop entry points
-        run: python -c "import customtkinter, gui_modern, launcher, tray_icon"
+        run: python -c "import app_version, customtkinter, gui_modern, launcher, tray_icon, updater"
       - name: Build Linux executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
       - name: Verify and smoke-test executable
