@@ -32,6 +32,7 @@ class UpdateStatus:
     available: bool
     asset: Optional[ReleaseAsset]
     message: str
+    staged: bool = False
 
 
 def check_for_update(config: Config) -> UpdateStatus:
@@ -106,6 +107,7 @@ def stage_update(
         True,
         status.asset,
         f'Version {status.latest_version} is verified and ready to install',
+        staged=True,
     )
 
 
@@ -141,7 +143,7 @@ def maybe_auto_stage(config: Config, wait_pid: Optional[int] = None) -> bool:
     try:
         status = auto_stage_update(config, wait_pid=wait_pid)
         logger.info('%s', status.message)
-        return bool(status.available and 'ready to install' in status.message)
+        return status.staged
     except (UpdateError, OSError, ValueError) as exc:
         logger.warning('Secure update check/install failed: %s', exc)
         return False
