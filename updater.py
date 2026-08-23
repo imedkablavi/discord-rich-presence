@@ -15,7 +15,7 @@ import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -193,7 +193,13 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def download_verified_asset(asset: ReleaseAsset, destination: Path, timeout: float = 30.0) -> Path:
+def download_verified_asset(
+    asset: ReleaseAsset,
+    destination: Path,
+    timeout: float = 30.0,
+    progress: Optional[Callable[[int, int], None]] = None,
+) -> Path:
+    """Download one signed-manifest asset and report verified byte progress."""
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp = destination.with_suffix(destination.suffix + ".part")
@@ -201,6 +207,8 @@ def download_verified_asset(asset: ReleaseAsset, destination: Path, timeout: flo
     total = 0
     digest = hashlib.sha256()
     try:
+        if progress:
+            progress(0, asset.size)
         with urllib.request.urlopen(request, timeout=timeout) as response, temp.open("wb") as out:
             final_url = str(response.geturl())
             if not final_url.startswith("https://"):
@@ -216,6 +224,8 @@ def download_verified_asset(asset: ReleaseAsset, destination: Path, timeout: flo
                     raise UpdateError("Update asset exceeded signed size")
                 digest.update(chunk)
                 out.write(chunk)
+                if progress:
+                    progress(total, asset.size)
         if total != asset.size:
             raise UpdateError(f"Update asset size mismatch: expected {asset.size}, got {total}")
         if not hmac_safe_equal(digest.hexdigest(), asset.sha256):
