@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version used for non-publishing package validation"
+        required: true
+        default: "2.1.0-rc1"
 
 permissions:
   contents: write
@@ -18,30 +23,128 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install build dependencies
-        run: python -m pip install -r requirements-dev.txt
-      - name: Build Windows executable
-        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
-      - name: Generate SHA-256 checksum
+      - name: Resolve version
         shell: pwsh
         run: |
-          $hash = (Get-FileHash "dist/DiscordRichPresence.exe" -Algorithm SHA256).Hash.ToLower()
-          "$hash  DiscordRichPresence.exe" | Set-Content -Encoding ascii "dist/DiscordRichPresence.exe.sha256"
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".TrimStart('v')
+          } else {
+            $version = "${{ inputs.version }}".TrimStart('v')
+          }
+          "BUILD_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Stamp application version
+        shell: pwsh
+        run: python -c "import os, pathlib; pathlib.Path('version.py').write_text('__version__ = \"' + os.environ['BUILD_VERSION'] + '\"\n', encoding='utf-8')"
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Build Windows portable executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Smoke-test portable executable
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist/DiscordRichPresence.exe" -ArgumentList "--dry-run", "--once" -PassThru
+          if (-not $process.WaitForExit(20000)) {
+            $process.Kill()
+            throw "Portable executable did not exit after dry-run smoke test"
+          }
+          if ($process.ExitCode -ne 0) { throw "Portable executable exited with $($process.ExitCode)" }
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Assemble Windows release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-dist | Out-Null
+          Copy-Item "dist/DiscordRichPresence.exe" "release-dist/DiscordRichPresence-windows-x86_64.exe"
+          Compress-Archive -Path "dist/DiscordRichPresence.exe", "README.md", "config.example.yaml", "LICENSE" -DestinationPath "release-dist/DiscordRichPresence-$env:BUILD_VERSION-windows-x86_64-portable.zip"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:BUILD_VERSION" "packaging\windows\discord-rich-presence.iss"
       - uses: actions/upload-artifact@v7
         with:
-          name: DiscordRichPresence-windows
-          path: |
-            dist/DiscordRichPresence.exe
-            dist/DiscordRichPresence.exe.sha256
+          name: release-windows
+          path: release-dist/*
           if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            version="${{ github.ref_name }}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          echo "BUILD_VERSION=${version#v}" >> "$GITHUB_ENV"
+      - name: Stamp application version
+        run: python -c "import os, pathlib; pathlib.Path('version.py').write_text('__version__ = \"' + os.environ['BUILD_VERSION'] + '\"\n', encoding='utf-8')"
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Build Linux portable executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Smoke-test portable executable
+        run: timeout 20s ./dist/DiscordRichPresence --dry-run --once
+      - name: Assemble Linux release assets
+        run: |
+          python scripts/build_linux_packages.py --binary dist/DiscordRichPresence --version "$BUILD_VERSION" --output release-dist
+          cp dist/DiscordRichPresence release-dist/DiscordRichPresence-linux-x86_64
+          chmod +x release-dist/DiscordRichPresence-linux-x86_64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux
+          path: release-dist/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-dist
+      - name: Require update signing key
+        env:
+          UPDATE_SIGNING_PRIVATE_KEY_B64: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY_B64 }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_PRIVATE_KEY_B64" ]; then
+            echo "UPDATE_SIGNING_PRIVATE_KEY_B64 is required for a tagged release" >&2
+            exit 1
+          fi
+      - name: Install signing dependency
+        run: python -m pip install "cryptography>=44,<47"
+      - name: Create signed updater manifest
+        env:
+          UPDATE_SIGNING_PRIVATE_KEY_B64: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY_B64 }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          python scripts/sign_release_manifest.py \
+            --version "$VERSION" \
+            --base-url "$BASE_URL" \
+            --private-key-b64 "$UPDATE_SIGNING_PRIVATE_KEY_B64" \
+            --output release-dist/update-manifest.json \
+            --asset release-dist/DiscordRichPresence-windows-x86_64.exe windows x86_64 portable \
+            --asset release-dist/DiscordRichPresence-linux-x86_64 linux x86_64 binary
+      - name: Generate SHA-256 checksums
+        run: |
+          cd release-dist
+          sha256sum * > SHA256SUMS.txt
       - name: Publish GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" `
-            "dist/DiscordRichPresence.exe" `
-            "dist/DiscordRichPresence.exe.sha256" `
-            --generate-notes `
-            --title "Discord Rich Presence ${{ github.ref_name }}"
+          gh release create "${GITHUB_REF_NAME}" release-dist/* \
+            --generate-notes \
+            --title "Discord Rich Presence ${GITHUB_REF_NAME}"
