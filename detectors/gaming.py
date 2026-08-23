@@ -1,4 +1,4 @@
-"""Foreground-game detection from local launcher catalogs with CS2 GSI enrichment."""
+"""Foreground-game detection from local launcher catalogs with safe game enrichment."""
 
 import logging
 import re
@@ -12,6 +12,7 @@ from cs2_gsi import (
     stop_cs2_gsi,
 )
 from epic_catalog import EpicGame, EpicGameCatalog
+from fivem_bridge import get_fivem_bridge
 from heroic_catalog import HeroicGame, HeroicGameCatalog
 from league_client import LeagueLiveClient
 from steam_catalog import SteamGame, SteamGameCatalog
@@ -38,6 +39,8 @@ class GamingDetector:
         'leagueoflegends': 'League of Legends',
         'league of legends': 'League of Legends',
         'valorant': 'VALORANT',
+        'fivem': 'FiveM',
+        'citizenfx': 'FiveM',
         'csgo': 'Counter-Strike 2',
         'cs2': 'Counter-Strike 2',
         'steam_app_730': 'Counter-Strike 2',
@@ -129,6 +132,7 @@ class GamingDetector:
         self.epic_catalog = EpicGameCatalog()
         self.heroic_catalog = HeroicGameCatalog()
         self.league_client = LeagueLiveClient()
+        self.fivem_bridge = get_fivem_bridge(config, start=False)
         self.cs2_gsi = None
         self._last_gsi_signature: Optional[tuple[bool, bool, bool, int, float]] = None
         self._sync_cs2_gsi(force=True)
@@ -230,6 +234,19 @@ class GamingDetector:
         app_name = str(window_info.get('app_name', '')).lower().replace('.exe', '')
         title = str(window_info.get('title', '')).strip()
 
+        # FiveM runs GTA inside a CitizenFX/FiveM process tree. Detect that
+        # identity before Steam path matching so it cannot be mislabeled as GTA V.
+        if self._is_fivem_process(app_name):
+            activity: Dict[str, Any] = {
+                'type': 'gaming',
+                'game_name': 'FiveM',
+                'launcher': 'FiveM',
+                'game_source': 'FiveM',
+                'is_game': True,
+            }
+            self._enrich_fivem(activity)
+            return activity
+
         # Local launcher catalogs are authoritative when available. They provide
         # the real installed title instead of leaking process/class strings into
         # Discord, and they work for games never hardcoded in this project.
@@ -252,7 +269,7 @@ class GamingDetector:
         game_name = self._match(app_name, self.KNOWN_GAMES)
         launcher_name = self._match(app_name, self.GAME_LAUNCHERS)
         if game_name:
-            activity: Dict[str, Any] = {
+            activity = {
                 'type': 'gaming',
                 'game_name': game_name,
                 'launcher': launcher_name or ('Steam' if game_name == 'Counter-Strike 2' else 'Gaming'),
@@ -268,6 +285,8 @@ class GamingDetector:
                 self._enrich_cs2(activity)
             elif game_name == 'League of Legends':
                 self._enrich_league(activity)
+            elif game_name == 'FiveM':
+                self._enrich_fivem(activity)
             return activity
 
         if self.cs2_gsi and ('counter-strike' in app_name or 'counter strike' in app_name):
@@ -345,6 +364,11 @@ class GamingDetector:
         normalized = re.sub(r'[^a-z0-9]+', '', str(name or '').lower())
         return normalized in {'counterstrike2', 'counterstrikeglobaloffensive'}
 
+    @staticmethod
+    def _is_fivem_process(app_name: str) -> bool:
+        lowered = str(app_name or '').lower()
+        return 'fivem' in lowered or 'citizenfx' in lowered
+
     def _enrich_league(self, activity: Dict[str, Any]) -> None:
         snapshot = self.league_client.snapshot()
         if not snapshot:
@@ -361,6 +385,34 @@ class GamingDetector:
             'league_live': True,
             'league_game_time': int(snapshot.get('game_time', 0) or 0),
         })
+
+    def _enrich_fivem(self, activity: Dict[str, Any]) -> None:
+        self.fivem_bridge.config = self.config
+        self.fivem_bridge.start()
+        snapshot = self.fivem_bridge.latest()
+        activity['launcher'] = 'FiveM'
+        if not snapshot:
+            activity['game_source'] = 'FiveM'
+            return
+
+        state_parts: list[str] = []
+        server_name = str(snapshot.get('server_name', '') or '').strip()
+        if server_name:
+            state_parts.append(server_name)
+        player_count = int(snapshot.get('player_count', 0) or 0)
+        max_players = int(snapshot.get('max_players', 0) or 0)
+        if max_players > 0:
+            state_parts.append(f'{player_count}/{max_players} players')
+        elif player_count > 0:
+            state_parts.append(f'{player_count} players')
+
+        activity.update({
+            'fivem_companion': True,
+            'game_source': ' · '.join(state_parts) or 'FiveM',
+        })
+        join_url = str(snapshot.get('join_url', '') or '').strip()
+        if join_url:
+            activity['store_url'] = join_url
 
     def _enrich_cs2(self, activity: Dict[str, Any]) -> None:
         if not self.cs2_gsi:
