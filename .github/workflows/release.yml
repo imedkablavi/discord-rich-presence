@@ -148,7 +148,13 @@ jobs:
       - name: Publish GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          release_flags=()
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
           gh release create "${GITHUB_REF_NAME}" release-dist/* \
             --generate-notes \
-            --title "Discord Rich Presence ${GITHUB_REF_NAME}"
+            --title "Discord Rich Presence ${GITHUB_REF_NAME}" \
+            "${release_flags[@]}"
