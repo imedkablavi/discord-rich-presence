@@ -4,10 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import tempfile
 import threading
 import time
 from pathlib import Path
+
+# Running this file directly makes Python use scripts/ as sys.path[0]. Add the
+# repository root explicitly so the harness behaves the same on Windows/Linux
+# and from arbitrary working directories.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import psutil
 
