@@ -1,0 +1,112 @@
+name: Release Gamer Companions
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing GitHub release tag to upload companions to"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          verify-signature: true
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.5.1"
+      - name: Build Minecraft Fabric companion
+        working-directory: integrations/minecraft/fabric-26.2
+        run: gradle --no-daemon build
+      - name: Package gamer companions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          minecraft_jar="$(find integrations/minecraft/fabric-26.2/build/libs \
+            -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' -print -quit)"
+          test -n "$minecraft_jar"
+          cp "$minecraft_jar" release-assets/CYBREX-Minecraft-Companion-26.2.jar
+
+          (
+            cd integrations/fivem
+            zip -r "${GITHUB_WORKSPACE}/release-assets/CYBREX-FiveM-Companion.zip" \
+              cybrex_presence \
+              -x '*/__pycache__/*' '*.pyc' '*.DS_Store'
+          )
+
+          cd release-assets
+          sha256sum CYBREX-Minecraft-Companion-26.2.jar > CYBREX-Minecraft-Companion-26.2.jar.sha256
+          sha256sum CYBREX-FiveM-Companion.zip > CYBREX-FiveM-Companion.zip.sha256
+          sha256sum -c CYBREX-Minecraft-Companion-26.2.jar.sha256
+          sha256sum -c CYBREX-FiveM-Companion.zip.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gamer-release-companions
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: gamer-release-companions
+          path: release-assets
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${DISPATCH_TAG}"
+          fi
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Wait for desktop release and upload companions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          found=false
+          for _ in $(seq 1 60); do
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              found=true
+              break
+            fi
+            sleep 10
+          done
+          if [[ "$found" != true ]]; then
+            echo "Desktop release $RELEASE_TAG was not published" >&2
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" \
+            release-assets/CYBREX-Minecraft-Companion-26.2.jar \
+            release-assets/CYBREX-Minecraft-Companion-26.2.jar.sha256 \
+            release-assets/CYBREX-FiveM-Companion.zip \
+            release-assets/CYBREX-FiveM-Companion.zip.sha256 \
+            --clobber
