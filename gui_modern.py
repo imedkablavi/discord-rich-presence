@@ -423,7 +423,7 @@ class ModernControlPanel(ctk.CTk):
             value=bool(self.config.get('rules.clear_on_lock_screen', True))
         )
         ctk.CTkSwitch(system, text='Clear Presence on lock screen', variable=self.clear_on_lock).pack(
-            anchor='w', padx=20, pady=(8, 18))
+            anchor='w', padx=20, pady=(8, 18)
         )
 
     # ---------------------------------------------------------------- settings
@@ -481,7 +481,7 @@ class ModernControlPanel(ctk.CTk):
         self.autostart = ctk.BooleanVar(value=self._registry_autostart_enabled())
         if _WINREG_AVAILABLE:
             ctk.CTkSwitch(windows, text='Start with Windows', variable=self.autostart).pack(
-                anchor='w', padx=20, pady=(8, 16)
+                anchor='w', padx=20, pady=(8, 16))
             )
         else:
             ctk.CTkLabel(
