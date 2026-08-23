@@ -5,6 +5,8 @@ on:
     paths:
       - "game_library.py"
       - "game_library_gui.py"
+      - "game_packs.py"
+      - "game_packs/**"
       - "fivem_bridge.py"
       - "minecraft_bridge.py"
       - "league_client.py"
@@ -12,6 +14,7 @@ on:
       - "integrations/fivem/**"
       - "integrations/minecraft/**"
       - "tests/test_game_library.py"
+      - "tests/test_game_packs.py"
       - "tests/test_fivem_bridge.py"
       - "tests/test_minecraft_bridge.py"
       - ".github/workflows/gamer-integrations.yml"
@@ -20,6 +23,8 @@ on:
     paths:
       - "game_library.py"
       - "game_library_gui.py"
+      - "game_packs.py"
+      - "game_packs/**"
       - "fivem_bridge.py"
       - "minecraft_bridge.py"
       - "league_client.py"
@@ -27,6 +32,7 @@ on:
       - "integrations/fivem/**"
       - "integrations/minecraft/**"
       - "tests/test_game_library.py"
+      - "tests/test_game_packs.py"
       - "tests/test_fivem_bridge.py"
       - "tests/test_minecraft_bridge.py"
       - ".github/workflows/gamer-integrations.yml"
@@ -54,9 +60,9 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Import gamer desktop modules
         run: |
-          python -c "import customtkinter, game_library, game_library_gui, fivem_bridge, minecraft_bridge, league_client, launcher, tray_icon"
+          python -c "import customtkinter, game_library, game_library_gui, game_packs, fivem_bridge, minecraft_bridge, league_client, launcher, tray_icon"
       - name: Run gamer regression tests
-        run: pytest -q tests/test_game_library.py tests/test_fivem_bridge.py tests/test_minecraft_bridge.py
+        run: pytest -q tests/test_game_library.py tests/test_game_packs.py tests/test_fivem_bridge.py tests/test_minecraft_bridge.py
       - name: Install Lua syntax checker
         run: |
           sudo apt-get update
