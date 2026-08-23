@@ -15,6 +15,7 @@ from epic_catalog import EpicGame, EpicGameCatalog
 from fivem_bridge import get_fivem_bridge
 from heroic_catalog import HeroicGame, HeroicGameCatalog
 from league_client import LeagueLiveClient
+from minecraft_bridge import get_minecraft_bridge
 from steam_catalog import SteamGame, SteamGameCatalog
 
 
@@ -30,6 +31,7 @@ class GamingDetector:
         'gog': 'GOG Galaxy', 'galaxyclient': 'GOG Galaxy',
         'battle.net': 'Battle.net', 'battlenet': 'Battle.net',
         'riotclientservices': 'Riot Client', 'leagueclient': 'League of Legends',
+        'minecraftlauncher': 'Minecraft Launcher',
         'xboxapp': 'Xbox',
     }
 
@@ -125,6 +127,12 @@ class GamingDetector:
         'cs_office': 'Office',
     }
 
+    MINECRAFT_DIMENSIONS = {
+        'minecraft:overworld': 'Overworld',
+        'minecraft:the_nether': 'Nether',
+        'minecraft:the_end': 'The End',
+    }
+
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
@@ -133,6 +141,7 @@ class GamingDetector:
         self.heroic_catalog = HeroicGameCatalog()
         self.league_client = LeagueLiveClient()
         self.fivem_bridge = get_fivem_bridge(config, start=False)
+        self.minecraft_bridge = get_minecraft_bridge(config, start=False)
         self.cs2_gsi = None
         self._last_gsi_signature: Optional[tuple[bool, bool, bool, int, float]] = None
         self._sync_cs2_gsi(force=True)
@@ -247,6 +256,20 @@ class GamingDetector:
             self._enrich_fivem(activity)
             return activity
 
+        # Minecraft Java often exposes only java/javaw as the process name. Pair
+        # that generic process identity with an explicit Minecraft window title;
+        # never classify arbitrary Java applications as games.
+        if self._is_minecraft_window(app_name, title):
+            activity = {
+                'type': 'gaming',
+                'game_name': 'Minecraft',
+                'launcher': 'Minecraft Launcher',
+                'game_source': 'Minecraft',
+                'is_game': True,
+            }
+            self._enrich_minecraft(activity)
+            return activity
+
         # Local launcher catalogs are authoritative when available. They provide
         # the real installed title instead of leaking process/class strings into
         # Discord, and they work for games never hardcoded in this project.
@@ -287,6 +310,8 @@ class GamingDetector:
                 self._enrich_league(activity)
             elif game_name == 'FiveM':
                 self._enrich_fivem(activity)
+            elif game_name == 'Minecraft':
+                self._enrich_minecraft(activity)
             return activity
 
         if self.cs2_gsi and ('counter-strike' in app_name or 'counter strike' in app_name):
@@ -369,6 +394,16 @@ class GamingDetector:
         lowered = str(app_name or '').lower()
         return 'fivem' in lowered or 'citizenfx' in lowered
 
+    @staticmethod
+    def _is_minecraft_window(app_name: str, title: str) -> bool:
+        app = str(app_name or '').lower().replace('.exe', '').strip()
+        window = str(title or '').strip().lower()
+        if app in {'minecraft', 'minecraftlauncher'}:
+            return True
+        if app not in {'java', 'javaw'}:
+            return False
+        return bool(re.match(r'^minecraft(?:\s|$|\*)', window))
+
     def _enrich_league(self, activity: Dict[str, Any]) -> None:
         snapshot = self.league_client.snapshot()
         if not snapshot:
@@ -413,6 +448,37 @@ class GamingDetector:
         join_url = str(snapshot.get('join_url', '') or '').strip()
         if join_url:
             activity['store_url'] = join_url
+
+    def _enrich_minecraft(self, activity: Dict[str, Any]) -> None:
+        self.minecraft_bridge.config = self.config
+        self.minecraft_bridge.start()
+        snapshot = self.minecraft_bridge.latest()
+        activity['launcher'] = 'Minecraft Launcher'
+        if not snapshot:
+            activity['game_source'] = 'Minecraft'
+            return
+
+        mode = str(snapshot.get('mode', '') or '').strip()
+        dimension_key = str(snapshot.get('dimension', '') or '').strip().lower()
+        dimension = self._friendly_minecraft_dimension(dimension_key)
+        server_name = str(snapshot.get('server_name', '') or '').strip()
+        state_parts = [part for part in (mode, dimension, server_name) if part]
+        activity.update({
+            'minecraft_companion': True,
+            'minecraft_mode': mode,
+            'minecraft_dimension': dimension,
+            'game_source': ' · '.join(state_parts) or 'Minecraft',
+        })
+
+    @classmethod
+    def _friendly_minecraft_dimension(cls, value: str) -> str:
+        key = str(value or '').strip().lower()
+        if not key:
+            return ''
+        if key in cls.MINECRAFT_DIMENSIONS:
+            return cls.MINECRAFT_DIMENSIONS[key]
+        raw = key.split(':', 1)[-1].replace('_', ' ').replace('-', ' ').strip()
+        return raw.title()[:80] if raw else ''
 
     def _enrich_cs2(self, activity: Dict[str, Any]) -> None:
         if not self.cs2_gsi:
