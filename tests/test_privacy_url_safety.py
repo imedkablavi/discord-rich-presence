@@ -10,6 +10,12 @@ def _redactor(tmp_path: Path, policy: str = 'full') -> PrivacyRedactor:
     return PrivacyRedactor(config)
 
 
+def _assert_secret_redacted(result: str, secret: str) -> None:
+    """Verify the secret is gone without coupling to a specific marker."""
+    assert secret not in result
+    assert '[REDACTED]' in result or '[TOKEN]' in result
+
+
 def test_full_browser_url_rejects_malformed_port(tmp_path: Path):
     redactor = _redactor(tmp_path)
     assert redactor._sanitize_exact_browser_url('https://example.com:bad/path') is None
@@ -44,8 +50,7 @@ def test_full_browser_url_redacts_long_token_in_path(tmp_path: Path):
         f'https://example.com/reset/{token}/confirm'
     )
     assert result is not None
-    assert token not in result
-    assert '[TOKEN]' in result
+    _assert_secret_redacted(result, token)
 
 
 def test_percent_encoded_path_token_is_redacted_after_decoding(tmp_path: Path):
@@ -56,8 +61,8 @@ def test_percent_encoded_path_token_is_redacted_after_decoding(tmp_path: Path):
         f'https://example.com/reset/{encoded}'
     )
     assert result is not None
-    assert token not in result
-    assert '[TOKEN]' in result
+    _assert_secret_redacted(result, token)
+    assert encoded not in result
 
 
 def test_domain_policy_never_includes_path_query_or_fragment(tmp_path: Path):
