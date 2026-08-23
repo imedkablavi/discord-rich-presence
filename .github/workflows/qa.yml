@@ -2,7 +2,7 @@ name: QA
 
 on:
   push:
-    branches: [main, "fix/**"]
+    branches: [main, "fix/**", "release/**"]
   pull_request:
 
 jobs:
@@ -20,13 +20,30 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install QA dependencies
-        run: python -m pip install "pypresence==4.6.2" "PyYAML>=6.0.3,<7" "psutil>=7.2.2,<8" "pytest>=9.1.1,<10" "ruff>=0.9,<1"
+        run: python -m pip install -r requirements-dev.txt
       - name: Compile Python sources
         run: python -m compileall -q .
       - name: Ruff critical checks
         run: ruff check . --select E9,F63,F7,F82
       - name: Run tests
         run: pytest -q
+
+  soak-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install QA dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run short resource-leak soak
+        run: python scripts/soak_test.py --duration 12 --max-rss-growth-mb 48 --max-handle-growth 10 --max-thread-growth 4
 
   package-windows:
     runs-on: windows-latest
@@ -38,7 +55,7 @@ jobs:
           cache: pip
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Build executable
+      - name: Build portable executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
       - name: Verify executable exists
         shell: pwsh
@@ -64,8 +81,53 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "Packaged executable exited with code $($process.ExitCode)"
           }
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-dist | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=0.0.0-ci" "packaging\windows\discord-rich-presence.iss"
+          if (-not (Get-ChildItem "release-dist\DiscordRichPresence-Setup-*-windows-x86_64.exe")) {
+            throw "Windows installer was not created"
+          }
       - uses: actions/upload-artifact@v7
         with:
           name: DiscordRichPresence-windows
-          path: dist/DiscordRichPresence.exe
+          path: |
+            dist/DiscordRichPresence.exe
+            release-dist/DiscordRichPresence-Setup-*-windows-x86_64.exe
+          if-no-files-found: error
+
+  package-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Build portable executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Verify and smoke-test executable
+        run: |
+          test -x dist/DiscordRichPresence
+          test "$(stat -c%s dist/DiscordRichPresence)" -gt 1000000
+          timeout 20s ./dist/DiscordRichPresence --dry-run --once
+      - name: Build Linux packages
+        run: python scripts/build_linux_packages.py --binary dist/DiscordRichPresence --version 0.0.0-ci --output release-dist
+      - name: Inspect Debian package
+        run: |
+          dpkg-deb --info release-dist/discord-rich-presence_0.0.0~ci_amd64.deb
+          dpkg-deb --contents release-dist/discord-rich-presence_0.0.0~ci_amd64.deb | grep usr/bin/discord-rich-presence
+      - uses: actions/upload-artifact@v7
+        with:
+          name: DiscordRichPresence-linux
+          path: |
+            dist/DiscordRichPresence
+            release-dist/*.tar.gz
+            release-dist/*.deb
           if-no-files-found: error
