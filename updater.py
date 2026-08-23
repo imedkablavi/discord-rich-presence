@@ -11,7 +11,6 @@ import stat
 import subprocess
 import sys
 import tempfile
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -297,32 +296,32 @@ def _schedule_windows_replace(target: Path, staged: Path, restart_args: list[str
     script_fd, script_name = tempfile.mkstemp(prefix="cybrex-update-", suffix=".ps1")
     os.close(script_fd)
     script = Path(script_name)
-    script.write_text(
-        """param([int]$WaitPid,[string]$Target,[string]$Staged,[string]$RestartJson)\n"
-        "$ErrorActionPreference = 'Stop'\n"
-        "for ($i = 0; $i -lt 240; $i++) {\n"
-        "  if (-not (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue)) { break }\n"
-        "  Start-Sleep -Milliseconds 250\n"
-        "}\n"
-        "if (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) { exit 20 }\n"
-        "$Backup = $Target + '.old'\n"
-        "Remove-Item $Backup -Force -ErrorAction SilentlyContinue\n"
-        "Move-Item -LiteralPath $Target -Destination $Backup -Force\n"
-        "try {\n"
-        "  Move-Item -LiteralPath $Staged -Destination $Target -Force\n"
-        "} catch {\n"
-        "  Move-Item -LiteralPath $Backup -Destination $Target -Force -ErrorAction SilentlyContinue\n"
-        "  exit 21\n"
-        "}\n"
-        "$ArgsList = ConvertFrom-Json $RestartJson\n"
-        "if ($null -ne $ArgsList -and $ArgsList.Count -gt 0) {\n"
-        "  Start-Process -FilePath $Target -ArgumentList $ArgsList\n"
-        "}\n"
-        "Remove-Item $Backup -Force -ErrorAction SilentlyContinue\n"
-        "Remove-Item $PSCommandPath -Force -ErrorAction SilentlyContinue\n"
-        """,
-        encoding="utf-8",
-    )
+    powershell = "\n".join([
+        "param([int]$WaitPid,[string]$Target,[string]$Staged,[string]$RestartJson)",
+        "$ErrorActionPreference = 'Stop'",
+        "for ($i = 0; $i -lt 240; $i++) {",
+        "  if (-not (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue)) { break }",
+        "  Start-Sleep -Milliseconds 250",
+        "}",
+        "if (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) { exit 20 }",
+        "$Backup = $Target + '.old'",
+        "Remove-Item $Backup -Force -ErrorAction SilentlyContinue",
+        "Move-Item -LiteralPath $Target -Destination $Backup -Force",
+        "try {",
+        "  Move-Item -LiteralPath $Staged -Destination $Target -Force",
+        "} catch {",
+        "  Move-Item -LiteralPath $Backup -Destination $Target -Force -ErrorAction SilentlyContinue",
+        "  exit 21",
+        "}",
+        "$ArgsList = ConvertFrom-Json $RestartJson",
+        "if ($null -ne $ArgsList -and $ArgsList.Count -gt 0) {",
+        "  Start-Process -FilePath $Target -ArgumentList $ArgsList",
+        "}",
+        "Remove-Item $Backup -Force -ErrorAction SilentlyContinue",
+        "Remove-Item $PSCommandPath -Force -ErrorAction SilentlyContinue",
+        "",
+    ])
+    script.write_text(powershell, encoding="utf-8")
     subprocess.Popen(
         [
             "powershell.exe",
