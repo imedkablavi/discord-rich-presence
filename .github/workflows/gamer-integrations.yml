@@ -1,0 +1,88 @@
+name: Gamer Integrations
+
+on:
+  pull_request:
+    paths:
+      - "game_library.py"
+      - "game_library_gui.py"
+      - "fivem_bridge.py"
+      - "minecraft_bridge.py"
+      - "league_client.py"
+      - "detectors/gaming.py"
+      - "integrations/fivem/**"
+      - "integrations/minecraft/**"
+      - "tests/test_game_library.py"
+      - "tests/test_fivem_bridge.py"
+      - "tests/test_minecraft_bridge.py"
+      - ".github/workflows/gamer-integrations.yml"
+  push:
+    branches: [main]
+    paths:
+      - "game_library.py"
+      - "game_library_gui.py"
+      - "fivem_bridge.py"
+      - "minecraft_bridge.py"
+      - "league_client.py"
+      - "detectors/gaming.py"
+      - "integrations/fivem/**"
+      - "integrations/minecraft/**"
+      - "tests/test_game_library.py"
+      - "tests/test_fivem_bridge.py"
+      - "tests/test_minecraft_bridge.py"
+      - ".github/workflows/gamer-integrations.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Import gamer desktop modules
+        run: |
+          python -c "import customtkinter, game_library, game_library_gui, fivem_bridge, minecraft_bridge, league_client, launcher, tray_icon"
+      - name: Run gamer regression tests
+        run: pytest -q tests/test_game_library.py tests/test_fivem_bridge.py tests/test_minecraft_bridge.py
+      - name: Install Lua syntax checker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+      - name: Validate FiveM resource
+        run: |
+          luac -p integrations/fivem/cybrex_presence/fxmanifest.lua
+          luac -p integrations/fivem/cybrex_presence/client.lua
+          luac -p integrations/fivem/cybrex_presence/server.lua
+          node --check integrations/fivem/cybrex_presence/html/bridge.js
+          grep -q "ui_page 'html/index.html'" integrations/fivem/cybrex_presence/fxmanifest.lua
+          if grep -RIE "license:|steam:|discord:|player.*identifier|GetPlayerIdentifier|GetEntityCoords" integrations/fivem/cybrex_presence --exclude=README.md; then
+            echo "Sensitive player-data primitive found in FiveM companion" >&2
+            exit 1
+          fi
+      - name: Validate Minecraft privacy boundary
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('integrations/minecraft/fabric-26.2/src/main/java/com/cybrex/presence/CybrexPresenceClient.java').read_text(encoding='utf-8').lower()
+          forbidden = (
+              'server.ip', 'getgameprofile', 'getuuid', 'position()', 'blockposition',
+              'inventory', 'health', 'fooddata', 'chat', 'session', 'access_token',
+          )
+          hits = [item for item in forbidden if item in source]
+          assert not hits, f'Forbidden Minecraft data primitive(s): {hits}'
+          assert 'send_server_name", "false"' in source
+          assert '127.0.0.1' in source
+          PY
