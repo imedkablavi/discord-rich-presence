@@ -30,6 +30,32 @@ def test_x_requires_explicit_url_or_twitter_marker(tmp_path: Path):
     assert detector._detect_service('Twitter / Home') == 'X'
 
 
+def test_service_url_markers_only_match_hostname_and_expected_path(tmp_path: Path):
+    detector = _detector(tmp_path)
+    assert detector._detect_service_from_url('https://www.youtube.com/watch?v=abc') == 'YouTube'
+    assert detector._detect_service_from_url('https://music.youtube.com/watch?v=abc') == 'YouTube Music'
+    assert detector._detect_service_from_url('https://www.amazon.com/gp/video/storefront') == 'Prime Video'
+    assert detector._detect_service_from_url('https://example.com/?next=https://x.com/home') is None
+    assert detector._detect_service_from_url('https://example.com/youtube.com/watch') is None
+    assert detector._detect_service_from_url('https://amazon.com/not-video?next=/gp/video') is None
+
+
+def test_exact_companion_url_ignores_service_names_inside_query(tmp_path: Path):
+    detector = _detector(tmp_path)
+    detector.companion = _FakeCompanion({
+        'title': 'Redirect helper — Mozilla Firefox',
+        'url': 'https://example.com/redirect?next=https://x.com/home',
+        'service': 'X',
+        'private': False,
+        'media': {},
+    })
+
+    activity = detector._from_companion('Firefox')
+    assert activity is not None
+    assert activity['service'] == ''
+    assert activity['url'] == 'https://example.com/redirect?next=https://x.com/home'
+
+
 def test_exact_companion_url_overrides_stale_service_label(tmp_path: Path):
     detector = _detector(tmp_path)
     detector.companion = _FakeCompanion({
