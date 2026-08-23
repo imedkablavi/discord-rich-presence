@@ -26,7 +26,8 @@ def _detector(tmp_path: Path) -> tuple[BrowserDetector, Config]:
     ('url', 'service'),
     [
         ('https://web.whatsapp.com/', 'WhatsApp'),
-        ('https://www.facebook.com/messages/t/123456', 'Facebook'),
+        ('https://www.facebook.com/', 'Facebook'),
+        ('https://www.facebook.com/messages/t/123456', 'Messenger'),
         ('https://www.messenger.com/t/123456', 'Messenger'),
         ('https://www.instagram.com/direct/t/123456/', 'Instagram'),
         ('https://www.linkedin.com/messaging/thread/abc/', 'LinkedIn'),
@@ -64,6 +65,12 @@ def test_social_detection_ignores_domains_hidden_in_query_text(tmp_path: Path):
             'Alice Family Group (12) - WhatsApp',
             'WhatsApp',
             'https://web.whatsapp.com',
+        ),
+        (
+            'https://www.facebook.com/messages/t/123456',
+            'Alice Smith | Messenger',
+            'Messenger',
+            'https://www.messenger.com',
         ),
         (
             'https://www.instagram.com/direct/t/123456/?hl=en',
