@@ -109,7 +109,7 @@ jobs:
       - name: Note unsigned Windows build
         if: steps.signing.outputs.enabled != 'true'
         shell: pwsh
-        run: Write-Warning "No Windows signing certificate configured; release EXE will be unsigned."
+        run: Write-Warning "No Windows signing certificate configured; release EXE and installer will be unsigned."
       - name: Verify and smoke-test executable
         shell: pwsh
         run: |
@@ -130,6 +130,103 @@ jobs:
           }
           if ($process.ExitCode -ne 0) {
             throw "Packaged executable exited with code $($process.ExitCode)"
+          }
+      - name: Install pinned Inno Setup compiler
+        shell: pwsh
+        run: choco install innosetup --version=6.7.1 --yes --no-progress
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            '0.0.0-dev'
+          }
+          $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
+          & $iscc "/DAppVersion=$version" "packaging/windows/CYBREX-Presence.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compiler failed with exit code $LASTEXITCODE"
+          }
+          if (-not (Test-Path "dist/CYBREX-Presence-Setup.exe")) {
+            throw "Windows installer was not created"
+          }
+          if ((Get-Item "dist/CYBREX-Presence-Setup.exe").Length -lt 1000000) {
+            throw "Windows installer is unexpectedly small"
+          }
+      - name: Sign Windows installer
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_PASSWORD)) {
+            throw "WINDOWS_SIGNING_PFX_BASE64 is configured but WINDOWS_SIGNING_PFX_PASSWORD is empty"
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP "cybrex-signing-installer.pfx"
+          [IO.File]::WriteAllBytes(
+            $certPath,
+            [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64)
+          )
+          try {
+            $signtool = Get-ChildItem `
+              "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" `
+              -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+            if ($null -eq $signtool) {
+              throw "signtool.exe was not found on the GitHub runner"
+            }
+            & $signtool.FullName sign `
+              /fd SHA256 `
+              /f $certPath `
+              /p $env:WINDOWS_SIGNING_PFX_PASSWORD `
+              /tr http://timestamp.digicert.com `
+              /td SHA256 `
+              "dist/CYBREX-Presence-Setup.exe"
+            if ($LASTEXITCODE -ne 0) { throw "installer signtool failed with exit code $LASTEXITCODE" }
+            $signature = Get-AuthenticodeSignature "dist/CYBREX-Presence-Setup.exe"
+            if ($signature.Status -ne 'Valid') {
+              throw "Windows installer signature verification failed: $($signature.Status)"
+            }
+          }
+          finally {
+            Remove-Item $certPath -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:WINDOWS_SIGNING_PFX_BASE64 -ErrorAction SilentlyContinue
+            Remove-Item Env:WINDOWS_SIGNING_PFX_PASSWORD -ErrorAction SilentlyContinue
+          }
+      - name: Silent-install and smoke-test installer
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP "CYBREX-Presence-Release-QA"
+          $installer = Resolve-Path "dist/CYBREX-Presence-Setup.exe"
+          $setup = Start-Process `
+            -FilePath $installer `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$target" `
+            -Wait -PassThru
+          if ($setup.ExitCode -ne 0) {
+            throw "Installer exited with code $($setup.ExitCode)"
+          }
+          $installed = Join-Path $target "DiscordRichPresence.exe"
+          if (-not (Test-Path $installed)) {
+            throw "Installed executable was not found"
+          }
+          $process = Start-Process `
+            -FilePath $installed `
+            -ArgumentList "--dry-run", "--once" `
+            -PassThru
+          if (-not $process.WaitForExit(20000)) {
+            $process.Kill()
+            throw "Installed executable did not exit after a one-cycle dry run"
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "Installed executable exited with code $($process.ExitCode)"
+          }
+          $uninstaller = Join-Path $target "unins000.exe"
+          $uninstall = Start-Process `
+            -FilePath $uninstaller `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" `
+            -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) {
+            throw "Uninstaller exited with code $($uninstall.ExitCode)"
           }
       - name: Validate and package Browser Companion
         shell: pwsh
@@ -156,6 +253,7 @@ jobs:
         run: |
           foreach ($file in @(
             "dist/DiscordRichPresence.exe",
+            "dist/CYBREX-Presence-Setup.exe",
             "dist/CYBREX-Browser-Companion.zip"
           )) {
             $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
@@ -168,6 +266,8 @@ jobs:
           path: |
             dist/DiscordRichPresence.exe
             dist/DiscordRichPresence.exe.sha256
+            dist/CYBREX-Presence-Setup.exe
+            dist/CYBREX-Presence-Setup.exe.sha256
             dist/CYBREX-Browser-Companion.zip
             dist/CYBREX-Browser-Companion.zip.sha256
           if-no-files-found: error
@@ -204,12 +304,51 @@ jobs:
           mv dist/DiscordRichPresence dist/CYBREX-DiscordRichPresence-linux-x86_64
           cd dist
           sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > CYBREX-DiscordRichPresence-linux-x86_64.sha256
+      - name: Build Linux user-level installer bundle
+        run: |
+          set -euo pipefail
+          mkdir -p dist/CYBREX-Presence-linux-x86_64
+          cp dist/CYBREX-DiscordRichPresence-linux-x86_64 dist/CYBREX-Presence-linux-x86_64/CYBREX-DiscordRichPresence-linux-x86_64
+          cp packaging/linux/install-user.sh dist/CYBREX-Presence-linux-x86_64/install-user.sh
+          chmod 755 dist/CYBREX-Presence-linux-x86_64/CYBREX-DiscordRichPresence-linux-x86_64
+          chmod 755 dist/CYBREX-Presence-linux-x86_64/install-user.sh
+          (
+            cd dist/CYBREX-Presence-linux-x86_64
+            sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > SHA256SUMS
+          )
+          tar -C dist -czf dist/CYBREX-Presence-linux-x86_64.tar.gz CYBREX-Presence-linux-x86_64
+          (
+            cd dist
+            sha256sum CYBREX-Presence-linux-x86_64.tar.gz > CYBREX-Presence-linux-x86_64.tar.gz.sha256
+          )
+      - name: Verify Linux user-level installer bundle
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/cybrex-release-home"
+          export XDG_DATA_HOME="$HOME/.local/share"
+          mkdir -p "$HOME"
+          bash dist/CYBREX-Presence-linux-x86_64/install-user.sh
+          target="$HOME/.local/lib/cybrex-presence/DiscordRichPresence"
+          link="$HOME/.local/bin/cybrex-presence"
+          desktop="$XDG_DATA_HOME/applications/cybrex-presence.desktop"
+          test -x "$target"
+          test -w "$target"
+          test -L "$link"
+          test "$(readlink -f "$link")" = "$target"
+          test -f "$desktop"
+          timeout 20s "$target" --dry-run --once
+          bash dist/CYBREX-Presence-linux-x86_64/install-user.sh --uninstall
+          test ! -e "$target"
+          test ! -e "$link"
+          test ! -e "$desktop"
       - uses: actions/upload-artifact@v7
         with:
           name: release-linux
           path: |
             dist/CYBREX-DiscordRichPresence-linux-x86_64
             dist/CYBREX-DiscordRichPresence-linux-x86_64.sha256
+            dist/CYBREX-Presence-linux-x86_64.tar.gz
+            dist/CYBREX-Presence-linux-x86_64.tar.gz.sha256
           if-no-files-found: error
 
   publish:
@@ -231,18 +370,24 @@ jobs:
         run: |
           cd release-assets
           sha256sum -c DiscordRichPresence.exe.sha256
+          sha256sum -c CYBREX-Presence-Setup.exe.sha256
           sha256sum -c CYBREX-Browser-Companion.zip.sha256
           sha256sum -c CYBREX-DiscordRichPresence-linux-x86_64.sha256
+          sha256sum -c CYBREX-Presence-linux-x86_64.tar.gz.sha256
       - name: Publish GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
+            release-assets/CYBREX-Presence-Setup.exe \
+            release-assets/CYBREX-Presence-Setup.exe.sha256 \
             release-assets/DiscordRichPresence.exe \
             release-assets/DiscordRichPresence.exe.sha256 \
-            release-assets/CYBREX-Browser-Companion.zip \
-            release-assets/CYBREX-Browser-Companion.zip.sha256 \
+            release-assets/CYBREX-Presence-linux-x86_64.tar.gz \
+            release-assets/CYBREX-Presence-linux-x86_64.tar.gz.sha256 \
             release-assets/CYBREX-DiscordRichPresence-linux-x86_64 \
             release-assets/CYBREX-DiscordRichPresence-linux-x86_64.sha256 \
+            release-assets/CYBREX-Browser-Companion.zip \
+            release-assets/CYBREX-Browser-Companion.zip.sha256 \
             --generate-notes \
-            --title "Discord Rich Presence ${{ github.ref_name }}"
+            --title "CYBREX Presence ${{ github.ref_name }}"
