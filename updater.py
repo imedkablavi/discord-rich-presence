@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -64,6 +65,7 @@ def parse_manifest(data: bytes) -> SignedManifest:
     signature = str(raw.get("signature", "")).strip()
     if not version or not signature:
         raise UpdateError("Update manifest is missing version/signature")
+    version_tuple(version)
     assets_value = raw.get("assets")
     if not isinstance(assets_value, list) or not assets_value:
         raise UpdateError("Update manifest has no assets")
@@ -89,6 +91,8 @@ def parse_manifest(data: bytes) -> SignedManifest:
             raise UpdateError(f"Update asset {name!r} has an invalid SHA-256")
         if size <= 0 or size > MAX_ASSET_BYTES:
             raise UpdateError(f"Update asset {name!r} has an invalid size")
+        if not asset_platform or not arch:
+            raise UpdateError(f"Update asset {name!r} is missing platform/architecture")
         assets.append(ReleaseAsset(name, url, digest, size, asset_platform, arch, kind))
     return SignedManifest(version, tuple(assets), signature, raw)
 
@@ -101,7 +105,7 @@ def verify_manifest(manifest: SignedManifest, public_key_b64: str) -> None:
         signature = base64.b64decode(manifest.signature, validate=True)
         key = Ed25519PublicKey.from_public_bytes(public_key_raw)
         key.verify(signature, manifest.signed_payload)
-    except (ValueError, InvalidSignature) as exc:
+    except (ValueError, binascii.Error, InvalidSignature) as exc:
         raise UpdateError("Update manifest signature verification failed") from exc
 
 
@@ -110,6 +114,9 @@ def fetch_signed_manifest(url: str, public_key_b64: str, timeout: float = 10.0) 
         raise UpdateError("Update manifest URL must use HTTPS")
     request = urllib.request.Request(url, headers={"User-Agent": "DiscordRichPresence-Updater/1"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
+        final_url = str(response.geturl())
+        if not final_url.startswith("https://"):
+            raise UpdateError("Update manifest redirect downgraded from HTTPS")
         if int(getattr(response, "status", 200)) != 200:
             raise UpdateError(f"Update manifest request failed with HTTP {response.status}")
         data = response.read(512 * 1024 + 1)
@@ -195,6 +202,9 @@ def download_verified_asset(asset: ReleaseAsset, destination: Path, timeout: flo
     digest = hashlib.sha256()
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response, temp.open("wb") as out:
+            final_url = str(response.geturl())
+            if not final_url.startswith("https://"):
+                raise UpdateError("Update asset redirect downgraded from HTTPS")
             if int(getattr(response, "status", 200)) != 200:
                 raise UpdateError(f"Update asset request failed with HTTP {response.status}")
             while True:
@@ -246,13 +256,22 @@ def atomic_replace_with_rollback(current: Path, staged: Path, backup: Optional[P
     return backup
 
 
+def _powershell_literal(value: str) -> str:
+    """Return a PowerShell single-quoted literal."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def schedule_self_replace(
     current: Path,
     staged: Path,
     wait_pids: Iterable[int],
     restart_args: Optional[list[str]] = None,
 ) -> Path:
-    """Launch a detached helper that replaces a running portable build."""
+    """Launch a detached helper that replaces a running portable build.
+
+    The helper keeps a rollback copy and treats an immediate restart exit as a
+    failed update, restoring and restarting the previous executable.
+    """
     current = Path(current).resolve()
     staged = Path(staged).resolve()
     if not staged.is_file():
@@ -266,20 +285,30 @@ def schedule_self_replace(
 
     if sys.platform == "win32":
         helper = helper_dir / "apply-update.ps1"
-        quoted_args = ",".join('"' + arg.replace('"', '`"') + '"' for arg in restart_args)
+        current_literal = _powershell_literal(str(current))
+        staged_literal = _powershell_literal(str(staged))
+        backup_literal = _powershell_literal(str(backup))
+        quoted_args = ",".join(_powershell_literal(arg) for arg in restart_args)
         helper.write_text(
             "param()\n"
             "$ErrorActionPreference='Stop'\n"
             f"$pids=@({','.join(str(pid) for pid in pids)})\n"
             "foreach($p in $pids){ try { Wait-Process -Id $p -Timeout 60 -ErrorAction SilentlyContinue } catch {} }\n"
-            f"$current='{str(current).replace("'", "''")}'\n"
-            f"$staged='{str(staged).replace("'", "''")}'\n"
-            f"$backup='{str(backup).replace("'", "''")}'\n"
+            f"$current={current_literal}\n"
+            f"$staged={staged_literal}\n"
+            f"$backup={backup_literal}\n"
             "try {\n"
             "  if(Test-Path $backup){ Remove-Item -Force $backup }\n"
             "  Move-Item -Force $current $backup\n"
             "  Move-Item -Force $staged $current\n"
-            f"  Start-Process -FilePath $current -ArgumentList @({quoted_args})\n"
+            f"  $child=Start-Process -FilePath $current -ArgumentList @({quoted_args}) -PassThru\n"
+            "  Start-Sleep -Seconds 3\n"
+            "  if($child.HasExited){\n"
+            "    Remove-Item -Force $current -ErrorAction SilentlyContinue\n"
+            "    Move-Item -Force $backup $current\n"
+            f"    Start-Process -FilePath $current -ArgumentList @({quoted_args}) | Out-Null\n"
+            "    exit 2\n"
+            "  }\n"
             "} catch {\n"
             "  if((-not (Test-Path $current)) -and (Test-Path $backup)){ Move-Item -Force $backup $current }\n"
             "  exit 1\n"
@@ -293,12 +322,16 @@ def schedule_self_replace(
             close_fds=True,
         )
     else:
-        helper = helper_dir / "apply-update.sh"
         import shlex
+
+        helper = helper_dir / "apply-update.sh"
+        restart_command = " ".join(["\"$current\""] + [shlex.quote(arg) for arg in restart_args])
+        wait_commands = "\n".join(
+            f"while kill -0 {pid} 2>/dev/null; do sleep 1; done" for pid in pids
+        )
         helper.write_text(
             "#!/bin/sh\nset -eu\n"
-            + " ".join(f"while kill -0 {pid} 2>/dev/null; do sleep 1; done;" for pid in pids)
-            + "\n"
+            + (wait_commands + "\n" if wait_commands else "")
             + f"current={shlex.quote(str(current))}\n"
             + f"staged={shlex.quote(str(staged))}\n"
             + f"backup={shlex.quote(str(backup))}\n"
@@ -306,7 +339,16 @@ def schedule_self_replace(
             + "mv \"$current\" \"$backup\"\n"
             + "if ! mv \"$staged\" \"$current\"; then mv \"$backup\" \"$current\"; exit 1; fi\n"
             + "chmod +x \"$current\" || true\n"
-            + f"if ! \"$current\" {' '.join(shlex.quote(a) for a in restart_args)} >/dev/null 2>&1 & then mv -f \"$backup\" \"$current\"; exit 1; fi\n",
+            + restart_command + " >/dev/null 2>&1 &\n"
+            + "child=$!\n"
+            + "sleep 3\n"
+            + "if ! kill -0 \"$child\" 2>/dev/null; then\n"
+            + "  rm -f \"$current\"\n"
+            + "  mv \"$backup\" \"$current\"\n"
+            + "  chmod +x \"$current\" || true\n"
+            + "  " + restart_command + " >/dev/null 2>&1 &\n"
+            + "  exit 2\n"
+            + "fi\n",
             encoding="utf-8",
         )
         helper.chmod(0o700)
