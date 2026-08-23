@@ -13,6 +13,7 @@ if sys.platform == 'win32':
 
 datas = []
 datas += collect_data_files('customtkinter')
+datas += [('game_packs/community.json', 'game_packs')]
 
 analysis = Analysis(
     ['launcher.py'],
