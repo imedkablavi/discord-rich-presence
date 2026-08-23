@@ -19,6 +19,8 @@
 - Keep GNOME Wayland fail-safe when no stable trusted global active-window API is available.
 - Expand known-game executable mappings while replacing broad substring matching with normalized exact executable-stem matching.
 - Close unhealthy Discord RPC transports after update/clear failures before reconnecting.
+- Make every Activity detector switch authoritative: disabled game/media/terminal/coding/browser/application detectors are no longer executed.
+- Stop the control panel from claiming an activity is being shown when Discord RPC is disconnected.
 
 ### Privacy and configuration
 
@@ -44,6 +46,9 @@
 - Add control-panel settings for browser companion privacy and signed updates.
 - Show application version and signed-update status in the control panel.
 - Add graceful packaged-service shutdown for the Windows uninstaller and unconditional autostart registry cleanup.
+- Rework the control panel into Overview, Activity, Privacy, Preferences, and About sections with shorter user-facing copy and clearer grouping.
+- Add a complete update card with check, release notes, download/verification progress, `Update now`, restart, and error recovery states.
+- Install the Windows build per-user so normal signed self-updates do not require administrator access.
 
 ### Release, updater, and QA
 
@@ -56,8 +61,11 @@
 - Add Ed25519-signed update manifests with HTTPS, signed-size, and SHA-256 verification.
 - Reject HTTPS-to-HTTP redirect downgrade for manifests and update assets.
 - Add staged portable self-update with rollback backup, immediate restart-health rollback, and fail-closed behavior.
+- Add user-approved manual update staging independently of the optional startup auto-update setting.
+- Report real byte progress while a verified update asset is downloaded.
 - Never self-replace source checkouts or unwritable/package-managed installs.
 - Require the update signing private key secret before a tagged release can publish.
+- Add regression tests proving disabled Activity detectors are not called and manual update staging reports real state.
 - Add short cross-platform resource-leak soak tests to PR QA and a scheduled/manual long soak workflow.
 - Track RSS, thread count, and file-descriptor/handle growth during soak runs.
 - Add security, privacy, troubleshooting, browser companion, release, and contribution documentation.
