@@ -55,6 +55,30 @@ def test_gamer_mode_is_idempotent(tmp_path):
     assert config.get('rules.enabled_detectors') == before
 
 
+def test_gamer_and_companion_settings_survive_save_reload(tmp_path):
+    path = tmp_path / 'config.yaml'
+    config = Config(path)
+    config.set('fivem.port', 32193)
+    config.set('fivem.show_server_name', True)
+    config.set('minecraft.port', 32194)
+    config.set('minecraft.show_server_name', True)
+    game_library.set_gamer_mode(config, True, save=False)
+    config.save()
+
+    reloaded = Config(path)
+    assert reloaded.get('fivem.port') == 32193
+    assert reloaded.get('fivem.show_server_name') is True
+    assert reloaded.get('minecraft.port') == 32194
+    assert reloaded.get('minecraft.show_server_name') is True
+    assert reloaded.get('gaming.gamer_mode.enabled') is True
+    assert reloaded.get('rules.enabled_detectors.gaming') is True
+    assert reloaded.get('rules.enabled_detectors.browser') is False
+
+    game_library.set_gamer_mode(reloaded, False, save=False)
+    assert reloaded.get('rules.enabled_detectors.browser') is True
+    assert reloaded.get('rules.enabled_detectors.media') is True
+
+
 def test_discovery_returns_stable_keys_without_install_paths(monkeypatch):
     class FakeSteam:
         def __init__(self):
