@@ -65,6 +65,30 @@ def test_percent_encoded_path_token_is_redacted_after_decoding(tmp_path: Path):
     assert encoded not in result
 
 
+def test_path_policy_redacts_secret_and_drops_query_fragment(tmp_path: Path):
+    redactor = _redactor(tmp_path, 'path')
+    token = 'C' * 48
+    result = redactor._sanitize_exact_browser_url(
+        f'https://example.com/reset/{token}/confirm?view=private#oauth-secret'
+    )
+    assert result is not None
+    _assert_secret_redacted(result, token)
+    assert 'view=private' not in result
+    assert 'oauth-secret' not in result
+
+
+def test_path_policy_redacts_percent_encoded_secret(tmp_path: Path):
+    redactor = _redactor(tmp_path, 'path')
+    token = 'D' * 48
+    encoded = ''.join(f'%{ord(char):02X}' for char in token)
+    result = redactor._sanitize_exact_browser_url(
+        f'https://example.com/reset/{encoded}'
+    )
+    assert result is not None
+    _assert_secret_redacted(result, token)
+    assert encoded not in result
+
+
 def test_domain_policy_never_includes_path_query_or_fragment(tmp_path: Path):
     redactor = _redactor(tmp_path, 'domain')
     result = redactor._sanitize_exact_browser_url(
