@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/imedkablavi/discord-rich-presence/blob/main/docs/TROUBLESHOOTING.md
+    about: Check common Discord, browser, Linux, game-detection and packaging problems before opening a bug.
+  - name: Security reports
+    url: https://github.com/imedkablavi/discord-rich-presence/blob/main/SECURITY.md
+    about: Do not post exploitable security vulnerabilities or sensitive data in a public issue.
