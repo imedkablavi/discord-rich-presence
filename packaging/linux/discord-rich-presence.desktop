@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Discord Rich Presence
+Comment=Privacy-aware Discord Rich Presence manager
+Exec=discord-rich-presence --gui
+Terminal=false
+Categories=Utility;
+StartupNotify=true
