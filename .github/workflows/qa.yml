@@ -57,6 +57,13 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Smoke-test release version stamp
+        shell: pwsh
+        env:
+          BUILD_VERSION: 2.1.0-rc-ci
+        run: |
+          Set-Content -Path version.py -Value "__version__ = '$env:BUILD_VERSION'" -Encoding utf8NoBOM
+          python -c "import version; assert version.__version__ == '2.1.0-rc-ci'"
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Build portable executable
