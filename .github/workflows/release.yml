@@ -34,7 +34,7 @@ jobs:
           "BUILD_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Stamp application version
         shell: pwsh
-        run: python -c "import os, pathlib; pathlib.Path('version.py').write_text('__version__ = \"' + os.environ['BUILD_VERSION'] + '\"\n', encoding='utf-8')"
+        run: Set-Content -Path version.py -Value "__version__ = '$env:BUILD_VERSION'" -Encoding utf8NoBOM
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Build Windows portable executable
