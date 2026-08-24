@@ -27,7 +27,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install validation dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: python -m pip install -r requirements-dev.txt "pip-audit>=2.9,<3" "bandit>=1.8,<2"
       - name: Verify dependency environment
         run: python -m pip check
       - name: Stamp and verify RC version
