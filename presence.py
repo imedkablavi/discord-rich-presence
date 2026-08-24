@@ -30,6 +30,22 @@ class PresenceBuilder:
 
     STEAM_ICON = 'https://www.google.com/s2/favicons?domain=steampowered.com&sz=128'
 
+    # Media detectors can identify a service without having a privacy-safe deep
+    # link to the exact track/video. Use the service's public homepage so the
+    # Discord button is still clickable instead of silently disappearing.
+    SERVICE_HOME_URLS = {
+        'youtube music': 'https://music.youtube.com',
+        'youtube': 'https://www.youtube.com',
+        'netflix': 'https://www.netflix.com',
+        'prime video': 'https://www.primevideo.com',
+        'disney+': 'https://www.disneyplus.com',
+        'hulu': 'https://www.hulu.com',
+        'soundcloud': 'https://soundcloud.com',
+        'spotify': 'https://open.spotify.com',
+        'twitch': 'https://www.twitch.tv',
+        'github': 'https://github.com',
+    }
+
     def __init__(self, config: Config):
         self.config = config
         self.redactor = PrivacyRedactor(config)
@@ -120,7 +136,7 @@ class PresenceBuilder:
             if end_ms is not None:
                 payload['end'] = end_ms
 
-        self._add_buttons(payload, service=service)
+        self._add_buttons(payload, url=self._service_home_url(service), service=service)
         return payload
 
     def _get_media_timeline(
@@ -380,11 +396,16 @@ class PresenceBuilder:
             configured = sites.get(str(service).lower())
         return self.icons.resolve_optional(service, configured=str(configured or ''))
 
+    @classmethod
+    def _service_home_url(cls, service: str) -> Optional[str]:
+        return cls.SERVICE_HOME_URLS.get(str(service or '').strip().lower())
+
     def _add_buttons(self, payload: Dict[str, Any], url: Optional[str] = None, service: str = ''):
         if self.config.get('privacy.mode', 'balanced') == 'strict':
             return
 
         buttons = []
+        seen_urls = set()
         configured = self.config.get('discord.buttons', []) or []
         if isinstance(configured, list):
             for button in configured[:2]:
@@ -396,17 +417,20 @@ class PresenceBuilder:
                     1 <= len(label) <= 32
                     and len(button_url) <= 512
                     and button_url.startswith(('http://', 'https://'))
+                    and button_url not in seen_urls
                 ):
                     buttons.append({'label': label, 'url': button_url})
+                    seen_urls.add(button_url)
 
         auto_url = str(url or '').strip().strip('`')
         if (
             len(buttons) < 2
             and auto_url.startswith(('http://', 'https://'))
             and len(auto_url) <= 512
+            and auto_url not in seen_urls
         ):
             if service == 'YouTube':
-                label = 'Search on YouTube'
+                label = 'Open YouTube'
             elif service == 'GitHub':
                 label = 'Open GitHub'
             elif service == 'Steam':
@@ -419,9 +443,7 @@ class PresenceBuilder:
                     label = f"Open {domain.split('.')[0].title()}"[:32]
                 except (ValueError, AttributeError):
                     label = 'Open Link'
-            candidate = {'label': label, 'url': auto_url}
-            if candidate not in buttons:
-                buttons.append(candidate)
+            buttons.append({'label': label, 'url': auto_url})
 
         if buttons:
             payload['buttons'] = buttons[:2]
