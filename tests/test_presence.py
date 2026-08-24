@@ -35,6 +35,58 @@ def test_spotify_uses_listening_activity_type(tmp_path: Path):
     assert payload['end'] > payload['start']
 
 
+def test_media_service_gets_clickable_home_button(tmp_path: Path):
+    payload = _builder(tmp_path).build({
+        'type': 'media',
+        'player': 'Chrome',
+        'service': 'YouTube',
+        'title': 'Video',
+        'is_playing': True,
+        'position': 5,
+        'duration': 100,
+    })
+
+    assert payload['buttons'] == [
+        {'label': 'Open YouTube', 'url': 'https://www.youtube.com'}
+    ]
+
+
+def test_media_auto_button_does_not_duplicate_configured_url(tmp_path: Path):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('discord.buttons', [
+        {'label': 'My YouTube', 'url': 'https://www.youtube.com'},
+    ])
+    payload = PresenceBuilder(cfg).build({
+        'type': 'media',
+        'player': 'Chrome',
+        'service': 'YouTube',
+        'title': 'Video',
+        'is_playing': True,
+        'position': 5,
+        'duration': 100,
+    })
+
+    assert payload['buttons'] == [
+        {'label': 'My YouTube', 'url': 'https://www.youtube.com'},
+    ]
+
+
+def test_strict_media_does_not_emit_service_button(tmp_path: Path):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('privacy.mode', 'strict')
+    payload = PresenceBuilder(cfg).build({
+        'type': 'media',
+        'player': 'Chrome',
+        'service': 'YouTube',
+        'title': 'Video',
+        'is_playing': True,
+        'position': 5,
+        'duration': 100,
+    })
+
+    assert 'buttons' not in payload
+
+
 def test_media_timeline_stays_stable_during_normal_playback(tmp_path: Path, monkeypatch):
     builder = _builder(tmp_path)
     clock = {'now': 1_800_000_000}
