@@ -9,6 +9,11 @@ pystray>=0.19.5,<1
 Pillow>=12.3,<13
 psutil>=7.2.2,<8
 
+# Cross-platform Arabic shaping/BiDi for Tk-based UI text. Tk rendering on
+# several Linux desktop stacks does not shape or order Arabic consistently.
+arabic-reshaper>=3.0,<4
+python-bidi>=0.6,<1
+
 # Linux media integration
 pydbus>=0.6,<1; sys_platform == 'linux'
 
