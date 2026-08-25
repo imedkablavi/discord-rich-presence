@@ -1,46 +1,62 @@
-"""Configuration manager for Discord Rich Presence Service."""
+"""Configuration management for Discord Rich Presence Service."""
 
 import copy
 import os
+import platform
 import re
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import yaml
+try:
+    import yaml  # type: ignore
+    _YAML_AVAILABLE = True
+except Exception:
+    yaml = None  # type: ignore
+    _YAML_AVAILABLE = False
+    import json
 
 
-_MAX_CONFIG_BYTES = 1024 * 1024
-_BUILTIN_DISCORD_APPLICATION_ID = '1416813807751336047'
-BUILTIN_DISCORD_APPLICATION_ID = _BUILTIN_DISCORD_APPLICATION_ID
+# Public application identifier shipped with CYBREX Discord Rich Presence.
+# Discord Application IDs are public identifiers, not credentials/secrets.
+BUILTIN_DISCORD_APPLICATION_ID = '1437867564762923028'
+_MAX_CONFIG_BYTES = 2 * 1024 * 1024
+_MAX_LIST_ITEMS = 512
+_MAX_CUSTOM_SERVICES = 256
 
 
-DEFAULT_CONFIG: Dict[str, Any] = {
+DEFAULT_CONFIG = {
     'discord': {
+        # Optional advanced override. Normal users do not need a Developer
+        # Portal application or an ID of their own.
         'application_id_override': '',
-        'buttons': [],
+        'buttons': []
     },
     'privacy': {
         'mode': 'balanced',
+        # Exact URLs from the browser companion are reduced to their origin by
+        # default. Options: none, domain, path, full.
         'browser_url_mode': 'domain',
         'redactions': [
             {'regex': r'(?i)(password|token|secret|key|api[_-]?key)\S*'},
             {'regex': r'([A-Fa-f0-9]{32,})'},
         ],
-        'hide_home_paths': True,
+        'hide_home_paths': True
     },
     'update_interval_secs': 2,
     'system': {
         'start_minimized': False,
-        'auto_start': False,
+        'auto_start': False
     },
     'browser_companion': {
+        # Loopback-only bridge for the optional Chromium/Firefox extension.
         'enabled': True,
         'port': 32191,
         'ttl_secs': 15,
         'domain_services': {},
     },
     'cs2_gsi': {
+        # Valve Game State Integration. The listener binds IPv4 loopback only
+        # and authenticates each POST with a locally generated token.
         'enabled': True,
         'auto_install': True,
         'port': 32192,
@@ -128,13 +144,19 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         'youtube_domains': ['YouTube', 'youtu.be'],
         'private_markers': ['Incognito', 'Private Browsing', 'InPrivate'],
         'enabled_detectors': {
+            # Terminal command presence is opt-in because command text can
+            # contain arguments/secrets even after best-effort redaction.
             'media': True, 'terminal': False, 'coding': True,
             'browser': True, 'gaming': True, 'application': True
         },
         'activity_priority': {
+            # smart: foreground work beats background media, while media wins
+            # when its own player/browser is the foreground application.
             'policy': 'smart',
             'custom_order': ['gaming', 'terminal', 'coding', 'browser', 'media', 'application'],
         },
+        # Raw command cache is local-only but may contain arguments. Keep it
+        # short-lived by default; advanced users can raise it up to seven days.
         'terminal_command_ttl_secs': 900,
         'clear_on_lock_screen': True,
         'whitelist': {'apps': [], 'sites': [], 'games': []},
@@ -188,51 +210,97 @@ class Config:
                 raise ValueError(f'Configuration file exceeds {_MAX_CONFIG_BYTES} bytes')
 
             with open(path, 'r', encoding='utf-8') as f:
-                loaded = yaml.safe_load(f) or {}
-            if not isinstance(loaded, dict):
-                raise ValueError('Configuration root must be a mapping')
-            data = copy.deepcopy(DEFAULT_CONFIG)
-            self._deep_merge(data, loaded)
-            self._validate(data)
-            self.data = data
+                if _YAML_AVAILABLE:
+                    user_config = yaml.safe_load(f)  # type: ignore
+                else:
+                    user_config = json.load(f)
+
+            if user_config is None:
+                user_config = {}
+            if not isinstance(user_config, dict):
+                raise ValueError('Top-level configuration must be a mapping/object')
+
+            new_data = copy.deepcopy(DEFAULT_CONFIG)
+            self._deep_update(new_data, user_config)
+
+            # Migrate the former user-facing client_id. The old built-in value is
+            # discarded; a genuinely custom value is preserved as an advanced
+            # override so existing custom setups keep working.
+            discord = new_data.get('discord', {})
+            if isinstance(discord, dict):
+                legacy_id = str(discord.pop('client_id', '') or '').strip()
+                current_override = str(discord.get('application_id_override', '') or '').strip()
+                if (
+                    legacy_id
+                    and legacy_id != BUILTIN_DISCORD_APPLICATION_ID
+                    and not current_override
+                ):
+                    discord['application_id_override'] = legacy_id
+
+            self._validate(new_data)
+            self.data = new_data
             self.config_path = path
+            # Configuration can contain exact URLs, custom rules, and labels.
+            # Keep the file private on POSIX even when it predates this release.
             self._chmod_private(path, 0o600)
-        except yaml.YAMLError as exc:
-            raise ValueError(f'Invalid YAML configuration: {exc}') from exc
+        except Exception as e:
+            raise ValueError(f"Failed to load config from {path}: {e}") from e
 
     def save(self, path: Optional[Path] = None):
-        """Persist configuration atomically without exposing secrets to other users."""
-        path = Path(path or self.config_path)
+        save_path = Path(path or self.config_path)
+        if not save_path:
+            raise ValueError('No config path specified')
+
         self._validate(self.data)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._chmod_private(path.parent, 0o700)
-        serialized = yaml.safe_dump(self.data, sort_keys=False, allow_unicode=True)
-        if len(serialized.encode('utf-8')) > _MAX_CONFIG_BYTES:
-            raise ValueError(f'Configuration exceeds {_MAX_CONFIG_BYTES} bytes')
-        fd, temp_name = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=str(path.parent))
+        save_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if save_path == self._get_default_config_path():
+            self._chmod_private(save_path.parent, 0o700)
+
+        tmp_path = save_path.with_suffix(save_path.suffix + f'.{os.getpid()}.tmp')
         try:
-            if os.name == 'posix':
-                os.fchmod(fd, 0o600)
-            with os.fdopen(fd, 'w', encoding='utf-8') as handle:
-                handle.write(serialized)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temp_name, path)
-            self.config_path = path
-            self._chmod_private(path, 0o600)
-        except Exception:
+            fd = os.open(tmp_path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
             try:
-                os.close(fd)
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    if _YAML_AVAILABLE:
+                        yaml.safe_dump(
+                            self.data,
+                            f,
+                            default_flow_style=False,
+                            allow_unicode=True,
+                            sort_keys=False,
+                        )  # type: ignore
+                    else:
+                        import json as _json
+                        _json.dump(self.data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    try:
+                        os.fsync(f.fileno())
+                    except OSError:
+                        pass
+            except Exception:
+                # fdopen owns fd after construction, but close defensively if
+                # construction itself failed.
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                raise
+            self._chmod_private(tmp_path, 0o600)
+            os.replace(tmp_path, save_path)
+            self._chmod_private(save_path, 0o600)
+            self.config_path = save_path
+        except Exception as e:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
             except OSError:
                 pass
-            try:
-                os.unlink(temp_name)
-            except OSError:
-                pass
-            raise
+            raise ValueError(f'Failed to save config to {save_path}: {e}') from e
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Return a nested dot-separated configuration value."""
+        # Runtime compatibility for older code paths while the public config no
+        # longer exposes client_id. They transparently receive the built-in ID or
+        # the optional advanced override.
         if key == 'discord.client_id':
             discord = self.data.get('discord', {})
             if isinstance(discord, dict):
@@ -241,239 +309,356 @@ class Config:
             return BUILTIN_DISCORD_APPLICATION_ID
 
         value: Any = self.data
-        for part in str(key).split('.'):
+        for part in key.split('.'):
             if isinstance(value, dict) and part in value:
                 value = value[part]
             else:
                 return default
         return value
 
-    def set(self, key: str, value: Any) -> None:
-        """Set a nested dot-separated configuration value in memory."""
-        parts = [part for part in str(key).split('.') if part]
-        if not parts:
-            raise ValueError('Configuration key cannot be empty')
+    def set(self, key: str, value: Any):
+        keys = key.split('.')
         data = self.data
-        for part in parts[:-1]:
-            child = data.get(part)
-            if not isinstance(child, dict):
-                child = {}
-                data[part] = child
-            data = child
-        data[parts[-1]] = value
+        for part in keys[:-1]:
+            if part not in data or not isinstance(data[part], dict):
+                data[part] = {}
+            data = data[part]
+        data[keys[-1]] = value
 
     @staticmethod
-    def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]):
-        for key, value in override.items():
-            if isinstance(value, dict) and isinstance(base.get(key), dict):
-                Config._deep_merge(base[key], value)
+    def _deep_update(base: Dict, update: Dict):
+        for key, value in update.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                Config._deep_update(base[key], value)
             else:
-                base[key] = value
+                base[key] = copy.deepcopy(value)
+
+    @staticmethod
+    def _validate_url(
+        value: Any,
+        name: str,
+        allow_empty: bool = True,
+        *,
+        max_length: int = 512,
+    ):
+        url = str(value or '').strip()
+        if not url and allow_empty:
+            return
+        if not url.startswith(('https://', 'http://')):
+            raise ValueError(f'{name} must start with http:// or https://')
+        if len(url) > max_length:
+            raise ValueError(f'{name} must be at most {max_length} characters')
+
+    @staticmethod
+    def _validate_buttons(buttons: Any, name: str):
+        if buttons is None:
+            buttons = []
+        if not isinstance(buttons, list) or len(buttons) > 2:
+            raise ValueError(f'{name} must be a list with at most 2 buttons')
+        for button in buttons:
+            if not isinstance(button, dict):
+                raise ValueError(f'Each {name} entry must be an object')
+            label = str(button.get('label', '')).strip()
+            if not (1 <= len(label) <= 32):
+                raise ValueError('Discord button labels must be 1-32 characters')
+            Config._validate_url(
+                button.get('url', ''),
+                'Discord button URL',
+                allow_empty=False,
+                max_length=512,
+            )
+
+    @staticmethod
+    def _validate_string_list(
+        value: Any,
+        name: str,
+        *,
+        max_items: int = _MAX_LIST_ITEMS,
+        max_item_length: int = 256,
+    ):
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise ValueError(f'{name} must be a list of strings')
+        if len(value) > max_items:
+            raise ValueError(f'{name} cannot contain more than {max_items} items')
+        if any(len(item) > max_item_length for item in value):
+            raise ValueError(f'{name} entries must be at most {max_item_length} characters')
+
+    @staticmethod
+    def _validate_local_service(
+        data: Dict[str, Any],
+        section: str,
+        *,
+        default_port: int,
+        default_ttl: int = 15,
+    ) -> None:
+        values = data.get(section, {})
+        if not isinstance(values, dict):
+            raise ValueError(f'{section} must be an object')
+        if not isinstance(values.get('enabled', False), bool):
+            raise ValueError(f'{section}.enabled must be true or false')
+        port = values.get('port', default_port)
+        if isinstance(port, bool) or not isinstance(port, int) or not (1024 <= port <= 65535):
+            raise ValueError(f'{section}.port must be an integer between 1024 and 65535')
+        ttl = values.get('ttl_secs', default_ttl)
+        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not (5 <= ttl <= 3600):
+            raise ValueError(f'{section}.ttl_secs must be between 5 and 3600 seconds')
 
     @staticmethod
     def _validate(data: Dict[str, Any]):
-        if not isinstance(data, dict):
-            raise ValueError('Configuration root must be a mapping')
-
-        discord = data.get('discord', {})
-        if not isinstance(discord, dict):
-            raise ValueError('discord must be a mapping')
-        application_id = discord.get('application_id_override', '')
-        if application_id not in (None, ''):
-            text = str(application_id).strip()
-            if not re.fullmatch(r'\d{17,20}', text):
-                raise ValueError('discord.application_id_override must be a 17-20 digit Discord application ID')
-        buttons = discord.get('buttons', [])
-        if not isinstance(buttons, list) or len(buttons) > 2:
-            raise ValueError('discord.buttons must be a list with at most two entries')
-        for item in buttons:
-            if not isinstance(item, dict):
-                raise ValueError('discord.buttons entries must be mappings')
-            label = str(item.get('label', '') or '').strip()
-            url = str(item.get('url', '') or '').strip()
-            if not (1 <= len(label) <= 32):
-                raise ValueError('discord button labels must be 1-32 characters')
-            if not (1 <= len(url) <= 512):
-                raise ValueError('discord button URLs must be 1-512 characters')
-
         privacy = data.get('privacy', {})
         if not isinstance(privacy, dict):
-            raise ValueError('privacy must be a mapping')
-        mode = str(privacy.get('mode', 'balanced') or 'balanced').lower()
+            raise ValueError('privacy must be an object')
+        mode = privacy.get('mode', 'balanced')
         if mode not in {'off', 'balanced', 'strict'}:
-            raise ValueError('privacy.mode must be off, balanced, or strict')
+            raise ValueError('privacy.mode must be one of: off, balanced, strict')
         browser_url_mode = str(privacy.get('browser_url_mode', 'domain') or 'domain').lower()
         if browser_url_mode not in {'none', 'domain', 'path', 'full'}:
-            raise ValueError('privacy.browser_url_mode must be none, domain, path, or full')
-        redactions = privacy.get('redactions', [])
-        if not isinstance(redactions, list) or len(redactions) > 100:
-            raise ValueError('privacy.redactions must be a list with at most 100 entries')
-        for item in redactions:
-            if not isinstance(item, dict):
-                raise ValueError('privacy.redactions entries must be mappings')
-            expression = str(item.get('regex', '') or '')
-            if not expression or len(expression) > 512:
-                raise ValueError('privacy redaction regex must be 1-512 characters')
+            raise ValueError('privacy.browser_url_mode must be one of: none, domain, path, full')
+        if not isinstance(privacy.get('hide_home_paths', True), bool):
+            raise ValueError('privacy.hide_home_paths must be true or false')
+        redactions = privacy.get('redactions', []) or []
+        if not isinstance(redactions, list) or len(redactions) > 64:
+            raise ValueError('privacy.redactions must be a list with at most 64 entries')
+        for entry in redactions:
+            if not isinstance(entry, dict) or not isinstance(entry.get('regex'), str):
+                raise ValueError('Each privacy.redactions entry must contain a regex string')
+            regex = entry['regex']
+            if len(regex) > 512:
+                raise ValueError('privacy.redactions regex strings must be at most 512 characters')
             try:
-                re.compile(expression)
-            except re.error as exc:
-                raise ValueError(f'invalid privacy redaction regex: {exc}') from exc
+                re.compile(regex)
+            except re.error as e:
+                raise ValueError(f"Invalid privacy regex {regex!r}: {e}") from e
 
-        update_interval = data.get('update_interval_secs', 2)
-        if isinstance(update_interval, bool):
-            raise ValueError('update_interval_secs must be numeric')
-        try:
-            update_interval = float(update_interval)
-        except (TypeError, ValueError) as exc:
-            raise ValueError('update_interval_secs must be numeric') from exc
-        if not (0.5 <= update_interval <= 300):
-            raise ValueError('update_interval_secs must be between 0.5 and 300')
+        interval = data.get('update_interval_secs', 2)
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)):
+            raise ValueError('update_interval_secs must be a number')
+        if interval < 1 or interval > 3600:
+            raise ValueError('update_interval_secs must be between 1 and 3600 seconds')
 
-        Config._validate_local_service(data, 'browser_companion', default_port=32191)
-        Config._validate_local_service(data, 'cs2_gsi', default_port=32192)
+        system = data.get('system', {})
+        if not isinstance(system, dict):
+            raise ValueError('system must be an object')
+        for key in ('start_minimized', 'auto_start'):
+            if not isinstance(system.get(key, False), bool):
+                raise ValueError(f'system.{key} must be true or false')
+
+        companion = data.get('browser_companion', {})
+        if not isinstance(companion, dict):
+            raise ValueError('browser_companion must be an object')
+        if not isinstance(companion.get('enabled', True), bool):
+            raise ValueError('browser_companion.enabled must be true or false')
+        port = companion.get('port', 32191)
+        if isinstance(port, bool) or not isinstance(port, int) or port < 1024 or port > 65535:
+            raise ValueError('browser_companion.port must be an integer between 1024 and 65535')
+        companion_ttl = companion.get('ttl_secs', 15)
+        if (
+            isinstance(companion_ttl, bool)
+            or not isinstance(companion_ttl, (int, float))
+            or companion_ttl < 2
+            or companion_ttl > 300
+        ):
+            raise ValueError('browser_companion.ttl_secs must be between 2 and 300 seconds')
+        domain_services = companion.get('domain_services', {}) or {}
+        if not isinstance(domain_services, dict):
+            raise ValueError('browser_companion.domain_services must be an object')
+        if len(domain_services) > _MAX_CUSTOM_SERVICES:
+            raise ValueError(
+                f'browser_companion.domain_services cannot exceed {_MAX_CUSTOM_SERVICES} entries'
+            )
+        for pattern, label in domain_services.items():
+            if not isinstance(pattern, str) or not isinstance(label, str):
+                raise ValueError('browser_companion.domain_services keys and values must be strings')
+            domain = pattern.strip().lower()
+            name = label.strip()
+            check_domain = domain[2:] if domain.startswith('*.') else domain
+            if (
+                not domain
+                or len(domain) > 255
+                or '://' in domain
+                or '/' in domain
+                or ':' in domain
+                or any(char.isspace() for char in domain)
+                or not check_domain
+                or check_domain.startswith('.')
+                or check_domain.endswith('.')
+            ):
+                raise ValueError(f'Invalid browser_companion domain pattern: {pattern!r}')
+            if not (1 <= len(name) <= 80):
+                raise ValueError('browser_companion.domain_services labels must be 1-80 characters')
+
+        cs2 = data.get('cs2_gsi', {})
+        if not isinstance(cs2, dict):
+            raise ValueError('cs2_gsi must be an object')
+        for key in ('enabled', 'auto_install'):
+            if not isinstance(cs2.get(key, True), bool):
+                raise ValueError(f'cs2_gsi.{key} must be true or false')
+        cs2_port = cs2.get('port', 32192)
+        if (
+            isinstance(cs2_port, bool)
+            or not isinstance(cs2_port, int)
+            or cs2_port < 1024
+            or cs2_port > 65535
+        ):
+            raise ValueError('cs2_gsi.port must be an integer between 1024 and 65535')
+        cs2_ttl = cs2.get('ttl_secs', 30)
+        if (
+            isinstance(cs2_ttl, bool)
+            or not isinstance(cs2_ttl, (int, float))
+            or cs2_ttl < 5
+            or cs2_ttl > 300
+        ):
+            raise ValueError('cs2_gsi.ttl_secs must be between 5 and 300 seconds')
+
         Config._validate_local_service(data, 'fivem', default_port=32193)
         Config._validate_local_service(data, 'minecraft', default_port=32194)
-
-        browser = data.get('browser_companion', {})
-        if not isinstance(browser.get('domain_services', {}), dict):
-            raise ValueError('browser_companion.domain_services must be a mapping')
-        if len(browser.get('domain_services', {})) > 100:
-            raise ValueError('browser_companion.domain_services has too many entries')
-        for host, service in browser.get('domain_services', {}).items():
-            host_text = str(host or '').strip().lower()
-            service_text = str(service or '').strip()
-            if not host_text or len(host_text) > 253 or not service_text or len(service_text) > 64:
-                raise ValueError('browser companion domain service entries are invalid')
-            candidate = host_text[2:] if host_text.startswith('*.') else host_text
-            if not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?', candidate):
-                raise ValueError('browser companion domain service hostname is invalid')
-
-        rules = data.get('rules', {})
-        if not isinstance(rules, dict):
-            raise ValueError('rules must be a mapping')
-        enabled = rules.get('enabled_detectors', {})
-        if not isinstance(enabled, dict):
-            raise ValueError('rules.enabled_detectors must be a mapping')
-        for name in {'media', 'terminal', 'coding', 'browser', 'gaming', 'application'}:
-            if not isinstance(enabled.get(name), bool):
-                raise ValueError(f'rules.enabled_detectors.{name} must be boolean')
-
-        priority = rules.get('activity_priority', {})
-        if not isinstance(priority, dict):
-            raise ValueError('rules.activity_priority must be a mapping')
-        policy = str(priority.get('policy', 'smart') or 'smart').strip().lower()
-        if policy not in {'smart', 'foreground_first', 'media_first', 'custom'}:
-            raise ValueError('rules.activity_priority.policy is invalid')
-        custom_order = priority.get('custom_order', [])
-        if not isinstance(custom_order, list):
-            raise ValueError('rules.activity_priority.custom_order must be a list')
-        allowed_order = {'gaming', 'terminal', 'coding', 'browser', 'media', 'application'}
-        normalized_order = [str(item).strip().lower() for item in custom_order]
-        if len(normalized_order) != len(set(normalized_order)) or any(item not in allowed_order for item in normalized_order):
-            raise ValueError('rules.activity_priority.custom_order contains invalid/duplicate entries')
-
-        try:
-            ttl = int(rules.get('terminal_command_ttl_secs', 900))
-        except (TypeError, ValueError) as exc:
-            raise ValueError('rules.terminal_command_ttl_secs must be an integer') from exc
-        if not (5 <= ttl <= 604800):
-            raise ValueError('rules.terminal_command_ttl_secs must be between 5 and 604800')
-
         for section, keys in (
-            ('system', {'start_minimized', 'auto_start'}),
-            ('cs2_gsi', {'enabled', 'auto_install'}),
-            ('fivem', {'enabled', 'show_server_name', 'show_player_count', 'allow_join_button'}),
-            ('minecraft', {'enabled', 'show_server_name'}),
-            ('league', {'enabled', 'show_champion', 'show_queue', 'show_score'}),
-            ('gamer_mode', {'enabled'}),
-            ('social', {'buttons'}),
+            ('fivem', ('show_server_name', 'show_player_count', 'allow_join_button')),
+            ('minecraft', ('show_server_name',)),
+            ('league', ('enabled', 'show_champion', 'show_queue', 'show_score')),
+            ('gamer_mode', ('enabled',)),
+            ('social', ('buttons',)),
         ):
             values = data.get(section, {})
             if not isinstance(values, dict):
-                raise ValueError(f'{section} must be a mapping')
+                raise ValueError(f'{section} must be an object')
             for key in keys:
-                if not isinstance(values.get(key), bool):
-                    raise ValueError(f'{section}.{key} must be boolean')
+                if not isinstance(values.get(key, False), bool):
+                    raise ValueError(f'{section}.{key} must be true or false')
 
         game_library = data.get('game_library', {})
         if not isinstance(game_library, dict):
-            raise ValueError('game_library must be a mapping')
-        if not isinstance(game_library.get('enabled'), bool):
-            raise ValueError('game_library.enabled must be boolean')
+            raise ValueError('game_library must be an object')
+        if not isinstance(game_library.get('enabled', True), bool):
+            raise ValueError('game_library.enabled must be true or false')
         sources = game_library.get('sources', {})
         if not isinstance(sources, dict):
-            raise ValueError('game_library.sources must be a mapping')
-        for source in {'steam', 'epic', 'heroic'}:
-            if not isinstance(sources.get(source), bool):
-                raise ValueError(f'game_library.sources.{source} must be boolean')
+            raise ValueError('game_library.sources must be an object')
+        for source in ('steam', 'epic', 'heroic'):
+            if not isinstance(sources.get(source, True), bool):
+                raise ValueError(f'game_library.sources.{source} must be true or false')
         custom_games = game_library.get('custom_games', [])
         if not isinstance(custom_games, list) or len(custom_games) > 200:
             raise ValueError('game_library.custom_games must be a list with at most 200 entries')
         for game in custom_games:
             if not isinstance(game, dict):
-                raise ValueError('game_library.custom_games entries must be mappings')
+                raise ValueError('game_library.custom_games entries must be objects')
             name = str(game.get('name', '') or '').strip()
             executable = str(game.get('executable', '') or '').strip()
             if not name or len(name) > 128 or not executable or len(executable) > 260:
                 raise ValueError('custom game name/executable is invalid')
 
         game_packs = data.get('game_packs', {})
-        if not isinstance(game_packs, dict) or not isinstance(game_packs.get('enabled'), bool):
-            raise ValueError('game_packs.enabled must be boolean')
+        if not isinstance(game_packs, dict):
+            raise ValueError('game_packs must be an object')
+        if not isinstance(game_packs.get('enabled', True), bool):
+            raise ValueError('game_packs.enabled must be true or false')
         directory = str(game_packs.get('directory', '') or '')
         if len(directory) > 1024 or '\x00' in directory:
             raise ValueError('game_packs.directory is invalid')
 
+        images = data.get('images', {})
+        if not isinstance(images, dict):
+            raise ValueError('images must be an object')
+        if not isinstance(images.get('use_external_app_icons', True), bool):
+            raise ValueError('images.use_external_app_icons must be true or false')
+        icon_overrides = images.get('icon_overrides', {}) or {}
+        if not isinstance(icon_overrides, dict) or len(icon_overrides) > 256:
+            raise ValueError('images.icon_overrides must be an object with at most 256 entries')
+        for key, value in icon_overrides.items():
+            if not isinstance(key, str) or not key.strip() or len(key) > 128:
+                raise ValueError('images.icon_overrides keys must be 1-128 character strings')
+            if not isinstance(value, str) or not (1 <= len(value.strip()) <= 300):
+                raise ValueError('images.icon_overrides values must be 1-300 character asset keys or URLs')
+
+        discord = data.get('discord', {})
+        if not isinstance(discord, dict):
+            raise ValueError('discord must be an object')
+        application_id_override = str(discord.get('application_id_override', '') or '').strip()
+        if application_id_override and (
+            not application_id_override.isdigit() or len(application_id_override) > 32
+        ):
+            raise ValueError(
+                'discord.application_id_override must be empty or a numeric Discord application ID'
+            )
+        Config._validate_buttons(discord.get('buttons', []), 'discord.buttons')
+
+        rules = data.get('rules', {})
+        if not isinstance(rules, dict):
+            raise ValueError('rules must be an object')
+        detectors = rules.get('enabled_detectors', {})
+        if not isinstance(detectors, dict):
+            raise ValueError('rules.enabled_detectors must be an object')
+        for key in ('media', 'terminal', 'coding', 'browser', 'gaming', 'application'):
+            if not isinstance(detectors.get(key, True), bool):
+                raise ValueError(f'rules.enabled_detectors.{key} must be true or false')
+
+        priority = rules.get('activity_priority', {})
+        if not isinstance(priority, dict):
+            raise ValueError('rules.activity_priority must be an object')
+        priority_policy = str(priority.get('policy', 'smart') or 'smart').lower()
+        if priority_policy not in {'smart', 'foreground_first', 'media_first', 'custom'}:
+            raise ValueError(
+                'rules.activity_priority.policy must be one of: smart, foreground_first, media_first, custom'
+            )
+        custom_order = priority.get('custom_order', []) or []
+        Config._validate_string_list(custom_order, 'rules.activity_priority.custom_order', max_items=6)
+        known_priority_kinds = {'gaming', 'terminal', 'coding', 'browser', 'media', 'application'}
+        normalized_order = [str(item).lower() for item in custom_order]
+        if any(item not in known_priority_kinds for item in normalized_order):
+            raise ValueError('rules.activity_priority.custom_order contains an unknown activity type')
+        if len(normalized_order) != len(set(normalized_order)):
+            raise ValueError('rules.activity_priority.custom_order cannot contain duplicates')
+
+        ttl = rules.get('terminal_command_ttl_secs', 900)
+        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or ttl < 0 or ttl > 604800:
+            raise ValueError('rules.terminal_command_ttl_secs must be between 0 and 604800')
+        if not isinstance(rules.get('clear_on_lock_screen', True), bool):
+            raise ValueError('rules.clear_on_lock_screen must be true or false')
+        for key in ('youtube_domains', 'private_markers'):
+            Config._validate_string_list(rules.get(key, []), f'rules.{key}', max_items=64)
+        for section in ('whitelist', 'blacklist'):
+            mapping = rules.get(section, {})
+            if not isinstance(mapping, dict):
+                raise ValueError(f'rules.{section} must be an object')
+            for key in ('apps', 'sites', 'games'):
+                Config._validate_string_list(mapping.get(key, []), f'rules.{section}.{key}')
+
         override = data.get('override', {})
         if not isinstance(override, dict):
-            raise ValueError('override must be a mapping')
-        if not isinstance(override.get('enabled'), bool):
-            raise ValueError('override.enabled must be boolean')
-        if not isinstance(override.get('use_start_timestamp'), bool):
-            raise ValueError('override.use_start_timestamp must be boolean')
-        for key in {'details', 'state', 'large_image_key', 'large_text', 'small_image_key', 'small_text'}:
-            if len(str(override.get(key, '') or '')) > 512:
-                raise ValueError(f'override.{key} is too long')
-        for key in {'details_url', 'state_url', 'large_url', 'small_url'}:
-            if len(str(override.get(key, '') or '')) > 2048:
-                raise ValueError(f'override.{key} is too long')
-        party_id = str(override.get('party_id', '') or '')
-        if len(party_id) > 128 or any(ord(char) < 32 for char in party_id):
-            raise ValueError('override.party_id is invalid')
-        for key in {'party_current', 'party_max'}:
-            value = override.get(key, 0)
-            if isinstance(value, bool):
-                raise ValueError(f'override.{key} must be an integer')
-            try:
-                number = int(value)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f'override.{key} must be an integer') from exc
-            if not (0 <= number <= 100000):
-                raise ValueError(f'override.{key} is out of range')
-
-    @staticmethod
-    def _validate_local_service(data: Dict[str, Any], section: str, *, default_port: int) -> None:
-        values = data.get(section, {})
-        if not isinstance(values, dict):
-            raise ValueError(f'{section} must be a mapping')
-        if not isinstance(values.get('enabled'), bool):
-            raise ValueError(f'{section}.enabled must be boolean')
+            raise ValueError('override must be an object')
+        for key in ('enabled', 'use_start_timestamp'):
+            if not isinstance(override.get(key, False), bool):
+                raise ValueError(f'override.{key} must be true or false')
+        Config._validate_buttons(override.get('buttons', []), 'override.buttons')
+        for key in ('details_url', 'state_url', 'large_url', 'small_url'):
+            Config._validate_url(
+                override.get(key, ''),
+                f'override.{key}',
+                max_length=256,
+            )
+        for key in ('details', 'state', 'large_text', 'small_text', 'party_id'):
+            value = override.get(key, '')
+            if not isinstance(value, str) or len(value) > 512:
+                raise ValueError(f'override.{key} must be a string with at most 512 characters')
+        for key in ('large_image_key', 'small_image_key'):
+            value = override.get(key, '')
+            if not isinstance(value, str) or len(value) > 300:
+                raise ValueError(f'override.{key} must be a string with at most 300 characters')
         try:
-            port = int(values.get('port', default_port))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f'{section}.port must be an integer') from exc
-        if not (1024 <= port <= 65535):
-            raise ValueError(f'{section}.port must be between 1024 and 65535')
-        try:
-            ttl = int(values.get('ttl_secs', 15))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f'{section}.ttl_secs must be an integer') from exc
-        if not (5 <= ttl <= 3600):
-            raise ValueError(f'{section}.ttl_secs must be between 5 and 3600')
+            party_current = int(override.get('party_current', 0) or 0)
+            party_max = int(override.get('party_max', 0) or 0)
+        except (TypeError, ValueError) as e:
+            raise ValueError('override party sizes must be integers') from e
+        if party_current < 0 or party_max < 0:
+            raise ValueError('override party sizes cannot be negative')
+        if party_max and party_current > party_max:
+            raise ValueError('override.party_current cannot exceed override.party_max')
 
     @staticmethod
     def _get_default_config_path() -> Path:
-        if os.name == 'nt':
+        system = platform.system().lower()
+        if system == 'windows':
             base = os.environ.get('APPDATA')
             config_dir = (
                 Path(base) / 'discord-rich-presence'
