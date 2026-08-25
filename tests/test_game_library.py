@@ -119,6 +119,7 @@ def test_discovery_returns_stable_keys_without_install_paths(monkeypatch):
     cs2 = next(entry for entry in entries if entry.key == 'steam:730')
     assert cs2.enhanced is True
     assert not hasattr(cs2, 'install_path')
+    assert all(entry.curated for entry in entries)
 
 
 def test_library_counts():
