@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from typing import Any, Dict
-from urllib.parse import urlsplit
 
 from pypresence.types import ActivityType
+
+from url_safety import contains_controls as _contains_controls
+from url_safety import public_https_url
 
 
 _TEXT_ALIASES = {'x': 'X.com', 'c': 'C language'}
@@ -27,10 +29,6 @@ _ALLOWED_KEYS = {
 }
 
 
-def _contains_controls(text: str) -> bool:
-    return any(ord(char) < 32 or ord(char) == 127 for char in text)
-
-
 def _clean_text(value: Any, limit: int) -> str | None:
     text = str(value or '').strip()
     if not text:
@@ -44,22 +42,8 @@ def _clean_text(value: Any, limit: int) -> str | None:
 
 
 def _http_url(value: Any, limit: int) -> str | None:
-    text = str(value or '').strip().strip('`')
-    if not text or len(text) > limit or _contains_controls(text):
-        return None
-    try:
-        parsed = urlsplit(text)
-        hostname = parsed.hostname
-        _ = parsed.port
-    except ValueError:
-        return None
-    if parsed.scheme.lower() not in {'https', 'http'} or not hostname:
-        return None
-    # Rich Presence links never need URL userinfo. Reject it instead of risking
-    # accidental publication of credentials embedded in a browser/custom URL.
-    if parsed.username is not None or parsed.password is not None:
-        return None
-    return text
+    """Keep the legacy helper name while enforcing public HTTPS-only links."""
+    return public_https_url(value, limit)
 
 
 def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -67,7 +51,8 @@ def sanitize_rpc_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     Only fields that this application intentionally supports are allowed through.
     Detector metadata must never accidentally become a keyword argument to
-    ``Presence.update`` and tear down the service loop.
+    ``Presence.update`` and tear down the service loop. URLs are a final trust
+    boundary: only public HTTPS destinations may leave the application.
     """
     raw = dict(payload or {})
     result = {
