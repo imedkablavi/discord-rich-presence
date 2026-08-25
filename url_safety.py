@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
 
 _BLOCKED_HOSTS = {'localhost', 'localhost.localdomain'}
 _BLOCKED_SUFFIXES = ('.localhost', '.local', '.internal')
+_DNS_LABEL_RE = re.compile(r'^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$')
 
 
 def contains_controls(text: str) -> bool:
@@ -40,14 +42,10 @@ def is_public_hostname(hostname: str) -> bool:
             ascii_host = host.encode('idna').decode('ascii')
         except (UnicodeError, ValueError):
             return False
+        if len(ascii_host) > 253:
+            return False
         labels = ascii_host.split('.')
-        return all(
-            label
-            and len(label) <= 63
-            and not label.startswith('-')
-            and not label.endswith('-')
-            for label in labels
-        )
+        return all(bool(_DNS_LABEL_RE.fullmatch(label)) for label in labels)
 
     return bool(address.is_global)
 
@@ -64,12 +62,14 @@ def public_https_url(value: Any, limit: int) -> str | None:
     try:
         parsed = urlsplit(text)
         hostname = parsed.hostname
-        _ = parsed.port
+        port = parsed.port
     except ValueError:
         return None
     if parsed.scheme.lower() != 'https' or not hostname:
         return None
     if parsed.username is not None or parsed.password is not None:
+        return None
+    if port not in {None, 443}:
         return None
     if not is_public_hostname(hostname):
         return None
