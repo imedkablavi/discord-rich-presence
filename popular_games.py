@@ -18,7 +18,11 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_CATALOG_BYTES = 128 * 1024
 _MAX_GAMES = 1024
 _MAX_TITLE = 160
-_BUNDLED_CATALOGS = ('popular_catalog.json', 'popular_cross_launcher.json')
+_BUNDLED_CATALOGS = (
+    'popular_catalog.json',
+    'popular_cross_launcher.json',
+    'popular_2026.json',
+)
 
 
 def _resource_root() -> Path:
