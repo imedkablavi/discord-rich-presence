@@ -31,8 +31,10 @@ def _release(version: str = '1.2.3') -> bytes:
     }).encode('utf-8')
 
 
-def test_version_parser_orders_stable_versions():
-    assert updater._version_tuple('v1.2.3') == (1, 2, 3)
+def test_version_parser_orders_stable_versions_and_prereleases():
+    assert updater._version_tuple('v1.2.3') == (1, 2, 3, 1)
+    assert updater._version_tuple('v1.2.3-rc3') == (1, 2, 3, 0)
+    assert updater._version_tuple('1.2.3') > updater._version_tuple('1.2.3-rc3')
     assert updater._version_tuple('2.0.0') > updater._version_tuple('1.99.99')
     with pytest.raises(UpdateError):
         updater._version_tuple('latest')
@@ -45,6 +47,10 @@ def test_update_urls_are_https_and_github_only():
         updater._validate_github_url('http://github.com/example')
     with pytest.raises(UpdateError):
         updater._validate_github_url('https://example.com/update.exe')
+    with pytest.raises(UpdateError):
+        updater._validate_github_url('https://user:secret@github.com/example')
+    with pytest.raises(UpdateError):
+        updater._validate_github_url('https://github.com:444/example')
 
 
 def test_check_for_update_requires_expected_platform_assets(monkeypatch):
@@ -55,6 +61,15 @@ def test_check_for_update_requires_expected_platform_assets(monkeypatch):
     assert info.latest_version == '1.2.3'
     assert info.binary.name == 'binary.bin'
     assert info.checksum.name == 'binary.bin.sha256'
+
+
+def test_check_for_update_promotes_same_core_rc_to_stable(monkeypatch):
+    monkeypatch.setattr(updater, '_read_limited', lambda *_: _release('2.1.0'))
+    monkeypatch.setattr(updater, '_platform_asset_names', lambda: ('binary.bin', 'binary.bin.sha256'))
+    info = updater.check_for_update('2.1.0-rc3')
+    assert info is not None
+    assert info.current_version == '2.1.0-rc3'
+    assert info.latest_version == '2.1.0'
 
 
 def test_check_for_update_never_downgrades(monkeypatch):
@@ -127,3 +142,31 @@ def test_linux_relaunch_is_noop_without_restart_args(monkeypatch, tmp_path: Path
         lambda *_args, **_kwargs: pytest.fail('Popen should not be called'),
     )
     updater._relaunch_linux(tmp_path / 'CYBREX', [])
+
+
+def test_linux_immediate_crash_restores_previous_binary(monkeypatch, tmp_path: Path):
+    target = tmp_path / 'CYBREX'
+    staged = tmp_path / '.CYBREX.2.0.0.new'
+    target.write_bytes(b'old')
+    staged.write_bytes(b'new')
+    rollback = updater._install_linux(target, staged, keep_backup=True)
+    assert rollback is not None
+    assert target.read_bytes() == b'new'
+
+    launches = []
+
+    class ExitedProcess:
+        def wait(self, timeout):
+            assert timeout == 3.0
+            return 1
+
+    def fake_popen(command, **kwargs):
+        launches.append((command, kwargs))
+        return ExitedProcess()
+
+    monkeypatch.setattr(updater.subprocess, 'Popen', fake_popen)
+    with pytest.raises(UpdateError, match='rollback restored'):
+        updater._relaunch_linux(target, ['--gui'], rollback_path=rollback)
+
+    assert target.read_bytes() == b'old'
+    assert len(launches) == 2
