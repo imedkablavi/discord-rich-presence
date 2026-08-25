@@ -155,14 +155,28 @@ def main() -> int:
     if '--gui' in sys.argv:
         sys.argv.remove('--gui')
         from config import Config
-        from gui_modern_v2 import ModernControlPanel
+        from gui_instance import GUIInstanceLock
+        from gui_modern_v3 import ModernControlPanel
 
-        app = ModernControlPanel(Config())
-        app.mainloop()
+        gui_lock = GUIInstanceLock()
+        if not gui_lock.acquire():
+            _setup_message('CYBREX control panel is already running.')
+            return 0
+        try:
+            app = ModernControlPanel(Config())
+            app.mainloop()
+        finally:
+            gui_lock.release()
         return 0
 
     _normalize_packaged_args()
 
+    # Install fixed-worker loopback servers before importing the service stack.
+    # This prevents long-running Browser Companion / CS2 traffic from creating a
+    # fresh OS thread for every request and growing RSS on Linux.
+    from resource_hardening import apply_resource_hardening
+
+    apply_resource_hardening()
     from main import main as service_main
     service_main()
     return 0
