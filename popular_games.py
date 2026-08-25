@@ -18,6 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_CATALOG_BYTES = 128 * 1024
 _MAX_GAMES = 1024
 _MAX_TITLE = 160
+_BUNDLED_CATALOGS = ('popular_catalog.json', 'popular_cross_launcher.json')
 
 
 def _resource_root() -> Path:
@@ -75,13 +76,32 @@ class PopularGameCatalog:
     """Exact normalized membership test for the bundled curated title set."""
 
     def __init__(self, path: Optional[Path] = None):
-        source = path or (_resource_root() / 'game_packs' / 'popular_catalog.json')
-        try:
-            self.games = load_popular_catalog(source)
-        except ValueError as exc:
-            _LOGGER.warning('Popular game catalog unavailable: %s', exc)
-            self.games = ()
-        self._normalized = frozenset(normalize_title(title) for title in self.games)
+        sources = (
+            (path,)
+            if path is not None
+            else tuple(_resource_root() / 'game_packs' / name for name in _BUNDLED_CATALOGS)
+        )
+        games: list[str] = []
+        seen: set[str] = set()
+        for source in sources:
+            try:
+                loaded = load_popular_catalog(source)
+            except ValueError as exc:
+                _LOGGER.warning('Popular game catalog unavailable (%s): %s', source, exc)
+                continue
+            for title in loaded:
+                normalized = normalize_title(title)
+                if normalized in seen:
+                    _LOGGER.warning('Ignoring duplicate popular game title across catalogs: %s', title)
+                    continue
+                seen.add(normalized)
+                games.append(title)
+                if len(games) >= _MAX_GAMES:
+                    break
+            if len(games) >= _MAX_GAMES:
+                break
+        self.games = tuple(games)
+        self._normalized = frozenset(seen)
 
     def contains(self, title: object) -> bool:
         normalized = normalize_title(title)
