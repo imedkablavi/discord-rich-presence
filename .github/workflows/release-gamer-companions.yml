@@ -4,29 +4,28 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: "Existing GitHub release tag to upload companions to"
-        required: true
-        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: gamer-companions-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "25"
           verify-signature: true
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
           gradle-version: "9.5.1"
       - name: Build Minecraft Fabric companion
@@ -41,6 +40,9 @@ jobs:
           minecraft_jar="$(find integrations/minecraft/fabric-26.2/build/libs \
             -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' -print -quit)"
           test -n "$minecraft_jar"
+          test "$(stat -c %s "$minecraft_jar")" -gt 1000
+          jar tf "$minecraft_jar" | grep -q '^fabric.mod.json$'
+          jar tf "$minecraft_jar" | grep -q '^com/cybrex/presence/CybrexPresenceClient.class$'
           cp "$minecraft_jar" release-assets/CYBREX-Minecraft-Companion-26.2.jar
 
           (
@@ -55,7 +57,7 @@ jobs:
           sha256sum CYBREX-FiveM-Companion.zip > CYBREX-FiveM-Companion.zip.sha256
           sha256sum -c CYBREX-Minecraft-Companion-26.2.jar.sha256
           sha256sum -c CYBREX-FiveM-Companion.zip.sha256
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gamer-release-companions
           path: release-assets/*
@@ -64,32 +66,25 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: gamer-release-companions
           path: release-assets
-      - name: Resolve release tag
-        id: tag
+      - name: Validate tag
         shell: bash
-        env:
-          DISPATCH_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            tag="${GITHUB_REF_NAME}"
-          else
-            tag="${DISPATCH_TAG}"
-          fi
-          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: Wait for desktop release and upload companions
+          [[ "${GITHUB_REF}" == refs/tags/* ]]
+          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+      - name: Wait for matching desktop release and upload companions
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           found=false
