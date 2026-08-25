@@ -10,6 +10,13 @@ from rpc_contract import sanitize_rpc_payload
     'https://example.com/path\tvalue',
     'https://example.com:bad/path',
     'file:///tmp/private',
+    'http://example.com/insecure',
+    'https://localhost/private',
+    'https://router.local/admin',
+    'https://127.0.0.1:8443/private',
+    'https://10.0.0.10/private',
+    'https://169.254.10.20/private',
+    'https://[::1]/private',
 ])
 def test_rpc_drops_unsafe_activity_urls(url: str):
     payload = sanitize_rpc_payload({
@@ -27,6 +34,8 @@ def test_rpc_drops_unsafe_activity_urls(url: str):
     'https://user:secret@example.com/private',
     'https://example.com/path\nInjected: yes',
     'https://example.com:bad/path',
+    'http://example.com/insecure',
+    'https://192.168.1.1/admin',
 ])
 def test_rpc_drops_unsafe_button_urls(url: str):
     payload = sanitize_rpc_payload({
@@ -41,6 +50,8 @@ def test_rpc_drops_unsafe_button_urls(url: str):
     'https://user:secret@example.com/icon.png',
     'https://example.com/icon.png\nInjected: yes',
     'https://example.com:bad/icon.png',
+    'http://example.com/icon.png',
+    'https://localhost/icon.png',
 ])
 def test_rpc_drops_unsafe_external_artwork_urls(url: str):
     payload = sanitize_rpc_payload({
