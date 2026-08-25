@@ -73,7 +73,7 @@ def load_popular_catalog(path: Path) -> tuple[str, ...]:
 
 
 class PopularGameCatalog:
-    """Exact normalized membership test for the bundled curated title set."""
+    """Exact normalized resolver for the bundled curated title set."""
 
     def __init__(self, path: Optional[Path] = None):
         sources = (
@@ -82,7 +82,7 @@ class PopularGameCatalog:
             else tuple(_resource_root() / 'game_packs' / name for name in _BUNDLED_CATALOGS)
         )
         games: list[str] = []
-        seen: set[str] = set()
+        canonical: dict[str, str] = {}
         for source in sources:
             try:
                 loaded = load_popular_catalog(source)
@@ -91,18 +91,25 @@ class PopularGameCatalog:
                 continue
             for title in loaded:
                 normalized = normalize_title(title)
-                if normalized in seen:
+                if normalized in canonical:
                     _LOGGER.warning('Ignoring duplicate popular game title across catalogs: %s', title)
                     continue
-                seen.add(normalized)
+                canonical[normalized] = title
                 games.append(title)
                 if len(games) >= _MAX_GAMES:
                     break
             if len(games) >= _MAX_GAMES:
                 break
         self.games = tuple(games)
-        self._normalized = frozenset(seen)
+        self._canonical = canonical
+        self._normalized = frozenset(canonical)
+
+    def resolve(self, title: object) -> Optional[str]:
+        """Return the catalog's canonical title for an exact normalized match."""
+        normalized = normalize_title(title)
+        if not normalized:
+            return None
+        return self._canonical.get(normalized)
 
     def contains(self, title: object) -> bool:
-        normalized = normalize_title(title)
-        return bool(normalized and normalized in self._normalized)
+        return self.resolve(title) is not None
