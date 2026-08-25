@@ -96,6 +96,10 @@ class GamingDetector:
         'counter-strike: global offensive': 'Counter-Strike 2',
     }
 
+    # Loaded once for both instance and class-level title fallback calls. Keeping
+    # the helper callable as a classmethod preserves its existing test/API contract.
+    POPULAR_GAMES = PopularGameCatalog()
+
     CS2_MODE_NAMES = {
         'competitive': 'Competitive',
         'casual': 'Casual',
@@ -142,7 +146,7 @@ class GamingDetector:
         self.epic_catalog = EpicGameCatalog()
         self.heroic_catalog = HeroicGameCatalog()
         self.game_packs = GamePackRegistry()
-        self.popular_games = PopularGameCatalog()
+        self.popular_games = self.POPULAR_GAMES
         self.league_client = LeagueLiveClient()
         self.fivem_bridge = get_fivem_bridge(config, start=False)
         self.minecraft_bridge = get_minecraft_bridge(config, start=False)
@@ -559,7 +563,8 @@ class GamingDetector:
                 return mapping[key]
         return None
 
-    def _extract_game_from_title(self, title: str) -> Optional[str]:
+    @classmethod
+    def _extract_game_from_title(cls, title: str) -> Optional[str]:
         if not title:
             return None
         candidate = title.strip()
@@ -585,6 +590,6 @@ class GamingDetector:
             'xbox', 'minecraft launcher', 'news', 'shop',
         }:
             return None
-        if lowered in self.TITLE_GAME_ALIASES:
-            return self.TITLE_GAME_ALIASES[lowered]
-        return self.popular_games.resolve(candidate)
+        if lowered in cls.TITLE_GAME_ALIASES:
+            return cls.TITLE_GAME_ALIASES[lowered]
+        return cls.POPULAR_GAMES.resolve(candidate)
