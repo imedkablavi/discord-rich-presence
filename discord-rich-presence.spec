@@ -17,6 +17,7 @@ datas += [
     ('game_packs/community.json', 'game_packs'),
     ('game_packs/popular_catalog.json', 'game_packs'),
     ('game_packs/popular_cross_launcher.json', 'game_packs'),
+    ('game_packs/popular_2026.json', 'game_packs'),
 ]
 
 analysis = Analysis(
