@@ -30,11 +30,12 @@ concurrency:
 jobs:
   windows-installer:
     runs-on: windows-latest
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -113,7 +114,7 @@ jobs:
           if ($uninstall.ExitCode -ne 0) {
             throw "Uninstaller exited with code $($uninstall.ExitCode)"
           }
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CYBREX-Presence-Windows-Installer
           path: dist/CYBREX-Presence-Setup.exe
@@ -121,11 +122,12 @@ jobs:
 
   linux-user-installer:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -147,6 +149,20 @@ jobs:
             cd dist/CYBREX-Presence-linux-x86_64
             sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > SHA256SUMS
           )
+      - name: Verify tampered Linux bundle fails closed
+        run: |
+          set -euo pipefail
+          tampered="$RUNNER_TEMP/tampered-bundle"
+          cp -a dist/CYBREX-Presence-linux-x86_64 "$tampered"
+          printf 'tamper' >> "$tampered/CYBREX-DiscordRichPresence-linux-x86_64"
+          export HOME="$RUNNER_TEMP/tampered-home"
+          export XDG_DATA_HOME="$HOME/.local/share"
+          mkdir -p "$HOME"
+          if bash "$tampered/install-user.sh"; then
+            echo "Tampered release bundle was accepted" >&2
+            exit 1
+          fi
+          test ! -e "$HOME/.local/lib/cybrex-presence/DiscordRichPresence"
       - name: Install, smoke-test, and uninstall as an unprivileged user
         run: |
           set -euo pipefail
@@ -172,7 +188,7 @@ jobs:
         run: |
           tar -C dist -czf dist/CYBREX-Presence-linux-x86_64.tar.gz CYBREX-Presence-linux-x86_64
           sha256sum dist/CYBREX-Presence-linux-x86_64.tar.gz > dist/CYBREX-Presence-linux-x86_64.tar.gz.sha256
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CYBREX-Presence-Linux-User-Installer
           path: |
