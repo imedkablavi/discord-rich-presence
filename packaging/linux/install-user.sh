@@ -16,6 +16,10 @@ fail() {
   exit 1
 }
 
+for path_value in "$INSTALL_ROOT" "$BIN_DIR" "$DESKTOP_DIR" "$INSTALL_TARGET" "$CLI_LINK" "$DESKTOP_FILE"; do
+  [[ "$path_value" != *$'\n'* && "$path_value" != *$'\r'* ]] || fail "install paths must not contain line breaks"
+done
+
 uninstall_user() {
   rm -f -- "$CLI_LINK" "$DESKTOP_FILE"
   rm -f -- "$INSTALL_TARGET" "${INSTALL_TARGET}.old"
@@ -35,12 +39,12 @@ SOURCE_BINARY="${1:-${SCRIPT_DIR}/${BINARY_NAME}}"
 [[ -f "$SOURCE_BINARY" ]] || fail "binary not found: $SOURCE_BINARY"
 [[ ! -L "$SOURCE_BINARY" ]] || fail "refusing a symlink as the installer source"
 
-if [[ -f "${SCRIPT_DIR}/SHA256SUMS" ]] && command -v sha256sum >/dev/null 2>&1; then
+if [[ -f "${SCRIPT_DIR}/SHA256SUMS" ]]; then
+  command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required to verify this release bundle"
   expected="$(awk -v name="$BINARY_NAME" '$2 == name || $2 == "*" name {print $1; exit}' "${SCRIPT_DIR}/SHA256SUMS")"
-  if [[ -n "$expected" ]]; then
-    actual="$(sha256sum "$SOURCE_BINARY" | awk '{print $1}')"
-    [[ "$actual" == "$expected" ]] || fail "binary SHA-256 does not match the bundle manifest"
-  fi
+  [[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] || fail "bundle manifest does not contain a valid SHA-256 for $BINARY_NAME"
+  actual="$(sha256sum "$SOURCE_BINARY" | awk '{print $1}')"
+  [[ "${actual,,}" == "${expected,,}" ]] || fail "binary SHA-256 does not match the bundle manifest"
 fi
 
 mkdir -p -- "$INSTALL_ROOT" "$BIN_DIR" "$DESKTOP_DIR"
