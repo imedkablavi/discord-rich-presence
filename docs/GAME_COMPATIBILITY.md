@@ -27,9 +27,10 @@ Enhanced support must not be inferred from membership in the 340-title catalog.
 2. Resolve Epic Games from local Epic manifest metadata.
 3. Resolve Heroic/Legendary from local Heroic metadata.
 4. Consult the validated Community Game Pack for conservative exact-process fallbacks.
-5. Use the small built-in fallback set for known launchers/games when a safe local catalog is not available.
+5. Apply the small built-in verified process aliases for known games/launchers.
+6. When the foreground process is a known launcher and local catalog resolution was unavailable, accept its window title only when it is a known alias or an **exact normalized match** to the curated 340-title catalog.
 
-Launcher metadata remains authoritative over fallback aliases.
+Launcher metadata remains authoritative over all fallback aliases and title matching. Generic launcher pages such as Store, Library, News and arbitrary promotional window titles fail closed and are not reported as games.
 
 ## Safety boundary
 
@@ -37,11 +38,11 @@ CYBREX Presence does not need game-memory reading, DLL/code injection, anti-chea
 
 ## Why the catalog is separate from process matching
 
-Hardcoding hundreds of guessed executable names would create false positives and would age badly as games update. The curated catalog therefore records supported product targets, while runtime detection uses authoritative local launcher metadata whenever available. Exact process aliases are added only when they are known and useful as a fallback.
+Hardcoding hundreds of guessed executable names would create false positives and would age badly as games update. The curated catalog therefore records supported product targets, while runtime detection uses authoritative local launcher metadata whenever available. Exact process aliases are added only when they are known and useful as a fallback. The launcher-title fallback also requires an exact curated title rather than substring matching.
 
 ## CI contract
 
-`tests/test_popular_games.py` fails if the bundled curated catalog drops below 300 unique titles or if its schema/normalization rules regress. Gamer Integrations CI also imports the catalog and runs the Game Library integration tests.
+`tests/test_popular_games.py` fails if the bundled curated catalog drops below 300 unique titles, if its schema/normalization rules regress, or if launcher-title fallback starts accepting arbitrary non-curated titles. Gamer Integrations CI also imports the catalog and runs the Game Library integration tests.
 
 ## Reporting a missing game
 
