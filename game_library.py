@@ -15,6 +15,7 @@ from typing import Iterable, Sequence
 from config import Config, DEFAULT_CONFIG
 from epic_catalog import EpicGameCatalog
 from heroic_catalog import HeroicGameCatalog
+from popular_games import PopularGameCatalog
 from steam_catalog import SteamGameCatalog
 
 
@@ -34,6 +35,7 @@ class GameLibraryEntry:
     source: str
     enhanced: bool = False
     app_id: str = ''
+    curated: bool = False
 
 
 def _slug(value: object) -> str:
@@ -65,8 +67,12 @@ def discover_games() -> list[GameLibraryEntry]:
 
     No install paths are returned to the UI. Paths are useful internally for
     foreground matching but are unnecessarily sensitive for a library view.
+
+    The bundled PopularGameCatalog marks well-known compatibility targets for
+    QA/documentation only. It never replaces authoritative launcher metadata.
     """
     entries: list[GameLibraryEntry] = []
+    popular = PopularGameCatalog()
 
     steam = SteamGameCatalog()
     for game in _catalog_snapshot(steam):
@@ -80,6 +86,7 @@ def discover_games() -> list[GameLibraryEntry]:
             source='Steam',
             app_id=appid,
             enhanced=_is_enhanced(name) or appid == '730',
+            curated=popular.contains(name),
         ))
 
     epic = EpicGameCatalog()
@@ -95,6 +102,7 @@ def discover_games() -> list[GameLibraryEntry]:
             source='Epic Games',
             app_id=app_name[:160],
             enhanced=_is_enhanced(name),
+            curated=popular.contains(name),
         ))
 
     heroic = HeroicGameCatalog()
@@ -110,6 +118,7 @@ def discover_games() -> list[GameLibraryEntry]:
             source='Heroic',
             app_id=app_name[:160],
             enhanced=_is_enhanced(name),
+            curated=popular.contains(name),
         ))
 
     # Keep one row per launcher identity, then sort predictably for search/UI.
