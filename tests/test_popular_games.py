@@ -29,6 +29,12 @@ def test_bundled_catalog_covers_major_launcher_ecosystems():
         'Rocket League',
         'Genshin Impact',
         'Roblox',
+        'PEAK',
+        'Deadlock',
+        'EA SPORTS FC 26',
+        'Grand Theft Auto V Enhanced',
+        'FiveM',
+        'Hearts of Iron IV',
     )
     assert all(catalog.contains(title) for title in expected)
 
@@ -45,21 +51,20 @@ def test_catalog_resolve_returns_canonical_title():
     catalog = PopularGameCatalog()
     assert catalog.resolve('  valorant ') == 'VALORANT'
     assert catalog.resolve('world OF warcraft') == 'World of Warcraft'
+    assert catalog.resolve('ea sports fc 26') == 'EA SPORTS FC 26'
     assert catalog.resolve('not in catalog') is None
 
 
 def test_launcher_title_fallback_only_accepts_curated_or_known_aliases():
-    detector = object.__new__(GamingDetector)
-    detector.popular_games = PopularGameCatalog()
+    assert GamingDetector._extract_game_from_title('Fortnite - Epic Games') == 'Fortnite'
+    assert GamingDetector._extract_game_from_title('world of warcraft - Battle.net') == 'World of Warcraft'
+    assert GamingDetector._extract_game_from_title('VALORANT - Riot Client') == 'VALORANT'
+    assert GamingDetector._extract_game_from_title('counter strike 2 - Steam') == 'Counter-Strike 2'
+    assert GamingDetector._extract_game_from_title('Deadlock - Steam') == 'Deadlock'
 
-    assert detector._extract_game_from_title('Fortnite - Epic Games') == 'Fortnite'
-    assert detector._extract_game_from_title('world of warcraft - Battle.net') == 'World of Warcraft'
-    assert detector._extract_game_from_title('VALORANT - Riot Client') == 'VALORANT'
-    assert detector._extract_game_from_title('counter strike 2 - Steam') == 'Counter-Strike 2'
-
-    assert detector._extract_game_from_title('Store - Battle.net') is None
-    assert detector._extract_game_from_title('News - Epic Games') is None
-    assert detector._extract_game_from_title('Random Advertisement - Riot Client') is None
+    assert GamingDetector._extract_game_from_title('Store - Battle.net') is None
+    assert GamingDetector._extract_game_from_title('News - Epic Games') is None
+    assert GamingDetector._extract_game_from_title('Random Advertisement - Riot Client') is None
 
 
 def test_loader_rejects_duplicate_titles(tmp_path: Path):
