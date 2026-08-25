@@ -188,7 +188,7 @@ def run_with_tray(service_run_func: Callable, config, stop_func: Optional[Callab
                 subprocess.Popen([sys.executable, '--gui'])
                 return
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            gui_script = os.path.join(script_dir, 'gui_modern.py')
+            gui_script = os.path.join(script_dir, 'gui_modern_v2.py')
             subprocess.Popen([sys.executable, gui_script], cwd=script_dir)
         except Exception as e:
             logging.error('Failed to open control panel: %s', e)
