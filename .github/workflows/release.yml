@@ -13,21 +13,24 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  PYTHON_VERSION: "3.12"
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - name: Install validation dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Verify dependencies
+      - name: Verify dependency environment
         run: python -m pip check
       - name: Stamp release version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -47,12 +50,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - name: Install release audit tooling
         run: python -m pip install "pip-audit>=2.9,<3" "bandit>=1.8,<2"
@@ -69,16 +72,16 @@ jobs:
     outputs:
       windows-signed: ${{ steps.signing.outputs.enabled }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Verify dependencies
+      - name: Verify dependency environment
         run: python -m pip check
       - name: Stamp release version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -92,180 +95,75 @@ jobs:
         shell: pwsh
         env:
           WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_BASE64)) {
-            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          }
-          else {
-            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          }
+          $ready = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_BASE64) -and `
+                   -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_PASSWORD)
+          "enabled=$($ready.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
       - name: Block unsigned stable Windows releases
         if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && steps.signing.outputs.enabled != 'true'
         shell: pwsh
-        run: |
-          throw "Stable Windows releases must be code-signed. Configure the signing integration first or publish a prerelease tag."
+        run: throw "Stable Windows releases must be code-signed. Configure and verify the signing integration first, or publish a prerelease tag."
       - name: Sign Windows executable
         if: steps.signing.outputs.enabled == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
           WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_PASSWORD)) {
-            throw "WINDOWS_SIGNING_PFX_BASE64 is configured but WINDOWS_SIGNING_PFX_PASSWORD is empty"
-          }
-          $certPath = Join-Path $env:RUNNER_TEMP "cybrex-signing.pfx"
-          [IO.File]::WriteAllBytes(
-            $certPath,
-            [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64)
-          )
-          try {
-            $signtool = Get-ChildItem `
-              "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" `
-              -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
-            if ($null -eq $signtool) {
-              throw "signtool.exe was not found on the GitHub runner"
-            }
-            & $signtool.FullName sign `
-              /fd SHA256 `
-              /f $certPath `
-              /p $env:WINDOWS_SIGNING_PFX_PASSWORD `
-              /tr http://timestamp.digicert.com `
-              /td SHA256 `
-              "dist/DiscordRichPresence.exe"
-            if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
-            $signature = Get-AuthenticodeSignature "dist/DiscordRichPresence.exe"
-            if ($signature.Status -ne 'Valid') {
-              throw "Windows signature verification failed: $($signature.Status)"
-            }
-          }
-          finally {
-            Remove-Item $certPath -Force -ErrorAction SilentlyContinue
-            Remove-Item Env:WINDOWS_SIGNING_PFX_BASE64 -ErrorAction SilentlyContinue
-            Remove-Item Env:WINDOWS_SIGNING_PFX_PASSWORD -ErrorAction SilentlyContinue
-          }
-      - name: Note unsigned prerelease Windows build
+        run: ./scripts/sign-windows.ps1 -Path "dist/DiscordRichPresence.exe"
+      - name: Note unsigned validation or prerelease build
         if: steps.signing.outputs.enabled != 'true'
         shell: pwsh
-        run: Write-Warning "No Windows signing certificate configured; this validation/prerelease build is unsigned. Stable tags are blocked until signing is configured."
-      - name: Verify and smoke-test executable
+        run: Write-Warning "Windows artifacts are unsigned. Stable tagged publication is blocked until signing succeeds."
+      - name: Smoke-test packaged executable
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist/DiscordRichPresence.exe")) {
-            throw "Packaged executable was not created"
-          }
-          $size = (Get-Item "dist/DiscordRichPresence.exe").Length
-          if ($size -lt 1000000) {
-            throw "Packaged executable is unexpectedly small"
-          }
-          $process = Start-Process `
-            -FilePath "dist/DiscordRichPresence.exe" `
-            -ArgumentList "--dry-run", "--once" `
-            -PassThru
+          if (-not (Test-Path "dist/DiscordRichPresence.exe" -PathType Leaf)) { throw "Packaged executable was not created" }
+          if ((Get-Item "dist/DiscordRichPresence.exe").Length -lt 1000000) { throw "Packaged executable is unexpectedly small" }
+          $process = Start-Process -FilePath "dist/DiscordRichPresence.exe" -ArgumentList "--dry-run", "--once" -PassThru
           if (-not $process.WaitForExit(20000)) {
             $process.Kill()
             throw "Packaged executable did not exit after a one-cycle dry run"
           }
-          if ($process.ExitCode -ne 0) {
-            throw "Packaged executable exited with code $($process.ExitCode)"
-          }
+          if ($process.ExitCode -ne 0) { throw "Packaged executable exited with code $($process.ExitCode)" }
       - name: Install pinned Inno Setup compiler
         shell: pwsh
         run: choco install innosetup --version=6.7.1 --yes --no-progress
       - name: Build Windows installer
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF -like 'refs/tags/v*') {
-            $env:GITHUB_REF_NAME.TrimStart('v')
-          } else {
-            '0.0.0-dev'
-          }
+          $version = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.0.0-dev' }
           $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
           & $iscc "/DAppVersion=$version" "packaging/windows/CYBREX-Presence.iss"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Inno Setup compiler failed with exit code $LASTEXITCODE"
-          }
-          if (-not (Test-Path "dist/CYBREX-Presence-Setup.exe")) {
-            throw "Windows installer was not created"
-          }
-          if ((Get-Item "dist/CYBREX-Presence-Setup.exe").Length -lt 1000000) {
-            throw "Windows installer is unexpectedly small"
-          }
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path "dist/CYBREX-Presence-Setup.exe" -PathType Leaf)) { throw "Windows installer was not created" }
+          if ((Get-Item "dist/CYBREX-Presence-Setup.exe").Length -lt 1000000) { throw "Windows installer is unexpectedly small" }
       - name: Sign Windows installer
         if: steps.signing.outputs.enabled == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
           WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_PASSWORD)) {
-            throw "WINDOWS_SIGNING_PFX_BASE64 is configured but WINDOWS_SIGNING_PFX_PASSWORD is empty"
-          }
-          $certPath = Join-Path $env:RUNNER_TEMP "cybrex-signing-installer.pfx"
-          [IO.File]::WriteAllBytes(
-            $certPath,
-            [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64)
-          )
-          try {
-            $signtool = Get-ChildItem `
-              "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" `
-              -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
-            if ($null -eq $signtool) {
-              throw "signtool.exe was not found on the GitHub runner"
-            }
-            & $signtool.FullName sign `
-              /fd SHA256 `
-              /f $certPath `
-              /p $env:WINDOWS_SIGNING_PFX_PASSWORD `
-              /tr http://timestamp.digicert.com `
-              /td SHA256 `
-              "dist/CYBREX-Presence-Setup.exe"
-            if ($LASTEXITCODE -ne 0) { throw "installer signtool failed with exit code $LASTEXITCODE" }
-            $signature = Get-AuthenticodeSignature "dist/CYBREX-Presence-Setup.exe"
-            if ($signature.Status -ne 'Valid') {
-              throw "Windows installer signature verification failed: $($signature.Status)"
-            }
-          }
-          finally {
-            Remove-Item $certPath -Force -ErrorAction SilentlyContinue
-            Remove-Item Env:WINDOWS_SIGNING_PFX_BASE64 -ErrorAction SilentlyContinue
-            Remove-Item Env:WINDOWS_SIGNING_PFX_PASSWORD -ErrorAction SilentlyContinue
-          }
-      - name: Silent-install and smoke-test installer
+        run: ./scripts/sign-windows.ps1 -Path "dist/CYBREX-Presence-Setup.exe"
+      - name: Silent-install, launch and uninstall
         shell: pwsh
         run: |
           $target = Join-Path $env:RUNNER_TEMP "CYBREX-Presence-Release-QA"
           $installer = Resolve-Path "dist/CYBREX-Presence-Setup.exe"
-          $setup = Start-Process `
-            -FilePath $installer `
-            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$target" `
-            -Wait -PassThru
-          if ($setup.ExitCode -ne 0) {
-            throw "Installer exited with code $($setup.ExitCode)"
-          }
+          $setup = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$target" -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Installer exited with code $($setup.ExitCode)" }
           $installed = Join-Path $target "DiscordRichPresence.exe"
-          if (-not (Test-Path $installed)) {
-            throw "Installed executable was not found"
-          }
-          $process = Start-Process `
-            -FilePath $installed `
-            -ArgumentList "--dry-run", "--once" `
-            -PassThru
+          if (-not (Test-Path $installed -PathType Leaf)) { throw "Installed executable was not found" }
+          $process = Start-Process -FilePath $installed -ArgumentList "--dry-run", "--once" -PassThru
           if (-not $process.WaitForExit(20000)) {
             $process.Kill()
             throw "Installed executable did not exit after a one-cycle dry run"
           }
-          if ($process.ExitCode -ne 0) {
-            throw "Installed executable exited with code $($process.ExitCode)"
-          }
+          if ($process.ExitCode -ne 0) { throw "Installed executable exited with code $($process.ExitCode)" }
           $uninstaller = Join-Path $target "unins000.exe"
-          $uninstall = Start-Process `
-            -FilePath $uninstaller `
-            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" `
-            -Wait -PassThru
-          if ($uninstall.ExitCode -ne 0) {
-            throw "Uninstaller exited with code $($uninstall.ExitCode)"
-          }
+          if (-not (Test-Path $uninstaller -PathType Leaf)) { throw "Uninstaller was not created" }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with code $($uninstall.ExitCode)" }
       - name: Validate and package Browser Companion
         shell: pwsh
         run: |
@@ -275,30 +173,19 @@ jobs:
           node --check browser_extension/options.js
           $stage = Join-Path $env:RUNNER_TEMP "CYBREX-Browser-Companion"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          foreach ($file in @(
-            "manifest.json",
-            "background.js",
-            "content.js",
-            "options.html",
-            "options.js",
-            "README.md"
-          )) {
+          foreach ($file in @("manifest.json", "background.js", "content.js", "options.html", "options.js", "README.md")) {
             Copy-Item "browser_extension/$file" $stage
           }
           Compress-Archive -Path "$stage/*" -DestinationPath "dist/CYBREX-Browser-Companion.zip" -Force
-      - name: Generate SHA-256 checksums
+      - name: Generate Windows SHA-256 checksums
         shell: pwsh
         run: |
-          foreach ($file in @(
-            "dist/DiscordRichPresence.exe",
-            "dist/CYBREX-Presence-Setup.exe",
-            "dist/CYBREX-Browser-Companion.zip"
-          )) {
-            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+          foreach ($file in @("dist/DiscordRichPresence.exe", "dist/CYBREX-Presence-Setup.exe", "dist/CYBREX-Browser-Companion.zip")) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
             $name = Split-Path $file -Leaf
             "$hash  $name" | Set-Content -Encoding ascii "$file.sha256"
           }
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-windows-and-extension
           path: |
@@ -315,16 +202,16 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Verify dependencies
+      - name: Verify dependency environment
         run: python -m pip check
       - name: Stamp release version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -333,7 +220,7 @@ jobs:
         run: python -c "import app_version, customtkinter, gui_modern, launcher, tray_icon, updater"
       - name: Build Linux executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
-      - name: Verify and smoke-test executable
+      - name: Smoke-test packaged executable
         run: |
           test -x dist/DiscordRichPresence
           test "$(stat -c %s dist/DiscordRichPresence)" -gt 1000000
@@ -341,26 +228,18 @@ jobs:
       - name: Rename and checksum Linux executable
         run: |
           mv dist/DiscordRichPresence dist/CYBREX-DiscordRichPresence-linux-x86_64
-          cd dist
-          sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > CYBREX-DiscordRichPresence-linux-x86_64.sha256
+          (cd dist && sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > CYBREX-DiscordRichPresence-linux-x86_64.sha256)
       - name: Build Linux user-level installer bundle
         run: |
           set -euo pipefail
           mkdir -p dist/CYBREX-Presence-linux-x86_64
           cp dist/CYBREX-DiscordRichPresence-linux-x86_64 dist/CYBREX-Presence-linux-x86_64/CYBREX-DiscordRichPresence-linux-x86_64
           cp packaging/linux/install-user.sh dist/CYBREX-Presence-linux-x86_64/install-user.sh
-          chmod 755 dist/CYBREX-Presence-linux-x86_64/CYBREX-DiscordRichPresence-linux-x86_64
-          chmod 755 dist/CYBREX-Presence-linux-x86_64/install-user.sh
-          (
-            cd dist/CYBREX-Presence-linux-x86_64
-            sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > SHA256SUMS
-          )
+          chmod 755 dist/CYBREX-Presence-linux-x86_64/CYBREX-DiscordRichPresence-linux-x86_64 dist/CYBREX-Presence-linux-x86_64/install-user.sh
+          (cd dist/CYBREX-Presence-linux-x86_64 && sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > SHA256SUMS)
           tar -C dist -czf dist/CYBREX-Presence-linux-x86_64.tar.gz CYBREX-Presence-linux-x86_64
-          (
-            cd dist
-            sha256sum CYBREX-Presence-linux-x86_64.tar.gz > CYBREX-Presence-linux-x86_64.tar.gz.sha256
-          )
-      - name: Verify Linux user-level installer bundle
+          (cd dist && sha256sum CYBREX-Presence-linux-x86_64.tar.gz > CYBREX-Presence-linux-x86_64.tar.gz.sha256)
+      - name: Install, launch and uninstall Linux bundle
         run: |
           set -euo pipefail
           export HOME="$RUNNER_TEMP/cybrex-release-home"
@@ -380,7 +259,7 @@ jobs:
           test ! -e "$target"
           test ! -e "$link"
           test ! -e "$desktop"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-linux
           path: |
@@ -398,11 +277,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: release-windows-and-extension
           path: release-assets
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: release-linux
           path: release-assets
@@ -414,7 +293,7 @@ jobs:
           sha256sum -c CYBREX-Browser-Companion.zip.sha256
           sha256sum -c CYBREX-DiscordRichPresence-linux-x86_64.sha256
           sha256sum -c CYBREX-Presence-linux-x86_64.tar.gz.sha256
-      - name: Create release provenance
+      - name: Create checksums and build provenance
         env:
           WINDOWS_SIGNED: ${{ needs.windows.outputs.windows-signed }}
         run: |
@@ -439,6 +318,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
           release_flags=()
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
             release_flags+=(--prerelease)
