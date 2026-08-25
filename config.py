@@ -132,14 +132,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             'browser': True, 'gaming': True, 'application': True
         },
         'activity_priority': {
-            # smart: foreground work beats background media, while media wins
-            # when its own player/browser is the foreground application.
             'policy': 'smart',
             'custom_order': ['gaming', 'terminal', 'coding', 'browser', 'media', 'application'],
         },
-        # Terminal command presence is opt-in because command text can contain
-        # arguments and secrets even after best-effort redaction. When enabled,
-        # keep the local cache short-lived by default.
         'terminal_command_ttl_secs': 900,
         'clear_on_lock_screen': True,
         'whitelist': {'apps': [], 'sites': [], 'games': []},
@@ -200,6 +195,7 @@ class Config:
             self._deep_merge(data, loaded)
             self._validate(data)
             self.data = data
+            self.config_path = path
             self._chmod_private(path, 0o600)
         except yaml.YAMLError as exc:
             raise ValueError(f'Invalid YAML configuration: {exc}') from exc
@@ -207,6 +203,7 @@ class Config:
     def save(self, path: Optional[Path] = None):
         """Persist configuration atomically without exposing secrets to other users."""
         path = Path(path or self.config_path)
+        self._validate(self.data)
         path.parent.mkdir(parents=True, exist_ok=True)
         self._chmod_private(path.parent, 0o700)
         serialized = yaml.safe_dump(self.data, sort_keys=False, allow_unicode=True)
@@ -221,6 +218,7 @@ class Config:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp_name, path)
+            self.config_path = path
             self._chmod_private(path, 0o600)
         except Exception:
             try:
@@ -232,6 +230,37 @@ class Config:
             except OSError:
                 pass
             raise
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Return a nested dot-separated configuration value."""
+        if key == 'discord.client_id':
+            discord = self.data.get('discord', {})
+            if isinstance(discord, dict):
+                override = str(discord.get('application_id_override', '') or '').strip()
+                return override or BUILTIN_DISCORD_APPLICATION_ID
+            return BUILTIN_DISCORD_APPLICATION_ID
+
+        value: Any = self.data
+        for part in str(key).split('.'):
+            if isinstance(value, dict) and part in value:
+                value = value[part]
+            else:
+                return default
+        return value
+
+    def set(self, key: str, value: Any) -> None:
+        """Set a nested dot-separated configuration value in memory."""
+        parts = [part for part in str(key).split('.') if part]
+        if not parts:
+            raise ValueError('Configuration key cannot be empty')
+        data = self.data
+        for part in parts[:-1]:
+            child = data.get(part)
+            if not isinstance(child, dict):
+                child = {}
+                data[part] = child
+            data = child
+        data[parts[-1]] = value
 
     @staticmethod
     def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]):
@@ -441,3 +470,18 @@ class Config:
             raise ValueError(f'{section}.ttl_secs must be an integer') from exc
         if not (5 <= ttl <= 3600):
             raise ValueError(f'{section}.ttl_secs must be between 5 and 3600')
+
+    @staticmethod
+    def _get_default_config_path() -> Path:
+        if os.name == 'nt':
+            base = os.environ.get('APPDATA')
+            config_dir = (
+                Path(base) / 'discord-rich-presence'
+                if base
+                else Path.home() / 'AppData' / 'Roaming' / 'discord-rich-presence'
+            )
+        else:
+            config_dir = Path.home() / '.config' / 'discord-rich-presence'
+        config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        Config._chmod_private(config_dir, 0o700)
+        return config_dir / 'config.yaml'
