@@ -17,6 +17,7 @@ from game_packs import GamePackRegistry
 from heroic_catalog import HeroicGame, HeroicGameCatalog
 from league_client import LeagueLiveClient
 from minecraft_bridge import get_minecraft_bridge
+from popular_games import PopularGameCatalog
 from steam_catalog import SteamGame, SteamGameCatalog
 
 
@@ -141,6 +142,7 @@ class GamingDetector:
         self.epic_catalog = EpicGameCatalog()
         self.heroic_catalog = HeroicGameCatalog()
         self.game_packs = GamePackRegistry()
+        self.popular_games = PopularGameCatalog()
         self.league_client = LeagueLiveClient()
         self.fivem_bridge = get_fivem_bridge(config, start=False)
         self.minecraft_bridge = get_minecraft_bridge(config, start=False)
@@ -334,8 +336,8 @@ class GamingDetector:
             return activity
 
         # A launcher is useful context, but it is not itself a game. Only use a
-        # title fallback when it contains a plausible game title, never generic
-        # launcher/store/library text.
+        # title fallback when it resolves to a known alias or exact curated game.
+        # This deliberately fails closed on store/news/advertisement window text.
         if launcher_name:
             title_game = self._extract_game_from_title(title)
             if title_game:
@@ -557,15 +559,16 @@ class GamingDetector:
                 return mapping[key]
         return None
 
-    @classmethod
-    def _extract_game_from_title(cls, title: str) -> Optional[str]:
+    def _extract_game_from_title(self, title: str) -> Optional[str]:
         if not title:
             return None
         candidate = title.strip()
         for suffix in (
             ' - Steam', ' — Steam', ' – Steam', ' | Steam',
             ' - Epic Games', ' — Epic Games', ' - Origin', ' - Battle.net',
-            ' - Heroic', ' — Heroic',
+            ' - Heroic', ' — Heroic', ' - EA app', ' - EA Desktop',
+            ' - Ubisoft Connect', ' - GOG Galaxy', ' - Riot Client',
+            ' - Xbox', ' - Minecraft Launcher',
         ):
             if candidate.lower().endswith(suffix.lower()):
                 candidate = candidate[:-len(suffix)].strip()
@@ -577,9 +580,11 @@ class GamingDetector:
         lowered = candidate.lower().strip(' -—–|')
         if not lowered or lowered in {
             'steam', 'store', 'library', 'community', 'friends', 'downloads',
-            'epic games', 'heroic', 'origin', 'battle.net',
+            'epic games', 'heroic', 'origin', 'ea app', 'ea desktop',
+            'ubisoft connect', 'gog galaxy', 'battle.net', 'riot client',
+            'xbox', 'minecraft launcher', 'news', 'shop',
         }:
             return None
-        if lowered in cls.TITLE_GAME_ALIASES:
-            return cls.TITLE_GAME_ALIASES[lowered]
-        return candidate[:160] or None
+        if lowered in self.TITLE_GAME_ALIASES:
+            return self.TITLE_GAME_ALIASES[lowered]
+        return self.popular_games.resolve(candidate)
