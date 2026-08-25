@@ -7,11 +7,12 @@ import logging
 import re
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
 from config import Config
+from loopback_http import BoundedLoopbackHTTPServer
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ class FiveMBridge:
 
     def __init__(self, config: Config):
         self.config = config
-        self._server: Optional[ThreadingHTTPServer] = None
+        self._server: Optional[BoundedLoopbackHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._latest: Optional[dict[str, Any]] = None
@@ -151,6 +152,7 @@ class FiveMBridge:
                 self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
                 self.send_header('Access-Control-Allow-Headers', 'Content-Type')
                 self.send_header('Cache-Control', 'no-store')
+                self.send_header('X-Content-Type-Options', 'nosniff')
                 self.send_header('Vary', 'Origin')
 
             def do_OPTIONS(self) -> None:  # noqa: N802
@@ -169,6 +171,11 @@ class FiveMBridge:
                     self.send_response(403 if self.path == '/presence' else 404)
                     self.end_headers()
                     return
+                content_type = str(self.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+                if content_type != 'application/json':
+                    self.send_response(415)
+                    self.end_headers()
+                    return
                 try:
                     length = int(self.headers.get('Content-Length') or 0)
                 except (TypeError, ValueError):
@@ -178,7 +185,17 @@ class FiveMBridge:
                     self.end_headers()
                     return
                 try:
-                    payload = json.loads(self.rfile.read(length).decode('utf-8'))
+                    raw = self.rfile.read(length)
+                except OSError:
+                    self.send_response(408)
+                    self.end_headers()
+                    return
+                if len(raw) != length:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+                try:
+                    payload = json.loads(raw.decode('utf-8'))
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     self.send_response(400)
                     self.end_headers()
@@ -192,8 +209,7 @@ class FiveMBridge:
                 self.end_headers()
 
         try:
-            server = ThreadingHTTPServer(('127.0.0.1', self._port()), Handler)
-            server.daemon_threads = True
+            server = BoundedLoopbackHTTPServer(('127.0.0.1', self._port()), Handler)
         except OSError as exc:
             _LOGGER.warning('FiveM companion bridge unavailable on loopback: %s', exc)
             return False
