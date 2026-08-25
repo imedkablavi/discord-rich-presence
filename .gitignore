@@ -1,7 +1,11 @@
-# Python bytecode
+# Python bytecode / test caches
 __pycache__/
 *.py[cod]
 *.pyo
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Distribution / packaging
 dist/
@@ -13,6 +17,19 @@ venv/
 .venv/
 env/
 
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.p8
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -23,8 +40,9 @@ Thumbs.db
 *.suo
 *.user
 
-# Logs
+# Logs and local diagnostics
 *.log
+*.trace
 
 # Local config (keep example, ignore personal config)
 config.yaml
