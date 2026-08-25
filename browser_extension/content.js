@@ -104,7 +104,7 @@
     const now = Date.now();
     // Mutation-heavy pages can trigger thousands of callbacks. Avoid walking
     // the DOM repeatedly when we already built a snapshot moments ago.
-    if (!force && now - lastBuildAt < 500) return;
+    if (!force && now - lastBuildAt < 750) return;
     if (!force && document.visibilityState !== 'visible' && !mediaWasPlaying) return;
     lastBuildAt = now;
 
@@ -112,7 +112,7 @@
     if (!snapshot.visible && !snapshot.media.playing) return;
     const serialized = JSON.stringify(snapshot);
     if (!force && serialized === lastSent && now - lastSentAt < 5000) return;
-    if (!force && now - lastSentAt < 1500) return;
+    if (!force && now - lastSentAt < 2000) return;
     lastSent = serialized;
     lastSentAt = now;
     try {
@@ -124,11 +124,15 @@
   }
 
   function schedulePublish() {
+    // Do not keep scheduling mutation work for hidden, non-playing tabs. Dynamic
+    // sites can mutate continuously in the background and previously caused
+    // needless content-script and bridge traffic across many open tabs.
+    if (document.visibilityState !== 'visible' && !mediaWasPlaying) return;
     if (publishTimer !== null) return;
     publishTimer = setTimeout(() => {
       publishTimer = null;
       publish(false);
-    }, 300);
+    }, 500);
   }
 
   api?.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
@@ -149,8 +153,10 @@
   const observer = new MutationObserver(schedulePublish);
   observer.observe(document.documentElement, { subtree: true, childList: true });
 
+  // 5 seconds remains safely below the desktop bridge's 15 second default TTL,
+  // while cutting steady-state extension/HTTP activity substantially.
   setInterval(() => {
     if (document.visibilityState === 'visible' || mediaWasPlaying) publish(false);
-  }, 2000);
+  }, 5000);
   publish(true);
 })();
