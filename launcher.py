@@ -155,7 +155,7 @@ def main() -> int:
     if '--gui' in sys.argv:
         sys.argv.remove('--gui')
         from config import Config
-        from gui_modern import ModernControlPanel
+        from gui_modern_v2 import ModernControlPanel
 
         app = ModernControlPanel(Config())
         app.mainloop()
