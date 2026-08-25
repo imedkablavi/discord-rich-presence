@@ -184,12 +184,9 @@ def run_with_tray(service_run_func: Callable, config, stop_func: Optional[Callab
 
     def on_open_panel():
         try:
-            if getattr(sys, 'frozen', False):
-                subprocess.Popen([sys.executable, '--gui'])
-                return
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            gui_script = os.path.join(script_dir, 'gui_modern_v2.py')
-            subprocess.Popen([sys.executable, gui_script], cwd=script_dir)
+            # Always route through launcher.py so the control-panel single-instance
+            # guard and resource-aware GUI are used in both source and packaged runs.
+            subprocess.Popen(_launcher_command('--gui'))
         except Exception as e:
             logging.error('Failed to open control panel: %s', e)
 
