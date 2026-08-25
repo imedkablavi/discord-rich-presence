@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 RELEASE_WORKFLOW = Path('.github/workflows/release.yml')
+WINDOWS_SIGN_SCRIPT = Path('scripts/sign-windows.ps1')
 
 
 def _workflow_text() -> str:
@@ -35,3 +36,25 @@ def test_release_publishes_checksums_and_provenance():
     assert 'SHA256SUMS.txt' in text
     assert 'BUILD-PROVENANCE.txt' in text
     assert 'windows_authenticode=${WINDOWS_SIGNED}' in text
+
+
+def test_release_critical_actions_are_commit_pinned():
+    text = _workflow_text()
+    assert 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' in text
+    assert 'actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97' in text
+    assert 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' in text
+    assert 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' in text
+    assert 'actions/checkout@v' not in text
+    assert 'actions/setup-python@v' not in text
+    assert 'actions/upload-artifact@v' not in text
+    assert 'actions/download-artifact@v' not in text
+
+
+def test_windows_signing_verifies_both_inner_exe_and_installer():
+    workflow = _workflow_text()
+    script = WINDOWS_SIGN_SCRIPT.read_text(encoding='utf-8')
+    assert './scripts/sign-windows.ps1 -Path "dist/DiscordRichPresence.exe"' in workflow
+    assert './scripts/sign-windows.ps1 -Path "dist/CYBREX-Presence-Setup.exe"' in workflow
+    assert 'Get-AuthenticodeSignature' in script
+    assert "https://timestamp.digicert.com" in script
+    assert "signature.Status -ne 'Valid'" in script
