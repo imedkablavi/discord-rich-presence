@@ -1,4 +1,4 @@
-from gui_modern_v2 import display_text, repair_utf8_mojibake
+from ui_text import display_text, repair_utf8_mojibake
 
 
 def test_plain_english_text_is_unchanged():
