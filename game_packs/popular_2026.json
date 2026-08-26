@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "description": "Current high-visibility 2026 compatibility targets verified against contemporary public player charts. Standard detection remains launcher-metadata-first.",
+  "games": [
+    "PEAK",
+    "Deadlock",
+    "EA SPORTS FC 26",
+    "Grand Theft Auto V Enhanced",
+    "FiveM",
+    "Hearts of Iron IV"
+  ]
+}

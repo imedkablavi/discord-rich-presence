@@ -4,6 +4,7 @@ from pypresence.types import ActivityType
 
 from config import Config
 from presence import PresenceBuilder
+from rpc_contract import sanitize_rpc_payload
 
 
 def _builder(tmp_path: Path) -> PresenceBuilder:
@@ -32,6 +33,58 @@ def test_spotify_uses_listening_activity_type(tmp_path: Path):
     })
     assert payload['activity_type'] == ActivityType.LISTENING
     assert payload['end'] > payload['start']
+
+
+def test_media_service_gets_clickable_home_button(tmp_path: Path):
+    payload = _builder(tmp_path).build({
+        'type': 'media',
+        'player': 'Chrome',
+        'service': 'YouTube',
+        'title': 'Video',
+        'is_playing': True,
+        'position': 5,
+        'duration': 100,
+    })
+
+    assert payload['buttons'] == [
+        {'label': 'Open YouTube', 'url': 'https://www.youtube.com'}
+    ]
+
+
+def test_media_auto_button_does_not_duplicate_configured_url(tmp_path: Path):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('discord.buttons', [
+        {'label': 'My YouTube', 'url': 'https://www.youtube.com'},
+    ])
+    payload = PresenceBuilder(cfg).build({
+        'type': 'media',
+        'player': 'Chrome',
+        'service': 'YouTube',
+        'title': 'Video',
+        'is_playing': True,
+        'position': 5,
+        'duration': 100,
+    })
+
+    assert payload['buttons'] == [
+        {'label': 'My YouTube', 'url': 'https://www.youtube.com'},
+    ]
+
+
+def test_strict_media_does_not_emit_service_button(tmp_path: Path):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('privacy.mode', 'strict')
+    payload = PresenceBuilder(cfg).build({
+        'type': 'media',
+        'player': 'Chrome',
+        'service': 'YouTube',
+        'title': 'Video',
+        'is_playing': True,
+        'position': 5,
+        'duration': 100,
+    })
+
+    assert 'buttons' not in payload
 
 
 def test_media_timeline_stays_stable_during_normal_playback(tmp_path: Path, monkeypatch):
@@ -86,6 +139,29 @@ def test_browser_url_reaches_clickable_payload_and_button(tmp_path: Path):
     assert payload['buttons'][0]['url'] == payload['details_url']
 
 
+def test_long_browser_url_cannot_break_final_discord_payload(tmp_path: Path):
+    long_url = 'https://example.com/chat?' + ('conversation-part-' * 20)
+    assert 256 < len(long_url) <= 512
+
+    built = _builder(tmp_path).build({
+        'type': 'browser',
+        'browser_name': 'Firefox',
+        'is_private': False,
+        'page_title': 'QA conversation',
+        'service': '',
+        'url': long_url,
+    })
+    payload = sanitize_rpc_payload(built)
+
+    assert payload['details'] == 'QA conversation'
+    assert payload['state'] == 'Firefox'
+    assert 'details_url' not in payload
+    assert 'large_url' not in payload
+    # Button URLs use a separate 512-character limit and must stay byte-for-byte
+    # complete rather than being shortened into a broken link.
+    assert payload['buttons'][0]['url'] == long_url
+
+
 def test_strict_browser_does_not_emit_urls_or_buttons(tmp_path: Path):
     cfg = Config(tmp_path / 'config.yaml')
     cfg.set('privacy.mode', 'strict')
@@ -100,3 +176,61 @@ def test_strict_browser_does_not_emit_urls_or_buttons(tmp_path: Path):
     assert 'details_url' not in payload
     assert 'large_url' not in payload
     assert 'buttons' not in payload
+
+
+def test_squad_uses_local_map_mode_server_and_population(tmp_path: Path, monkeypatch):
+    builder = _builder(tmp_path)
+    monkeypatch.setattr(builder.squad_telemetry, 'snapshot', lambda: {
+        'squad_telemetry': True,
+        'layer': 'Yehorivka_RAAS_v2',
+        'map': 'Yehorivka',
+        'mode': 'RAAS',
+        'server_name': 'EU Tactical Server #1',
+        'player_count': 78,
+        'max_players': 100,
+        'queue': 4,
+    })
+    payload = builder.build({
+        'type': 'gaming',
+        'game_name': 'Squad',
+        'launcher': 'Steam',
+        'game_source': 'Steam',
+        'steam_appid': 393380,
+    })
+    assert payload['details'] == 'Squad · RAAS'
+    assert payload['state'] == 'Yehorivka · EU Tactical Server #1 · 78/100 (+4 queue)'
+    assert '203.0.113.' not in repr(payload)
+
+
+def test_squad_strict_privacy_keeps_generic_game_contract(tmp_path: Path, monkeypatch):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('privacy.mode', 'strict')
+    builder = PresenceBuilder(cfg)
+    calls = {'count': 0}
+
+    def snapshot():
+        calls['count'] += 1
+        return {
+            'squad_telemetry': True,
+            'map': 'Gorodok',
+            'mode': 'AAS',
+            'server_name': 'Private Community Server',
+            'player_count': 90,
+            'max_players': 100,
+        }
+
+    monkeypatch.setattr(builder.squad_telemetry, 'snapshot', snapshot)
+    payload = builder.build({
+        'type': 'gaming',
+        'game_name': 'Squad',
+        'launcher': 'Steam',
+        'game_source': 'Steam',
+        'steam_appid': 393380,
+    })
+    assert payload['details'] == 'Game'
+    assert payload['state'] == 'Gaming'
+    assert 'Private Community Server' not in repr(payload)
+    assert '90/100' not in repr(payload)
+    # Strict mode strips the game identity before game-specific enrichment, so
+    # CYBREX does not even read the local Squad log in this privacy mode.
+    assert calls['count'] == 0

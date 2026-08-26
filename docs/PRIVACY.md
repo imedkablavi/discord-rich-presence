@@ -1,23 +1,46 @@
 # Privacy
 
-Discord Rich Presence reads local activity so it can build a status for Discord. There is no project-operated telemetry or analytics service.
+CYBREX Presence reads local activity so it can build a Discord status. The project does not operate an activity telemetry, analytics, browser-history or command-history backend.
 
-## What the service can read
+## What the application can read
 
-Depending on the enabled detectors and operating system, the service may read:
+Depending on enabled detectors and operating system, CYBREX may read:
 
-- the foreground application name and window title;
-- editor filenames and workspace names;
-- media player metadata and playback position;
-- browser window titles and recognized service names;
-- game process names;
-- optional terminal commands written by the supplied shell hooks.
+- foreground application name and window title
+- editor filenames and workspace names
+- media metadata and playback position
+- browser window titles and recognized service names
+- game identity and supported local game-state sources
+- optional terminal commands written by the supplied shell hooks
 
-The browser detector does not read the exact browser tab URL. Links shown in Rich Presence are inferred search or service links from visible window-title information.
+The optional Browser Companion can provide the current tab URL/title, recognized service/domain, tab focus/visibility and HTML audio/video metadata to the local desktop bridge. Records are bounded, short-lived and memory-only.
+
+Optional enhanced game integrations use only their documented local sources. Strict privacy suppresses deep game telemetry collection, including supported CS2, League, FiveM, Minecraft, Squad and War Thunder enrichment paths, instead of collecting rich state and hiding it only after collection.
+
+## Browser URL privacy
+
+Without Browser Companion, browser links are inferred only from visible foreground-window information.
+
+With Browser Companion, the exact URL is available locally for accurate detection. `privacy.browser_url_mode` controls what can survive privacy filtering on ordinary pages:
+
+- `none`: publish no browser URL
+- `domain`: publish only the origin, for example `https://www.youtube.com` (default)
+- `path`: include the path but remove query parameters and fragments
+- `full`: keep ordinary query parameters, redact sensitive token/auth/key values and remove the fragment
+
+If a page title itself requires redaction, the associated URL is removed.
+
+Recognized social and messaging services use a stricter contract regardless of ordinary browser URL mode. Conversation names, contact names, profile/post identifiers, deep social links and social-page media metadata are removed before Presence building.
+
+Private or incognito foreground windows are handled conservatively and do not reuse a normal-tab Companion snapshot.
 
 ## What reaches Discord
 
-Only the Rich Presence payload produced after detector rules and privacy filtering is sent through Discord Desktop RPC. That payload can contain activity text, image keys, timestamps, buttons, and configured URLs.
+Only the Rich Presence payload produced after detector rules and privacy filtering is sent to Discord. A final protocol sanitizer validates optional text, URLs, buttons, image values, timestamps and party fields before transport.
+
+The final payload may contain activity text, image keys or safe public image URLs, timestamps, buttons and configured public URLs.
+
+Known applications can use public HTTPS raster artwork URLs. Developer Portal asset keys remain the deterministic fallback when direct images are unsupported by the active Discord transport/client.
 
 If you do not want a category published, disable its detector. `rules.enabled_detectors.application` controls the generic fallback for applications that do not match a specialized detector.
 
@@ -25,17 +48,19 @@ If you do not want a category published, disable its detector. `rules.enabled_de
 
 ### `off`
 
-Keeps detected activity details with no project-side redaction. Use this only if you are comfortable publishing the detected text.
+Minimal project-side redaction. Use this only if you are comfortable publishing detected activity text and configured browser context.
 
 ### `balanced`
 
-Keeps useful context while applying configured redaction patterns and reducing path exposure. This is the default mode.
+Default mode. Keeps useful context while applying secret/path redaction and reducing browser URL exposure.
+
+For terminal commands, values following common sensitive flags such as token, password, authorization, API-key, access-key and private-key arguments are redacted in addition to configured rules.
 
 ### `strict`
 
-Uses generic descriptions and removes identifying browser URLs and buttons.
+Uses generic activity descriptions, removes identifying browser URLs/buttons and suppresses deep game telemetry collection.
 
-The service can also clear Rich Presence when a known lock-screen window is detected.
+The service also clears Rich Presence when a supported lock-screen state is detected.
 
 ## Local files
 
@@ -46,17 +71,37 @@ The service can also clear Rich Presence when a known lock-screen window is dete
 - Runtime state: `%LOCALAPPDATA%\discord-rich-presence\runtime\`
 - Terminal hook cache: `%LOCALAPPDATA%\discord-rich-presence\cache\`
 
-### Linux
+These paths use the per-user Windows profile and ACL model.
+
+### Linux / POSIX
 
 - Configuration: `~/.config/discord-rich-presence/config.yaml`
 - Logs: `~/.local/state/discord-rich-presence/app.log`
 - Runtime state: `~/.local/state/discord-rich-presence/runtime/`
 - Terminal hook cache: `~/.cache/discord-rich-presence/`
 
-Logs rotate locally. Runtime state is used by the control panel and single-instance guard. Terminal command cache entries expire according to `rules.terminal_command_ttl_secs`.
+CYBREX hardens sensitive POSIX directories to user-only access (`0700`) and sensitive files to `0600` where supported.
+
+## Loopback services
+
+Browser, game and companion bridges bind to IPv4 loopback only. They use bounded request sizes, short timeouts, fixed or bounded worker counts, short TTLs and explicit parsing rules.
+
+Loopback is not a security boundary against another malicious process already running as the same operating-system user.
+
+War Thunder enrichment reads only fixed `127.0.0.1:8111` telemetry endpoints used by the integration and applies response-size, timeout and cache bounds. Tactical map objects, chat and HUD/damage feeds are outside the Presence data path.
+
+## Logs
+
+Logs rotate locally and are bounded. Persistent logs intentionally avoid complete Rich Presence payloads, so normal logging does not persist full page titles, commands, buttons or activity URLs.
+
+An explicit `--dry-run` prints the full sanitized payload to the local terminal for diagnosis. Review that output before sharing it publicly.
+
+Runtime state is used by the control panel and instance guard. It may include a short activity summary while the service runs and is removed on clean shutdown.
 
 ## Terminal hooks
 
-Terminal command tracking is optional. Bash, Zsh, and PowerShell hooks write commands to local per-shell cache files. The detector attempts to match the foreground terminal process tree before using a command entry. If a PID-scoped hook cache exists but does not match the focused terminal, the detector does not fall back to another terminal's command.
+Terminal command tracking is optional. Bash, Zsh and PowerShell hooks write commands to local per-shell cache files. The detector attempts to match the focused terminal process tree before using a command entry.
 
-Do not enable terminal tracking on a machine where displaying command text in Discord is unacceptable, even with redaction enabled.
+Raw command cache entries expire according to `rules.terminal_command_ttl_secs`; the hardened default is 900 seconds. Expired PID-scoped entries are deleted and the cache remains bounded.
+
+Do not enable terminal tracking on a machine where publishing command text to Discord is unacceptable, even with redaction enabled.

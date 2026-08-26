@@ -1,0 +1,66 @@
+name: Integration request
+description: Request support for a launcher, browser, media app, desktop environment, or local companion.
+title: "[Integration] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Integration requests should explain both the user value and the data source. CYBREX prefers documented local APIs, local manifests, OS media/session APIs, and loopback companions over scraping or invasive hooks.
+
+  - type: input
+    id: integration
+    attributes:
+      label: Integration
+      placeholder: e.g. Battle.net installed-game catalog
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Game launcher / store
+        - Browser / website
+        - Media player
+        - Desktop environment / compositor
+        - Game companion / mod / plugin
+        - Discord transport
+        - Packaging / installer
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What can users not do today, and why would this integration matter?
+    validations:
+      required: true
+
+  - type: textarea
+    id: source
+    attributes:
+      label: Proposed data source / API
+      description: Link or describe the documented API, manifest, local IPC, plugin API, or supported system interface.
+    validations:
+      required: true
+
+  - type: textarea
+    id: presence
+    attributes:
+      label: Desired Presence behavior
+      description: What should Discord show when the integration is active?
+    validations:
+      required: true
+
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and security considerations
+      description: Identify any account IDs, URLs, paths, server details, tokens, or other sensitive fields the source may expose and which fields should never leave the local machine.
+    validations:
+      required: true

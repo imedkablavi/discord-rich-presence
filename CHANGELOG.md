@@ -2,90 +2,72 @@
 
 ## Unreleased
 
-### Runtime and detection
+### Desktop experience
 
-- Clear Discord Rich Presence when activity disappears, becomes blocked, the lock screen is detected, or the service exits normally.
-- Compare complete normalized payloads so button, URL, timestamp, and party changes are not missed.
-- Align payload timestamps and clickable URLs with `pypresence 4.6.2`.
-- Add Discord activity types for listening, watching, and playing.
-- Add single-instance locking, runtime heartbeat/status, and graceful stop requests.
-- Stabilize media timelines to avoid unnecessary RPC updates during normal playback.
-- Isolate terminal command caches per shell PID and avoid cross-terminal command leakage.
-- Improve editor-title parsing for hyphenated filenames and Windows paths.
-- Remove unreliable process-list guessing for generic Wayland sessions.
-- Keep unsupported platforms from falling through to X11 detection.
-- Report the active foreground-detection capability/backend to the control panel.
-- Require an actual Sway session before using `swaymsg`; merely having the command installed is not sufficient.
-- Keep GNOME Wayland fail-safe when no stable trusted global active-window API is available.
-- Expand known-game executable mappings while replacing broad substring matching with normalized exact executable-stem matching.
-- Close unhealthy Discord RPC transports after update/clear failures before reconnecting.
-- Make every Activity detector switch authoritative: disabled game/media/terminal/coding/browser/application detectors are no longer executed.
-- Stop the control panel from claiming an activity is being shown when Discord RPC is disconnected.
+- Added the modern control panel with clearer Overview, Integrations, Activity, Privacy, Settings, Diagnostics and About pages.
+- Added application and navigation artwork without requiring remote icon-font dependencies.
+- Improved Arabic text rendering with deterministic shaping, BiDi handling and broader font fallbacks.
+- Added single-instance control for the GUI and service lifecycle.
+- Added Stable and Preview update-channel controls to the application UI.
 
-### Privacy and configuration
+### Discord transport
 
-- Rebuild configuration from defaults on hot reload and validate critical settings.
-- Make `off`, `balanced`, and `strict` privacy behavior consistent with the UI and documentation.
-- Validate privacy regexes, detector flags, button/override URLs, terminal cache TTL, and party values.
-- Add lock-screen suppression and a separate toggle for generic application activity.
-- Make GUI settings changes transactional when validation fails.
-- Add an optional authenticated browser companion bound to loopback only.
-- Make exact browser URL access an explicit opt-in; origin-only is the default companion URL policy.
-- Strip title, service, and URL from private/incognito companion payloads regardless of extension input.
-- Add privacy regression tests for companion authentication, URL minimization, and private browsing.
+- Added an optional Discord Social SDK helper transport that can set the top-level activity name to the actual current app or game.
+- Kept legacy Discord RPC as an automatic fallback when the helper is unavailable or fails.
+- Added bounded helper protocol parsing, strict field allowlisting, timeout recovery and deterministic process/thread cleanup.
+- Added a retry cooldown so repeated Social SDK failures do not create helper spawn/kill churn.
+- Hardened legacy pypresence cleanup after connection, update and clear failures.
 
-### Desktop, startup, and GUI
+### Games
 
-- Add editable Client ID, two custom buttons, service controls, log access, and a real Discord RPC connection test.
-- Show live service PID, heartbeat, RPC state, activity summary, recent runtime errors, and foreground backend in the control panel.
-- Persist tray privacy changes and report the actual configured mode.
-- Avoid reinstalling dependencies on every Windows launch and recreate outdated virtual environments when needed.
-- Add a packaged application entry point that supports tray/service mode and `--gui`.
-- Keep the control panel available from the tray in packaged builds.
-- Add per-user startup registration for Windows and Linux desktop sessions.
-- Add control-panel settings for browser companion privacy and signed updates.
-- Show application version and signed-update status in the control panel.
-- Add graceful packaged-service shutdown for the Windows uninstaller and unconditional autostart registry cleanup.
-- Rework the control panel into Overview, Activity, Privacy, Preferences, and About sections with shorter user-facing copy and clearer grouping.
-- Add a complete update card with check, release notes, download/verification progress, `Update now`, restart, and error recovery states.
-- Install the Windows build per-user so normal signed self-updates do not require administrator access.
+- Added a curated catalog containing more than 300 popular compatibility targets while keeping launcher metadata authoritative.
+- Added conservative exact-process fallbacks and exact curated launcher-title matching instead of broad substring process guessing.
+- Added War Thunder identity support through Steam AppID `236390` and exact client process names.
+- Added bounded, read-only War Thunder enrichment from fixed local `127.0.0.1:8111` telemetry. Presence may include branch, a conservative vehicle label and mission/battle state. Tactical map objects, chat and HUD/damage streams are not used.
+- Added bounded Squad local-log enrichment with strict evidence and staleness rules.
+- Kept enhanced integrations for Counter-Strike 2 GSI, League local Live Client data, FiveM companion state and Minecraft Fabric companion state.
+- Fixed `MinecraftLauncher` so the launcher is not mistaken for the running Minecraft game.
+- Added application-specific artwork aliases for common games, launchers, browsers, editors, terminals and media applications.
 
-### Release, updater, and QA
+### Browser and social presence
 
-- Set the supported Python baseline to 3.10+.
-- Add pytest regression tests and GitHub Actions QA on Windows/Ubuntu with Python 3.10/3.12.
-- Build and smoke-test Windows and Linux PyInstaller executables in CI.
-- Add Windows Inno Setup installer packaging in addition to the portable executable.
-- Add Linux portable `tar.gz`, Debian `.deb`, and Fedora/Bazzite-compatible RPM packages.
-- Add tagged GitHub Releases with SHA-256 checksums.
-- Add Ed25519-signed update manifests with HTTPS, signed-size, and SHA-256 verification.
-- Reject HTTPS-to-HTTP redirect downgrade for manifests and update assets.
-- Add staged portable self-update with rollback backup, immediate restart-health rollback, and fail-closed behavior.
-- Add user-approved manual update staging independently of the optional startup auto-update setting.
-- Report real byte progress while a verified update asset is downloaded.
-- Never self-replace source checkouts or unwritable/package-managed installs.
-- Require the update signing private key secret before a tagged release can publish.
-- Add regression tests proving disabled Activity detectors are not called and manual update staging reports real state.
-- Add short cross-platform resource-leak soak tests to PR QA and a scheduled/manual long soak workflow.
-- Track RSS, thread count, and file-descriptor/handle growth during soak runs.
-- Add security, privacy, troubleshooting, browser companion, release, and contribution documentation.
-- Add Dependabot and structured bug/feature issue templates.
+- Added the optional Manifest V3 Browser Companion for Chromium-family browsers and Firefox.
+- Added a loopback-only desktop bridge with bounded records, request size, workers, socket timeouts and record TTLs.
+- Added focused service/tab/media attribution while keeping Browser Companion records local and short-lived.
+- Added privacy-safe generic Presence for major social and messaging web applications.
+- Social titles, contact/conversation names, profile/post identifiers, deep social URLs and social-page media metadata are discarded before Presence building.
+- Throttled background/hidden Browser Companion activity to reduce unnecessary wakeups and allocations.
 
-## 2.0.0 — Windows support
+### Privacy and security
 
-The repository added Windows foreground-window and media integrations, gaming detection, Git helpers, system-tray support, a modern GUI, and broader editor/language mappings.
+- Strict privacy now suppresses collection of deep game telemetry instead of collecting rich state and hiding it later.
+- Added final public-HTTPS URL validation for Rich Presence links and external artwork.
+- Unsafe optional URLs fail soft without preventing the service from starting.
+- Persistent logs avoid complete Rich Presence payloads and sensitive fields.
+- Added dependency auditing, high-severity Bandit checks and privacy/security regression tests to CI.
 
-Some documentation from the original 2.0.0 notes referenced installer/support files that are not present in the current repository snapshot; those claims have been removed here so the changelog only describes code that is currently available.
+### Reliability and memory
 
-## 1.0.0 — Initial Linux implementation
+- Replaced thread-per-request loopback listeners with bounded fixed-worker servers where applicable.
+- Reused a bounded GUI integration-probe worker instead of creating unbounded background work.
+- Linux media detection now uses stateless `playerctl` probing and no longer keeps the former pydbus/GLib polling path.
+- Added a process memory guard that records RSS, thread and file-descriptor pressure and can request allocator page return on Linux under pressure.
+- Added packaged GUI and tray process-tree memory soaks.
+- Added War Thunder telemetry to the core memory soak.
+- Current automated Linux core stress covers 5,000 Browser Companion requests, 30,000 Presence builds and 20,000 War Thunder telemetry snapshots while checking RSS, thread and file-descriptor growth.
 
-Initial Linux/X11 activity detection, browser/media/coding/terminal detectors, Discord RPC publishing, and privacy configuration.
+### Packaging and updates
 
-## Planned
+- Added Windows installer and portable builds plus Linux x86_64 user-level installer and portable builds.
+- Added checksum verification, combined release checksums and build provenance.
+- Added verified self-update with rollback behavior on Windows and Linux.
+- Added Windows Authenticode integration support. Stable Windows publication is blocked when signing is not configured and verified; explicitly marked prereleases may be unsigned.
+- Added CI installation, launch and uninstall qualification for Windows and Linux packages.
+- Reviewed public documentation and removed obsolete internal release-planning material from the release tree.
 
-- Authenticode/code-signed Windows binaries and installer once signing credentials are available.
-- Native macOS foreground-window support.
-- Reliable trusted integrations for additional Wayland compositors when stable APIs exist.
-- Browser extension packages that implement the documented local companion protocol.
-- AppImage packaging after distribution-specific validation.
-- Detector/plugin extension API.
+### Known limitations
+
+- Automated tests do not replace real-device qualification for Discord Desktop, games, launchers, desktop compositors or hardware combinations.
+- The optional Discord Social SDK transport must be included in a packaged build for dynamic top-level activity names. Legacy RPC may still display the registered CYBREX application name.
+- macOS foreground-window support is not implemented.
+- Wayland foreground detection depends on compositor-specific trustworthy APIs.

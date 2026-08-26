@@ -1,123 +1,172 @@
-import base64
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import updater
-from updater import (
-    UpdateError,
-    _powershell_literal,
-    atomic_replace_with_rollback,
-    is_newer_version,
-    parse_manifest,
-    schedule_self_replace,
-    select_asset,
-    verify_manifest,
-)
+from updater import ReleaseAsset, UpdateError, UpdateInfo
 
 
-def _signed_manifest():
-    private = Ed25519PrivateKey.generate()
-    public = private.public_key().public_bytes_raw()
-    raw = {
-        "version": "2.1.0",
-        "assets": [
+def _release(version: str = '1.2.3') -> bytes:
+    binary_name, checksum_name = 'binary.bin', 'binary.bin.sha256'
+    return json.dumps({
+        'tag_name': f'v{version}',
+        'html_url': f'https://github.com/imedkablavi/discord-rich-presence/releases/tag/v{version}',
+        'draft': False,
+        'prerelease': False,
+        'assets': [
             {
-                "name": "DiscordRichPresence.exe",
-                "url": "https://example.invalid/DiscordRichPresence.exe",
-                "sha256": "a" * 64,
-                "size": 1234,
-                "platform": "windows",
-                "arch": "x86_64",
-                "kind": "portable",
-            }
+                'name': binary_name,
+                'browser_download_url': f'https://github.com/imedkablavi/discord-rich-presence/releases/download/v{version}/{binary_name}',
+                'size': 12,
+                'digest': 'sha256:' + ('a' * 64),
+            },
+            {
+                'name': checksum_name,
+                'browser_download_url': f'https://github.com/imedkablavi/discord-rich-presence/releases/download/v{version}/{checksum_name}',
+                'size': 90,
+            },
         ],
-    }
-    payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
-    raw["signature"] = base64.b64encode(private.sign(payload)).decode()
-    return json.dumps(raw).encode(), base64.b64encode(public).decode()
+    }).encode('utf-8')
 
 
-def test_manifest_signature_is_required_and_verified():
-    data, public = _signed_manifest()
-    manifest = parse_manifest(data)
-    verify_manifest(manifest, public)
-    assert select_asset(manifest, "windows", "x86_64").name == "DiscordRichPresence.exe"
+def test_version_parser_orders_stable_versions_and_prereleases():
+    assert updater._version_tuple('v1.2.3') == (1, 2, 3, 1)
+    assert updater._version_tuple('v1.2.3-rc3') == (1, 2, 3, 0)
+    assert updater._version_tuple('1.2.3') > updater._version_tuple('1.2.3-rc3')
+    assert updater._version_tuple('2.0.0') > updater._version_tuple('1.99.99')
+    with pytest.raises(UpdateError):
+        updater._version_tuple('latest')
 
 
-def test_manifest_tampering_fails_closed():
-    data, public = _signed_manifest()
-    raw = json.loads(data)
-    raw["assets"][0]["size"] = 9999
-    manifest = parse_manifest(json.dumps(raw).encode())
-    with pytest.raises(UpdateError, match="signature"):
-        verify_manifest(manifest, public)
+def test_update_urls_are_https_and_github_only():
+    updater._validate_github_url('https://api.github.com/repos/a/b/releases/latest')
+    updater._validate_github_url('https://release-assets.githubusercontent.com/example')
+    with pytest.raises(UpdateError):
+        updater._validate_github_url('http://github.com/example')
+    with pytest.raises(UpdateError):
+        updater._validate_github_url('https://example.com/update.exe')
+    with pytest.raises(UpdateError):
+        updater._validate_github_url('https://user:secret@github.com/example')
+    with pytest.raises(UpdateError):
+        updater._validate_github_url('https://github.com:444/example')
 
 
-def test_manifest_rejects_non_https_assets():
-    data, _ = _signed_manifest()
-    raw = json.loads(data)
-    raw["assets"][0]["url"] = "http://example.invalid/app.exe"
-    with pytest.raises(UpdateError, match="HTTPS"):
-        parse_manifest(json.dumps(raw).encode())
+def test_check_for_update_requires_expected_platform_assets(monkeypatch):
+    monkeypatch.setattr(updater, '_read_limited', lambda *_: _release('1.2.3'))
+    monkeypatch.setattr(updater, '_platform_asset_names', lambda: ('binary.bin', 'binary.bin.sha256'))
+    info = updater.check_for_update('1.0.0')
+    assert info is not None
+    assert info.latest_version == '1.2.3'
+    assert info.binary.name == 'binary.bin'
+    assert info.checksum.name == 'binary.bin.sha256'
 
 
-def test_version_comparison_handles_prerelease():
-    assert is_newer_version("2.1.0", "2.0.0")
-    assert is_newer_version("2.1.0", "2.1.0-rc1")
-    assert not is_newer_version("2.1.0-rc1", "2.1.0")
+def test_check_for_update_promotes_same_core_rc_to_stable(monkeypatch):
+    monkeypatch.setattr(updater, '_read_limited', lambda *_: _release('2.1.0'))
+    monkeypatch.setattr(updater, '_platform_asset_names', lambda: ('binary.bin', 'binary.bin.sha256'))
+    info = updater.check_for_update('2.1.0-rc3')
+    assert info is not None
+    assert info.current_version == '2.1.0-rc3'
+    assert info.latest_version == '2.1.0'
 
 
-def test_atomic_replace_keeps_rollback(tmp_path: Path):
-    current = tmp_path / "app.bin"
-    staged = tmp_path / "app.new"
-    current.write_bytes(b"old")
-    staged.write_bytes(b"new")
-    backup = atomic_replace_with_rollback(current, staged)
-    assert current.read_bytes() == b"new"
-    assert backup.read_bytes() == b"old"
+def test_check_for_update_never_downgrades(monkeypatch):
+    monkeypatch.setattr(updater, '_read_limited', lambda *_: _release('1.2.3'))
+    monkeypatch.setattr(updater, '_platform_asset_names', lambda: ('binary.bin', 'binary.bin.sha256'))
+    assert updater.check_for_update('1.2.3') is None
+    assert updater.check_for_update('2.0.0') is None
 
 
-def test_powershell_literal_escapes_single_quotes():
-    assert _powershell_literal("C:\\Users\\O'Brien\\app.exe") == "'C:\\Users\\O''Brien\\app.exe'"
+def test_release_rejects_missing_checksum(monkeypatch):
+    raw = json.loads(_release('1.2.3').decode('utf-8'))
+    raw['assets'] = raw['assets'][:1]
+    monkeypatch.setattr(updater, '_read_limited', lambda *_: json.dumps(raw).encode())
+    monkeypatch.setattr(updater, '_platform_asset_names', lambda: ('binary.bin', 'binary.bin.sha256'))
+    with pytest.raises(UpdateError, match='missing required asset'):
+        updater.check_for_update('1.0.0')
 
 
-def test_windows_helper_contains_restart_health_rollback(monkeypatch, tmp_path: Path):
-    current = tmp_path / "O'Brien" / "DiscordRichPresence.exe"
-    staged = tmp_path / "stage.exe"
-    current.parent.mkdir()
-    current.write_bytes(b"old")
-    staged.write_bytes(b"new")
-    calls = []
+def test_checksum_sidecar_must_name_the_binary(monkeypatch):
+    info = UpdateInfo(
+        current_version='1.0.0',
+        latest_version='1.2.3',
+        tag_name='v1.2.3',
+        release_url='https://github.com/imedkablavi/discord-rich-presence/releases/tag/v1.2.3',
+        binary=ReleaseAsset('binary.bin', 'https://github.com/a', 4),
+        checksum=ReleaseAsset('binary.bin.sha256', 'https://github.com/b', 80),
+    )
+    digest = hashlib.sha256(b'data').hexdigest()
+    monkeypatch.setattr(
+        updater,
+        '_read_limited',
+        lambda *_: f'{digest}  other.bin\n'.encode('ascii'),
+    )
+    with pytest.raises(UpdateError, match='checksum file is invalid'):
+        updater._expected_checksum(info)
 
-    monkeypatch.setattr(updater.sys, "platform", "win32")
-    monkeypatch.setattr(updater.subprocess, "Popen", lambda args, **kwargs: calls.append((args, kwargs)))
 
-    helper = schedule_self_replace(current, staged, [123], ["--tray"])
-    text = helper.read_text(encoding="utf-8")
-    assert "O''Brien" in text
-    assert "Start-Sleep -Seconds 3" in text
-    assert "if($child.HasExited)" in text
-    assert "Move-Item -Force $backup $current" in text
-    assert calls and calls[0][0][0] == "powershell.exe"
+def test_linux_atomic_replace_keeps_new_payload(tmp_path: Path):
+    target = tmp_path / 'CYBREX'
+    staged = tmp_path / '.CYBREX.2.0.0.new'
+    target.write_bytes(b'old')
+    staged.write_bytes(b'new')
+    updater._install_linux(target, staged)
+    assert target.read_bytes() == b'new'
+    assert not staged.exists()
+    assert not (tmp_path / 'CYBREX.old').exists()
 
 
-def test_linux_helper_contains_restart_health_rollback(monkeypatch, tmp_path: Path):
-    current = tmp_path / "Discord Rich Presence"
-    staged = tmp_path / "stage"
-    current.write_bytes(b"old")
-    staged.write_bytes(b"new")
-    calls = []
+def test_linux_relaunch_uses_verified_replacement(monkeypatch, tmp_path: Path):
+    target = tmp_path / 'CYBREX'
+    target.write_bytes(b'new')
+    launched = []
 
-    monkeypatch.setattr(updater.sys, "platform", "linux")
-    monkeypatch.setattr(updater.subprocess, "Popen", lambda args, **kwargs: calls.append((args, kwargs)))
+    def fake_popen(command, **kwargs):
+        launched.append((command, kwargs))
+        return object()
 
-    helper = schedule_self_replace(current, staged, [456], ["--tray"])
-    text = helper.read_text(encoding="utf-8")
-    assert "while kill -0 456" in text
-    assert "sleep 3" in text
-    assert "if ! kill -0 \"$child\"" in text
-    assert "mv \"$backup\" \"$current\"" in text
-    assert calls and calls[0][0][0] == "sh"
+    monkeypatch.setattr(updater.subprocess, 'Popen', fake_popen)
+    updater._relaunch_linux(target, ['--gui'])
+
+    assert launched[0][0] == [str(target), '--gui']
+    assert launched[0][1]['close_fds'] is True
+    assert launched[0][1]['start_new_session'] is True
+
+
+def test_linux_relaunch_is_noop_without_restart_args(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        updater.subprocess,
+        'Popen',
+        lambda *_args, **_kwargs: pytest.fail('Popen should not be called'),
+    )
+    updater._relaunch_linux(tmp_path / 'CYBREX', [])
+
+
+def test_linux_immediate_crash_restores_previous_binary(monkeypatch, tmp_path: Path):
+    target = tmp_path / 'CYBREX'
+    staged = tmp_path / '.CYBREX.2.0.0.new'
+    target.write_bytes(b'old')
+    staged.write_bytes(b'new')
+    rollback = updater._install_linux(target, staged, keep_backup=True)
+    assert rollback is not None
+    assert target.read_bytes() == b'new'
+
+    launches = []
+
+    class ExitedProcess:
+        def wait(self, timeout):
+            assert timeout == 3.0
+            return 1
+
+    def fake_popen(command, **kwargs):
+        launches.append((command, kwargs))
+        return ExitedProcess()
+
+    monkeypatch.setattr(updater.subprocess, 'Popen', fake_popen)
+    with pytest.raises(UpdateError, match='rollback restored'):
+        updater._relaunch_linux(target, ['--gui'], rollback_path=rollback)
+
+    assert target.read_bytes() == b'old'
+    assert len(launches) == 2

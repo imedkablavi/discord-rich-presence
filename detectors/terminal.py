@@ -1,11 +1,11 @@
 """Terminal activity detection using optional per-shell command hooks."""
 
+import logging
 import os
 import platform
 import time
-import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 import psutil
 
@@ -27,13 +27,33 @@ class TerminalDetector:
         self.platform_name = platform.system().lower()
         if self.platform_name == 'windows':
             base = os.environ.get('LOCALAPPDATA')
-            self.cache_dir = (Path(base) if base else Path.home() / 'AppData' / 'Local') / 'discord-rich-presence' / 'cache'
+            self.cache_dir = (
+                (Path(base) if base else Path.home() / 'AppData' / 'Local')
+                / 'discord-rich-presence' / 'cache'
+            )
             self.cmd_file = self.cache_dir / 'rp_last_cmd.txt'
         else:
             self.cache_dir = Path.home() / '.cache' / 'discord-rich-presence'
             self.cmd_file = self.cache_dir / 'rp_last_cmd'
         self.command_dir = self.cache_dir / 'commands'
-        self.command_dir.mkdir(parents=True, exist_ok=True)
+        self.command_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self._secure_cache_paths()
+
+    def _secure_cache_paths(self) -> None:
+        if os.name != 'posix':
+            return
+        for path in (self.cache_dir, self.command_dir):
+            try:
+                path.mkdir(parents=True, exist_ok=True, mode=0o700)
+                os.chmod(path, 0o700)
+            except OSError:
+                pass
+        for path in [self.cmd_file, *self.command_dir.glob('*.txt')]:
+            try:
+                if path.exists():
+                    os.chmod(path, 0o600)
+            except OSError:
+                pass
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not window_info or not self.config.get('rules.enabled_detectors.terminal', True):
@@ -59,9 +79,9 @@ class TerminalDetector:
 
     def _ttl(self) -> int:
         try:
-            return max(0, int(self.config.get('rules.terminal_command_ttl_secs', 21600) or 21600))
+            return max(0, int(self.config.get('rules.terminal_command_ttl_secs', 900) or 900))
         except (TypeError, ValueError):
-            return 21600
+            return 900
 
     def _is_fresh(self, path: Path) -> bool:
         ttl = self._ttl()
@@ -118,7 +138,7 @@ class TerminalDetector:
             return []
 
     def _cleanup_command_cache(self):
-        """Bound stale per-shell cache files without touching fresh active entries."""
+        """Bound stale command files and delete expired legacy command data."""
         try:
             files = list(self.command_dir.glob('*.txt'))
             stale = [path for path in files if not self._is_fresh(path)]
@@ -135,6 +155,12 @@ class TerminalDetector:
                         path.unlink()
                     except OSError:
                         pass
+            if self.cmd_file.exists() and not self._is_fresh(self.cmd_file):
+                try:
+                    self.cmd_file.unlink()
+                except OSError:
+                    pass
+            self._secure_cache_paths()
         except OSError:
             pass
 
@@ -163,7 +189,10 @@ class TerminalDetector:
         if not title:
             return None, None
         title_lower = title.lower()
-        shell = next((s for s in ('powershell', 'pwsh', 'bash', 'zsh', 'fish', 'ksh', 'tcsh') if s in title_lower), None)
+        shell = next(
+            (s for s in ('powershell', 'pwsh', 'bash', 'zsh', 'fish', 'ksh', 'tcsh') if s in title_lower),
+            None,
+        )
 
         if self.platform_name == 'windows':
             import re

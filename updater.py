@@ -1,366 +1,460 @@
-"""Signed release manifest verification and staged self-update helpers."""
+"""Verified GitHub Release updater for packaged CYBREX builds."""
 
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
 import json
 import os
 import platform
 import re
+import stat
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Optional
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from app_version import APP_VERSION
 
 
-MAX_ASSET_BYTES = 300 * 1024 * 1024
-_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-.]?(?:rc|beta|alpha|dev)[.-]?(\d+)?)?$", re.I)
+REPOSITORY = "imedkablavi/discord-rich-presence"
+LATEST_RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
+_API_MAX_BYTES = 2 * 1024 * 1024
+_CHECKSUM_MAX_BYTES = 16 * 1024
+_BINARY_MAX_BYTES = 256 * 1024 * 1024
+_HTTP_TIMEOUT = 12.0
+_ALLOWED_DOWNLOAD_HOSTS = {
+    "api.github.com",
+    "github.com",
+}
 
 
 class UpdateError(RuntimeError):
-    pass
+    """Raised when an update cannot be verified or installed safely."""
 
 
 @dataclass(frozen=True)
 class ReleaseAsset:
     name: str
     url: str
-    sha256: str
     size: int
-    platform: str
-    arch: str
-    kind: str = "portable"
+    digest: Optional[str] = None
 
 
 @dataclass(frozen=True)
-class SignedManifest:
-    version: str
-    assets: tuple[ReleaseAsset, ...]
-    signature: str
-    raw: Dict[str, Any]
-
-    @property
-    def signed_payload(self) -> bytes:
-        payload = dict(self.raw)
-        payload.pop("signature", None)
-        return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+class UpdateInfo:
+    current_version: str
+    latest_version: str
+    tag_name: str
+    release_url: str
+    binary: ReleaseAsset
+    checksum: ReleaseAsset
 
 
-def parse_manifest(data: bytes) -> SignedManifest:
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        _validate_github_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _validate_github_url(url: str) -> None:
     try:
-        raw = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise UpdateError("Update manifest is not valid UTF-8 JSON") from exc
-    if not isinstance(raw, dict):
-        raise UpdateError("Update manifest must be an object")
-    version = str(raw.get("version", "")).strip()
-    signature = str(raw.get("signature", "")).strip()
-    if not version or not signature:
-        raise UpdateError("Update manifest is missing version/signature")
-    version_tuple(version)
-    assets_value = raw.get("assets")
-    if not isinstance(assets_value, list) or not assets_value:
-        raise UpdateError("Update manifest has no assets")
-    assets = []
-    for item in assets_value:
-        if not isinstance(item, dict):
-            raise UpdateError("Update asset entry must be an object")
-        name = str(item.get("name", "")).strip()
-        url = str(item.get("url", "")).strip()
-        digest = str(item.get("sha256", "")).strip().lower()
-        asset_platform = str(item.get("platform", "")).strip().lower()
-        arch = str(item.get("arch", "")).strip().lower()
-        kind = str(item.get("kind", "portable")).strip().lower() or "portable"
-        try:
-            size = int(item.get("size", 0))
-        except (TypeError, ValueError) as exc:
-            raise UpdateError(f"Invalid size for update asset {name!r}") from exc
-        if not name or Path(name).name != name:
-            raise UpdateError("Update asset name must be a basename")
-        if not url.startswith("https://"):
-            raise UpdateError(f"Update asset {name!r} must use HTTPS")
-        if not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise UpdateError(f"Update asset {name!r} has an invalid SHA-256")
-        if size <= 0 or size > MAX_ASSET_BYTES:
-            raise UpdateError(f"Update asset {name!r} has an invalid size")
-        if not asset_platform or not arch:
-            raise UpdateError(f"Update asset {name!r} is missing platform/architecture")
-        assets.append(ReleaseAsset(name, url, digest, size, asset_platform, arch, kind))
-    return SignedManifest(version, tuple(assets), signature, raw)
+        parsed = urllib.parse.urlsplit(str(url or ""))
+        port = parsed.port
+    except ValueError as exc:
+        raise UpdateError("Malformed update URL") from exc
+    host = (parsed.hostname or "").lower()
+    allowed = (
+        host in _ALLOWED_DOWNLOAD_HOSTS
+        or host.endswith(".githubusercontent.com")
+        or host.endswith(".github.com")
+    )
+    if (
+        parsed.scheme != "https"
+        or not allowed
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+    ):
+        raise UpdateError(f"Refusing non-GitHub update URL: {host or 'unknown'}")
 
 
-def verify_manifest(manifest: SignedManifest, public_key_b64: str) -> None:
-    if not public_key_b64:
-        raise UpdateError("Update signing public key is not configured")
+def _opener() -> urllib.request.OpenerDirector:
+    return urllib.request.build_opener(_SafeRedirectHandler())
+
+
+def _request(url: str) -> urllib.request.Request:
+    _validate_github_url(url)
+    return urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2026-03-10",
+            "User-Agent": f"CYBREX-Rich-Presence/{APP_VERSION}",
+        },
+    )
+
+
+def _read_limited(url: str, max_bytes: int) -> bytes:
     try:
-        public_key_raw = base64.b64decode(public_key_b64, validate=True)
-        signature = base64.b64decode(manifest.signature, validate=True)
-        key = Ed25519PublicKey.from_public_bytes(public_key_raw)
-        key.verify(signature, manifest.signed_payload)
-    except (ValueError, binascii.Error, InvalidSignature) as exc:
-        raise UpdateError("Update manifest signature verification failed") from exc
+        with _opener().open(_request(url), timeout=_HTTP_TIMEOUT) as response:
+            _validate_github_url(response.geturl())
+            length = response.headers.get("Content-Length")
+            if length:
+                try:
+                    if int(length) > max_bytes:
+                        raise UpdateError("Update response is unexpectedly large")
+                except ValueError:
+                    pass
+            data = response.read(max_bytes + 1)
+    except UpdateError:
+        raise
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+        raise UpdateError(f"Could not contact GitHub: {exc}") from exc
+    if len(data) > max_bytes:
+        raise UpdateError("Update response exceeded the safety limit")
+    return data
 
 
-def fetch_signed_manifest(url: str, public_key_b64: str, timeout: float = 10.0) -> SignedManifest:
-    if not url.startswith("https://"):
-        raise UpdateError("Update manifest URL must use HTTPS")
-    request = urllib.request.Request(url, headers={"User-Agent": "DiscordRichPresence-Updater/1"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        final_url = str(response.geturl())
-        if not final_url.startswith("https://"):
-            raise UpdateError("Update manifest redirect downgraded from HTTPS")
-        if int(getattr(response, "status", 200)) != 200:
-            raise UpdateError(f"Update manifest request failed with HTTP {response.status}")
-        data = response.read(512 * 1024 + 1)
-    if len(data) > 512 * 1024:
-        raise UpdateError("Update manifest is unexpectedly large")
-    manifest = parse_manifest(data)
-    verify_manifest(manifest, public_key_b64)
-    return manifest
-
-
-def normalized_platform() -> str:
-    if sys.platform == "win32":
-        return "windows"
-    if sys.platform.startswith("linux"):
-        return "linux"
-    if sys.platform == "darwin":
-        return "macos"
-    return sys.platform.lower()
-
-
-def normalized_arch() -> str:
-    machine = platform.machine().lower()
-    aliases = {
-        "amd64": "x86_64",
-        "x64": "x86_64",
-        "x86-64": "x86_64",
-        "aarch64": "arm64",
-    }
-    return aliases.get(machine, machine)
-
-
-def select_asset(
-    manifest: SignedManifest,
-    target_platform: Optional[str] = None,
-    arch: Optional[str] = None,
-    preferred_kinds: Iterable[str] = ("portable", "binary"),
-) -> ReleaseAsset:
-    target_platform = (target_platform or normalized_platform()).lower()
-    arch = (arch or normalized_arch()).lower()
-    matches = [a for a in manifest.assets if a.platform == target_platform and a.arch == arch]
-    for kind in preferred_kinds:
-        for asset in matches:
-            if asset.kind == kind:
-                return asset
-    if matches:
-        return matches[0]
-    raise UpdateError(f"No update asset for {target_platform}/{arch}")
-
-
-def version_tuple(value: str) -> tuple[int, int, int, int, int]:
-    clean = value.strip().lstrip("v")
-    match = _VERSION_RE.fullmatch(clean)
+def _version_tuple(value: str) -> tuple[int, int, int, int]:
+    """Return a precedence key where a stable build outranks its prerelease."""
+    text = str(value or "").strip()
+    match = re.fullmatch(
+        r"v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?",
+        text,
+    )
     if not match:
-        raise UpdateError(f"Unsupported version format: {value!r}")
-    major, minor, patch = (int(match.group(i)) for i in range(1, 4))
-    lower = clean.lower()
-    prerelease_rank = 1
-    prerelease_number = 0
-    if any(marker in lower for marker in ("rc", "beta", "alpha", "dev")):
-        prerelease_rank = 0
-        prerelease_number = int(match.group(4) or 0)
-    return major, minor, patch, prerelease_rank, prerelease_number
+        raise UpdateError(f"Unsupported release version: {text or 'empty'}")
+    major, minor, patch = (int(match.group(index)) for index in range(1, 4))
+    stable_rank = 0 if match.group(4) else 1
+    return major, minor, patch, stable_rank
 
 
-def is_newer_version(candidate: str, current: str) -> bool:
-    return version_tuple(candidate) > version_tuple(current)
+def _normalized_version(value: str) -> str:
+    return str(value or "").strip().lstrip("v")
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+def _platform_asset_names() -> tuple[str, str]:
+    machine = platform.machine().lower()
+    if machine not in {"x86_64", "amd64"}:
+        raise UpdateError(f"Automatic updates are not available for {machine or 'this architecture'}")
+    if sys.platform == "win32":
+        binary = "DiscordRichPresence.exe"
+    elif sys.platform.startswith("linux"):
+        binary = "CYBREX-DiscordRichPresence-linux-x86_64"
+    else:
+        raise UpdateError(f"Automatic updates are not available on {sys.platform}")
+    return binary, f"{binary}.sha256"
 
 
-def download_verified_asset(
-    asset: ReleaseAsset,
-    destination: Path,
-    timeout: float = 30.0,
-    progress: Optional[Callable[[int, int], None]] = None,
-) -> Path:
-    """Download one signed-manifest asset and report verified byte progress."""
-    destination = Path(destination)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temp = destination.with_suffix(destination.suffix + ".part")
-    request = urllib.request.Request(asset.url, headers={"User-Agent": "DiscordRichPresence-Updater/1"})
-    total = 0
-    digest = hashlib.sha256()
+def _release_asset(raw: Any, expected_name: str, max_bytes: int) -> ReleaseAsset:
+    if not isinstance(raw, list):
+        raise UpdateError("GitHub release assets are missing")
+    for item in raw:
+        if not isinstance(item, dict) or item.get("name") != expected_name:
+            continue
+        url = str(item.get("browser_download_url") or "")
+        _validate_github_url(url)
+        try:
+            size = int(item.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if size <= 0 or size > max_bytes:
+            raise UpdateError(f"Release asset {expected_name} has an invalid size")
+        digest = str(item.get("digest") or "").strip() or None
+        return ReleaseAsset(expected_name, url, size, digest)
+    raise UpdateError(f"Release is missing required asset: {expected_name}")
+
+
+def check_for_update(current_version: str = APP_VERSION) -> Optional[UpdateInfo]:
+    """Return verified release metadata when a newer stable release exists."""
+    raw = _read_limited(LATEST_RELEASE_API, _API_MAX_BYTES)
     try:
-        if progress:
-            progress(0, asset.size)
-        with urllib.request.urlopen(request, timeout=timeout) as response, temp.open("wb") as out:
-            final_url = str(response.geturl())
-            if not final_url.startswith("https://"):
-                raise UpdateError("Update asset redirect downgraded from HTTPS")
-            if int(getattr(response, "status", 200)) != 200:
-                raise UpdateError(f"Update asset request failed with HTTP {response.status}")
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > asset.size or total > MAX_ASSET_BYTES:
-                    raise UpdateError("Update asset exceeded signed size")
-                digest.update(chunk)
-                out.write(chunk)
-                if progress:
-                    progress(total, asset.size)
-        if total != asset.size:
-            raise UpdateError(f"Update asset size mismatch: expected {asset.size}, got {total}")
-        if not hmac_safe_equal(digest.hexdigest(), asset.sha256):
-            raise UpdateError("Update asset SHA-256 verification failed")
-        os.replace(temp, destination)
-        return destination
+        release = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise UpdateError("GitHub returned invalid release metadata") from exc
+    if not isinstance(release, dict):
+        raise UpdateError("GitHub returned invalid release metadata")
+    if bool(release.get("draft")) or bool(release.get("prerelease")):
+        raise UpdateError("Latest release is not a stable published build")
+
+    tag = str(release.get("tag_name") or "").strip()
+    latest = _normalized_version(tag)
+    latest_tuple = _version_tuple(latest)
+
+    current_text = _normalized_version(current_version)
+    current_tuple = _version_tuple(current_text)
+    if latest_tuple <= current_tuple:
+        return None
+
+    binary_name, checksum_name = _platform_asset_names()
+    assets = release.get("assets")
+    binary = _release_asset(assets, binary_name, _BINARY_MAX_BYTES)
+    checksum = _release_asset(assets, checksum_name, _CHECKSUM_MAX_BYTES)
+    release_url = str(release.get("html_url") or "")
+    _validate_github_url(release_url)
+    return UpdateInfo(
+        current_version=current_text,
+        latest_version=latest,
+        tag_name=tag,
+        release_url=release_url,
+        binary=binary,
+        checksum=checksum,
+    )
+
+
+def _expected_checksum(info: UpdateInfo) -> str:
+    text = _read_limited(info.checksum.url, _CHECKSUM_MAX_BYTES).decode("ascii", errors="strict")
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if not parts:
+            continue
+        digest = parts[0].lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            continue
+        if len(parts) >= 2:
+            filename = parts[-1].lstrip("*")
+            if filename != info.binary.name:
+                continue
+        return digest
+    raise UpdateError("Release checksum file is invalid")
+
+
+def _download_verified_binary(info: UpdateInfo, destination: Path) -> str:
+    expected = _expected_checksum(info)
+    digest = hashlib.sha256()
+    received = 0
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with _opener().open(_request(info.binary.url), timeout=_HTTP_TIMEOUT) as response:
+            _validate_github_url(response.geturl())
+            with open(destination, "wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > _BINARY_MAX_BYTES:
+                        raise UpdateError("Downloaded update exceeded the safety limit")
+                    digest.update(chunk)
+                    handle.write(chunk)
+                handle.flush()
+                os.fsync(handle.fileno())
     except Exception:
         try:
-            temp.unlink()
+            destination.unlink()
         except OSError:
             pass
         raise
 
+    if received != info.binary.size:
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise UpdateError("Downloaded update size does not match GitHub metadata")
 
-def hmac_safe_equal(a: str, b: str) -> bool:
-    import hmac
-    return hmac.compare_digest(a, b)
+    actual = digest.hexdigest().lower()
+    api_digest = str(info.binary.digest or "").lower()
+    if api_digest.startswith("sha256:") and api_digest[7:] != actual:
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise UpdateError("GitHub asset digest verification failed")
+    if actual != expected:
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise UpdateError("SHA-256 verification failed")
+    return actual
 
 
-def atomic_replace_with_rollback(current: Path, staged: Path, backup: Optional[Path] = None) -> Path:
-    """Replace a non-running target and restore it immediately if replacement fails."""
-    current = Path(current)
-    staged = Path(staged)
-    backup = Path(backup) if backup else current.with_suffix(current.suffix + ".rollback")
-    if not staged.is_file():
-        raise UpdateError("Staged update does not exist")
-    if not os.access(current.parent, os.W_OK):
-        raise UpdateError("Install directory is not writable; use the system package manager")
+def _install_linux(target: Path, staged: Path, *, keep_backup: bool = False) -> Optional[Path]:
     try:
-        if backup.exists():
-            backup.unlink()
-        os.replace(current, backup)
-        os.replace(staged, current)
-    except Exception as exc:
-        if not current.exists() and backup.exists():
-            os.replace(backup, current)
-        raise UpdateError("Failed to replace application; rollback restored the previous version") from exc
-    return backup
+        mode = stat.S_IMODE(target.stat().st_mode)
+    except OSError:
+        mode = 0o755
+    os.chmod(staged, mode | stat.S_IXUSR)
+    backup = target.with_name(target.name + ".old")
+    try:
+        backup.unlink(missing_ok=True)
+    except OSError:
+        pass
+    os.replace(target, backup)
+    try:
+        os.replace(staged, target)
+        os.chmod(target, mode | stat.S_IXUSR)
+    except Exception:
+        try:
+            os.replace(backup, target)
+        except OSError:
+            pass
+        raise
+    if keep_backup:
+        return backup
+    try:
+        backup.unlink()
+    except OSError:
+        pass
+    return None
 
 
-def _powershell_literal(value: str) -> str:
-    """Return a PowerShell single-quoted literal."""
-    return "'" + value.replace("'", "''") + "'"
+def _relaunch_linux(
+    target: Path,
+    restart_args: list[str],
+    *,
+    rollback_path: Optional[Path] = None,
+) -> None:
+    if not restart_args:
+        if rollback_path is not None:
+            try:
+                rollback_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return
+    process = subprocess.Popen(
+        [str(target), *restart_args],
+        close_fds=True,
+        start_new_session=True,
+    )
+    if rollback_path is None:
+        return
+    try:
+        process.wait(timeout=3.0)
+    except subprocess.TimeoutExpired:
+        try:
+            rollback_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return
 
-
-def schedule_self_replace(
-    current: Path,
-    staged: Path,
-    wait_pids: Iterable[int],
-    restart_args: Optional[list[str]] = None,
-) -> Path:
-    """Launch a detached helper that replaces a running portable build.
-
-    The helper keeps a rollback copy and treats an immediate restart exit as a
-    failed update, restoring and restarting the previous executable.
-    """
-    current = Path(current).resolve()
-    staged = Path(staged).resolve()
-    if not staged.is_file():
-        raise UpdateError("Staged update does not exist")
-    if not os.access(current.parent, os.W_OK):
-        raise UpdateError("Install directory is not writable; use the system package manager")
-    pids = [int(pid) for pid in wait_pids if int(pid) > 0]
-    restart_args = list(restart_args or [])
-    helper_dir = Path(tempfile.mkdtemp(prefix="drp-update-"))
-    backup = current.with_suffix(current.suffix + ".rollback")
-
-    if sys.platform == "win32":
-        helper = helper_dir / "apply-update.ps1"
-        current_literal = _powershell_literal(str(current))
-        staged_literal = _powershell_literal(str(staged))
-        backup_literal = _powershell_literal(str(backup))
-        quoted_args = ",".join(_powershell_literal(arg) for arg in restart_args)
-        helper.write_text(
-            "param()\n"
-            "$ErrorActionPreference='Stop'\n"
-            f"$pids=@({','.join(str(pid) for pid in pids)})\n"
-            "foreach($p in $pids){ try { Wait-Process -Id $p -Timeout 60 -ErrorAction SilentlyContinue } catch {} }\n"
-            f"$current={current_literal}\n"
-            f"$staged={staged_literal}\n"
-            f"$backup={backup_literal}\n"
-            "try {\n"
-            "  if(Test-Path $backup){ Remove-Item -Force $backup }\n"
-            "  Move-Item -Force $current $backup\n"
-            "  Move-Item -Force $staged $current\n"
-            f"  $child=Start-Process -FilePath $current -ArgumentList @({quoted_args}) -PassThru\n"
-            "  Start-Sleep -Seconds 3\n"
-            "  if($child.HasExited){\n"
-            "    Remove-Item -Force $current -ErrorAction SilentlyContinue\n"
-            "    Move-Item -Force $backup $current\n"
-            f"    Start-Process -FilePath $current -ArgumentList @({quoted_args}) | Out-Null\n"
-            "    exit 2\n"
-            "  }\n"
-            "} catch {\n"
-            "  if((-not (Test-Path $current)) -and (Test-Path $backup)){ Move-Item -Force $backup $current }\n"
-            "  exit 1\n"
-            "}\n",
-            encoding="utf-8",
-        )
+    try:
+        target.unlink(missing_ok=True)
+        os.replace(rollback_path, target)
         subprocess.Popen(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(helper)],
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "DETACHED_PROCESS", 0),
+            [str(target), *restart_args],
             close_fds=True,
+            start_new_session=True,
         )
-    else:
-        import shlex
+    except OSError as exc:
+        raise UpdateError("Updated Linux build exited immediately and rollback failed") from exc
+    raise UpdateError("Updated Linux build exited immediately; rollback restored the previous version")
 
-        helper = helper_dir / "apply-update.sh"
-        restart_command = " ".join(["\"$current\""] + [shlex.quote(arg) for arg in restart_args])
-        wait_commands = "\n".join(
-            f"while kill -0 {pid} 2>/dev/null; do sleep 1; done" for pid in pids
-        )
-        helper.write_text(
-            "#!/bin/sh\nset -eu\n"
-            + (wait_commands + "\n" if wait_commands else "")
-            + f"current={shlex.quote(str(current))}\n"
-            + f"staged={shlex.quote(str(staged))}\n"
-            + f"backup={shlex.quote(str(backup))}\n"
-            + "rm -f \"$backup\"\n"
-            + "mv \"$current\" \"$backup\"\n"
-            + "if ! mv \"$staged\" \"$current\"; then mv \"$backup\" \"$current\"; exit 1; fi\n"
-            + "chmod +x \"$current\" || true\n"
-            + restart_command + " >/dev/null 2>&1 &\n"
-            + "child=$!\n"
-            + "sleep 3\n"
-            + "if ! kill -0 \"$child\" 2>/dev/null; then\n"
-            + "  rm -f \"$current\"\n"
-            + "  mv \"$backup\" \"$current\"\n"
-            + "  chmod +x \"$current\" || true\n"
-            + "  " + restart_command + " >/dev/null 2>&1 &\n"
-            + "  exit 2\n"
-            + "fi\n",
-            encoding="utf-8",
-        )
-        helper.chmod(0o700)
-        subprocess.Popen(["sh", str(helper)], start_new_session=True, close_fds=True)
-    return helper
+
+def _schedule_windows_replace(target: Path, staged: Path, restart_args: list[str]) -> None:
+    script_fd, script_name = tempfile.mkstemp(prefix="cybrex-update-", suffix=".ps1")
+    os.close(script_fd)
+    script = Path(script_name)
+    powershell = "\n".join([
+        "param([int]$WaitPid,[string]$Target,[string]$Staged,[string]$RestartJson)",
+        "$ErrorActionPreference = 'Stop'",
+        "for ($i = 0; $i -lt 240; $i++) {",
+        "  if (-not (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue)) { break }",
+        "  Start-Sleep -Milliseconds 250",
+        "}",
+        "if (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) { exit 20 }",
+        "$Backup = $Target + '.old'",
+        "Remove-Item $Backup -Force -ErrorAction SilentlyContinue",
+        "Move-Item -LiteralPath $Target -Destination $Backup -Force",
+        "try {",
+        "  Move-Item -LiteralPath $Staged -Destination $Target -Force",
+        "} catch {",
+        "  Move-Item -LiteralPath $Backup -Destination $Target -Force -ErrorAction SilentlyContinue",
+        "  exit 21",
+        "}",
+        "$ArgsList = ConvertFrom-Json $RestartJson",
+        "if ($null -ne $ArgsList -and $ArgsList.Count -gt 0) {",
+        "  $Child = Start-Process -FilePath $Target -ArgumentList $ArgsList -PassThru",
+        "  Start-Sleep -Seconds 3",
+        "  if ($Child.HasExited) {",
+        "    Remove-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue",
+        "    Move-Item -LiteralPath $Backup -Destination $Target -Force",
+        "    Start-Process -FilePath $Target -ArgumentList $ArgsList | Out-Null",
+        "    Remove-Item $PSCommandPath -Force -ErrorAction SilentlyContinue",
+        "    exit 22",
+        "  }",
+        "}",
+        "Remove-Item $Backup -Force -ErrorAction SilentlyContinue",
+        "Remove-Item $PSCommandPath -Force -ErrorAction SilentlyContinue",
+        "",
+    ])
+    script.write_text(powershell, encoding="utf-8")
+    subprocess.Popen(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            str(os.getpid()),
+            str(target),
+            str(staged),
+            json.dumps(restart_args),
+        ],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        close_fds=True,
+    )
+
+
+def install_update(
+    info: UpdateInfo,
+    *,
+    target_path: Optional[Path] = None,
+    restart_args: Optional[list[str]] = None,
+) -> str:
+    """Download, verify and install a release over the packaged executable.
+
+    Windows schedules replacement after the updater process exits because a
+    running PE file cannot be replaced reliably. Linux uses an atomic rename and
+    keeps a rollback copy until the relaunched build survives its startup check.
+    """
+    if target_path is None:
+        if not getattr(sys, "frozen", False):
+            raise UpdateError("Self-update is only available in packaged builds")
+        target = Path(sys.executable).resolve()
+    else:
+        target = Path(target_path).resolve()
+    if not target.exists() or not target.is_file():
+        raise UpdateError("Current executable could not be located")
+
+    staged = target.with_name(f".{target.name}.{info.latest_version}.new")
+    try:
+        staged.unlink(missing_ok=True)
+    except OSError:
+        pass
+    _download_verified_binary(info, staged)
+
+    args = list(restart_args or [])
+    if sys.platform == "win32" and target_path is None:
+        _schedule_windows_replace(target, staged, args)
+        return "scheduled"
+    try:
+        rollback = _install_linux(target, staged, keep_backup=target_path is None)
+        if target_path is None:
+            _relaunch_linux(target, args, rollback_path=rollback)
+    except Exception as exc:
+        try:
+            staged.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if isinstance(exc, UpdateError):
+            raise
+        raise UpdateError(f"Could not replace the current executable: {exc}") from exc
+    return "installed"
+
+
+def update_summary(info: Optional[UpdateInfo]) -> str:
+    if info is None:
+        return f"CYBREX Rich Presence {APP_VERSION} is up to date."
+    return (
+        f"CYBREX Rich Presence {info.latest_version} is available "
+        f"(current: {info.current_version})."
+    )

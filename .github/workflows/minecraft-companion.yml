@@ -1,0 +1,61 @@
+name: Minecraft Companion
+
+on:
+  pull_request:
+    paths:
+      - "integrations/minecraft/**"
+      - "minecraft_bridge.py"
+      - "detectors/gaming.py"
+      - "tests/test_minecraft_bridge.py"
+      - ".github/workflows/minecraft-companion.yml"
+  push:
+    branches: [main]
+    paths:
+      - "integrations/minecraft/**"
+      - "minecraft_bridge.py"
+      - "detectors/gaming.py"
+      - "tests/test_minecraft_bridge.py"
+      - ".github/workflows/minecraft-companion.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          verify-signature: true
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: "9.5.1"
+      - name: Build Fabric companion
+        working-directory: integrations/minecraft/fabric-26.2
+        run: gradle --no-daemon build
+      - name: Verify remapped companion JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd integrations/minecraft/fabric-26.2
+          jar="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' -print -quit)"
+          test -n "$jar"
+          test "$(stat -c %s "$jar")" -gt 1000
+          jar tf "$jar" | grep -q '^fabric.mod.json$'
+          jar tf "$jar" | grep -q '^com/cybrex/presence/CybrexPresenceClient.class$'
+          cp "$jar" ../../../CYBREX-Minecraft-Companion-26.2.jar
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: CYBREX-Minecraft-Companion-26.2
+          path: CYBREX-Minecraft-Companion-26.2.jar
+          if-no-files-found: error

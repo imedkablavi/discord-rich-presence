@@ -3,12 +3,22 @@ pypresence==4.6.2
 PyYAML>=6.0.3,<7
 customtkinter>=5.2,<6
 pystray>=0.19.5,<1
-Pillow>=10,<12
+# Pillow 12.3.0 includes fixes for the 2026 advisories affecting the older
+# 11.x line while retaining Python 3.10 support. Keep the next major release
+# out until its Python/runtime compatibility is part of the supported matrix.
+Pillow>=12.3,<13
 psutil>=7.2.2,<8
-cryptography>=44,<47
 
-# Linux media integration
-pydbus>=0.6,<1; sys_platform == 'linux'
+# Cross-platform Arabic shaping/BiDi for Tk-based UI text. Tk rendering on
+# several Linux desktop stacks does not shape or order Arabic consistently.
+arabic-reshaper>=3.0,<4
+python-bidi>=0.6,<1
+
+# Linux native media discovery intentionally uses the external `playerctl`
+# command when available. We do not bundle pydbus/GLib proxies into the long-
+# running process because repeated proxy construction caused unacceptable RSS
+# growth on real Linux desktop sessions. Browser Companion remains the precise
+# fallback for browser media when playerctl is unavailable.
 
 # Windows integrations
 pywin32>=305; sys_platform == 'win32'

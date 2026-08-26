@@ -3,54 +3,59 @@
 # Linux: ~/.config/discord-rich-presence/config.yaml
 
 discord:
-  # Discord Developer Application ID (numeric)
-  client_id: "1437867564762923028"
-  # Optional buttons: maximum 2, label 1-32 chars, URL max 512 chars.
+  # Normal users do not need a Discord Developer Portal application. The app
+  # ships with the CYBREX Discord Application ID and connects to the running
+  # Discord Desktop client automatically.
+  # Advanced only: set a custom Application ID if you intentionally maintain
+  # your own Discord application/assets. Leave empty for the built-in identity.
+  application_id_override: ""
   buttons: []
 
 privacy:
-  # off: no activity redaction
-  # balanced: redact configured secrets and reduce path exposure
-  # strict: generic descriptions only; browser URLs/buttons are removed
   mode: balanced
+  # Exact Companion URLs in Balanced mode: none, domain, path, or full.
+  # domain is the default and shares only e.g. https://www.youtube.com.
+  browser_url_mode: domain
   redactions:
     - regex: '(?i)(password|token|secret|key|api[_-]?key)\S*'
     - regex: '([A-Fa-f0-9]{32,})'
   hide_home_paths: true
 
-# Valid range: 1-3600 seconds
-update_interval_secs: 5
+update_interval_secs: 2
 
 system:
   start_minimized: false
   auto_start: false
 
 browser_companion:
-  # Optional local browser-extension bridge. It binds only to 127.0.0.1 and
-  # requires a random per-user bearer token stored next to the config file.
-  enabled: false
-  port: 17653
-  # Ignore extension state after this many seconds.
-  ttl_secs: 15
-  # Titles can reveal sensitive content. Disable if only service/origin is needed.
-  allow_titles: true
-  # Default URL policy exposes only scheme + host, never path/query/fragment.
-  allow_origin: true
-  # Explicit opt-in. Even when true, URL fragments are removed and private tabs
-  # are always stripped of title/service/URL before they reach the detector.
-  allow_exact_url: false
-
-updates:
-  # Verification is enabled for official releases. Automatic installation stays
-  # off unless the user explicitly enables it.
+  # Optional Chromium/Firefox extension bridge. It listens on loopback only.
   enabled: true
-  auto_install: false
-  manifest_url: "https://github.com/imedkablavi/discord-rich-presence/releases/latest/download/update-manifest.json"
-  # Public 32-byte Ed25519 verification key for official release manifests.
-  # Never put the matching private signing key in this file or in the app.
-  public_key: "zx3g5J29SZVSwcJ3pbux7VBorpZAOoCHJPfPz1KLXxk="
+  port: 32191
+  ttl_secs: 15
+  # Free declarative support for self-hosted/custom domains. Exact hostnames and
+  # leading *. wildcards are accepted; no custom JavaScript is required.
+  domain_services: {}
+  # Example:
+  # domain_services:
+  #   media.home.example: "Jellyfin"
+  #   "*.corp.example": "Company Portal"
+
+cs2_gsi:
+  # Official, read-only Counter-Strike 2 Game State Integration. When CS2 is
+  # found in a Steam library, the service prepares its local GSI cfg automatically.
+  enabled: true
+  auto_install: true
+  port: 32192
+  # A stale snapshot expires quickly when the game closes or stops reporting.
+  ttl_secs: 30
 
 images:
+  use_external_app_icons: true
+  icon_overrides: {}
+  # Example:
+  # icon_overrides:
+  #   trae: "https://example.com/trae.png"
+  #   konsole: "my-konsole-asset"
   browser: "browser"
   video: "video"
   terminal: "terminal"
@@ -104,6 +109,7 @@ images:
     hulu: "hulu"
     prime video: "prime"
   games:
+    counter-strike 2: "cs2"
     league of legends: "lol"
     valorant: "valorant"
     minecraft: "minecraft"
@@ -127,13 +133,23 @@ rules:
     coding: true
     browser: true
     gaming: true
-    # Set false to avoid publishing generic/unknown application window titles.
     application: true
-  # Clear existing Presence when a known OS/compositor lock screen is foreground.
+  activity_priority:
+    # smart: foreground work beats background media, but foreground media wins.
+    # foreground_first: always favor foreground terminal/code/browser over media.
+    # media_first: preserve the old background-media-first behavior.
+    # custom: use custom_order below.
+    policy: smart
+    custom_order:
+      - gaming
+      - terminal
+      - coding
+      - browser
+      - media
+      - application
   clear_on_lock_screen: true
-  # Ignore terminal hook cache entries older than this. 0 disables expiration.
-  # Valid range: 0-604800 (7 days).
-  terminal_command_ttl_secs: 21600
+  # Raw shell commands can contain arguments, so the default cache lifetime is short.
+  terminal_command_ttl_secs: 900
   whitelist:
     apps: []
     sites: []

@@ -1,199 +1,94 @@
-"""
-Git integration helper for better repository information
-"""
+"""Lightweight Git repository enrichment for coding activity."""
 
-import subprocess
 import logging
+import re
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 
 class GitHelper:
-    """Helper class for Git repository information"""
-    
+    """Read repository status with a small, bounded number of Git subprocesses."""
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-    
+
+    def _run(self, path: Path, *args: str) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                ['git', *args],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=1,
+                check=False,
+            )
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+            self.logger.debug('Git command failed: %s', e)
+            return None
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip()
+
     def get_repo_info(self, path: str) -> Optional[Dict[str, Any]]:
-        """
-        Get comprehensive Git repository information
-        Returns: {
-            'repo_name': str,
-            'branch': str,
-            'ahead': int,
-            'behind': int,
-            'uncommitted': int,
-            'is_dirty': bool
-        }
-        """
         try:
             path_obj = Path(path).expanduser()
             if not path_obj.exists():
                 return None
-            
-            # Check if it's a Git repository
-            if not self._is_git_repo(path_obj):
+
+            root_text = self._run(path_obj, 'rev-parse', '--show-toplevel')
+            if not root_text:
                 return None
-            
-            info = {}
-            
-            # Get repository root and name
-            repo_root = self._get_repo_root(path_obj)
-            if repo_root:
-                info['repo_name'] = repo_root.name
-                info['repo_path'] = str(repo_root)
-            else:
+            repo_root = Path(root_text)
+
+            status = self._run(repo_root, 'status', '--porcelain=v1', '--branch')
+            if status is None:
                 return None
-            
-            # Get current branch
-            branch = self._get_current_branch(path_obj)
-            info['branch'] = branch or 'unknown'
-            
-            # Get ahead/behind commits
-            ahead, behind = self._get_ahead_behind(path_obj)
-            info['ahead'] = ahead
-            info['behind'] = behind
-            
-            # Get uncommitted changes
-            uncommitted = self._get_uncommitted_count(path_obj)
-            info['uncommitted'] = uncommitted
-            info['is_dirty'] = uncommitted > 0
-            
-            return info
-            
-        except Exception as e:
-            self.logger.debug(f"Failed to get Git info: {e}")
+            lines = status.splitlines()
+            header = lines[0] if lines and lines[0].startswith('## ') else ''
+            changes = lines[1:] if header else lines
+
+            branch = 'unknown'
+            ahead = 0
+            behind = 0
+            if header:
+                branch_part = header[3:].split('...', 1)[0].strip()
+                if branch_part and not branch_part.startswith('HEAD '):
+                    branch = branch_part
+                ahead_match = re.search(r'\bahead (\d+)\b', header)
+                behind_match = re.search(r'\bbehind (\d+)\b', header)
+                if ahead_match:
+                    ahead = int(ahead_match.group(1))
+                if behind_match:
+                    behind = int(behind_match.group(1))
+
+            uncommitted = sum(1 for line in changes if line.strip())
+            return {
+                'repo_name': repo_root.name,
+                'repo_path': str(repo_root),
+                'branch': branch,
+                'ahead': ahead,
+                'behind': behind,
+                'uncommitted': uncommitted,
+                'is_dirty': uncommitted > 0,
+            }
+        except (OSError, ValueError) as e:
+            self.logger.debug('Failed to get Git info: %s', e)
             return None
-    
-    def _is_git_repo(self, path: Path) -> bool:
-        """Check if path is inside a Git repository"""
-        try:
-            result = subprocess.run(
-                ['git', 'rev-parse', '--git-dir'],
-                cwd=path,
-                capture_output=True,
-                timeout=1
-            )
-            return result.returncode == 0
-        except:
-            return False
-    
-    def _get_repo_root(self, path: Path) -> Optional[Path]:
-        """Get Git repository root directory"""
-        try:
-            result = subprocess.run(
-                ['git', 'rev-parse', '--show-toplevel'],
-                cwd=path,
-                capture_output=True,
-                text=True,
-                timeout=1
-            )
-            
-            if result.returncode == 0:
-                return Path(result.stdout.strip())
-        except:
-            pass
-        
-        return None
-    
-    def _get_current_branch(self, path: Path) -> Optional[str]:
-        """Get current Git branch name"""
-        try:
-            result = subprocess.run(
-                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-                cwd=path,
-                capture_output=True,
-                text=True,
-                timeout=1
-            )
-            
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except:
-            pass
-        
-        return None
-    
-    def _get_ahead_behind(self, path: Path) -> tuple[int, int]:
-        """Get number of commits ahead/behind remote"""
-        try:
-            # Get upstream branch
-            result = subprocess.run(
-                ['git', 'rev-parse', '--abbrev-ref', '@{upstream}'],
-                cwd=path,
-                capture_output=True,
-                text=True,
-                timeout=1
-            )
-            
-            if result.returncode != 0:
-                return 0, 0
-            
-            upstream = result.stdout.strip()
-            
-            # Get ahead/behind counts
-            result = subprocess.run(
-                ['git', 'rev-list', '--left-right', '--count', f'HEAD...{upstream}'],
-                cwd=path,
-                capture_output=True,
-                text=True,
-                timeout=1
-            )
-            
-            if result.returncode == 0:
-                parts = result.stdout.strip().split()
-                if len(parts) == 2:
-                    ahead = int(parts[0])
-                    behind = int(parts[1])
-                    return ahead, behind
-        except:
-            pass
-        
-        return 0, 0
-    
-    def _get_uncommitted_count(self, path: Path) -> int:
-        """Get number of uncommitted changes"""
-        try:
-            # Get status in short format
-            result = subprocess.run(
-                ['git', 'status', '--porcelain'],
-                cwd=path,
-                capture_output=True,
-                text=True,
-                timeout=1
-            )
-            
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                # Filter out empty lines
-                return len([line for line in lines if line.strip()])
-        except:
-            pass
-        
-        return 0
-    
+
     def format_git_status(self, info: Dict[str, Any]) -> str:
-        """Format Git status for display"""
-        parts = [info['repo_name']]
-        
-        # Add branch
-        branch = info.get('branch', '')
+        parts = [str(info.get('repo_name', 'repository'))]
+        branch = str(info.get('branch', '') or '')
         if branch and branch != 'unknown':
-            parts.append(f"({branch})")
-        
-        # Add status indicators
+            parts.append(f'({branch})')
+
         status_parts = []
-        
-        if info.get('ahead', 0) > 0:
+        if int(info.get('ahead', 0) or 0) > 0:
             status_parts.append(f"↑{info['ahead']}")
-        
-        if info.get('behind', 0) > 0:
+        if int(info.get('behind', 0) or 0) > 0:
             status_parts.append(f"↓{info['behind']}")
-        
-        if info.get('uncommitted', 0) > 0:
+        if int(info.get('uncommitted', 0) or 0) > 0:
             status_parts.append(f"*{info['uncommitted']}")
-        
         if status_parts:
             parts.append('[' + ' '.join(status_parts) + ']')
-        
         return ' '.join(parts)

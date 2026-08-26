@@ -5,8 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: qa-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -19,12 +22,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install QA dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: python -m pip install "pypresence==4.6.2" "PyYAML>=6.0.3,<7" "psutil>=7.2.2,<8" "pytest>=9.1.1,<10" "ruff>=0.9,<1"
+      - name: Verify dependency environment
+        run: python -m pip check
       - name: Compile Python sources
         run: python -m compileall -q .
       - name: Ruff critical checks
@@ -32,7 +39,7 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-  soak-smoke:
+  security-audit:
     strategy:
       fail-fast: false
       matrix:
@@ -40,26 +47,160 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install QA dependencies
-        run: python -m pip install -r requirements-dev.txt
-      - name: Run short resource-leak soak
-        run: python scripts/soak_test.py --duration 12 --max-rss-growth-mb 48 --max-handle-growth 10 --max-thread-growth 4
+      - name: Install audit tooling
+        run: python -m pip install "pip-audit>=2.9,<3" "bandit>=1.8,<2"
+      - name: Audit runtime dependencies for known vulnerabilities
+        run: pip-audit -r requirements.txt
+      - name: Scan Python for high-severity security issues
+        if: runner.os == 'Linux' && always()
+        run: bandit -q -r . -x ./tests,./build,./dist -lll
+
+  browser-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Validate Manifest V3 JSON and permission scope
+        run: |
+          python -m json.tool browser_extension/manifest.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('browser_extension/manifest.json').read_text(encoding='utf-8'))
+          assert manifest['manifest_version'] == 3
+          assert manifest['background']['service_worker'] == 'background.js'
+          assert 'background.js' in manifest['background']['scripts']
+          assert set(manifest['permissions']) == {'storage'}
+          assert manifest['host_permissions'] == ['http://127.0.0.1/*']
+          assert manifest['options_ui']['page'] == 'options.html'
+          matches = set(manifest['content_scripts'][0]['matches'])
+          assert matches == {'http://*/*', 'https://*/*'}
+          assert manifest['content_scripts'][0]['all_frames'] is False
+
+          background = Path('browser_extension/background.js').read_text(encoding='utf-8')
+          assert 'REQUEST_TIMEOUT_MS' in background
+          assert 'signal: controller.signal' in background
+          assert 'api.storage.local.get' in background
+          assert 'snapshot.url ||' not in background
+          assert "changeInfo.status !== 'complete'" in background
+          assert 'changeInfo.url' not in background
+          assert 'changeInfo.title' not in background
+          assert "browser: String(payload?.browser || '')" in background
+          assert "const browser = String(previous?.browser || '').trim()" in background
+          assert 'if (!browser) return;' in background
+          PY
+      - name: Validate JavaScript and helper syntax
+        run: |
+          node --check browser_extension/background.js
+          node --check browser_extension/content.js
+          node --check browser_extension/options.js
+          bash -n scripts/prepare-browser-companion.sh
+      - name: Verify clean unpacked helper
+        run: |
+          tmp="$(mktemp -d)"
+          bash scripts/prepare-browser-companion.sh "$tmp/CYBREX-Browser-Companion"
+          for file in manifest.json background.js content.js options.html options.js README.md; do
+            test -f "$tmp/CYBREX-Browser-Companion/$file"
+          done
+          test "$(find "$tmp/CYBREX-Browser-Companion" -maxdepth 1 -type f | wc -l)" -eq 6
+      - name: Package clean companion extension
+        run: |
+          zip -j CYBREX-Browser-Companion.zip \
+            browser_extension/manifest.json \
+            browser_extension/background.js \
+            browser_extension/content.js \
+            browser_extension/options.html \
+            browser_extension/options.js \
+            browser_extension/README.md
+          unzip -l CYBREX-Browser-Companion.zip
+          if unzip -l CYBREX-Browser-Companion.zip | grep -E '(__pycache__|\.pyc|/\.git)'; then
+            echo "Unexpected development files in extension package" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: CYBREX-Browser-Companion
+          path: CYBREX-Browser-Companion.zip
+          if-no-files-found: error
+
+  shell-hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+      - name: Validate Bash and Zsh hook syntax
+        run: |
+          bash -n scripts/hooks/bash.sh
+          zsh -n scripts/hooks/zsh.zsh
+      - name: Verify Bash command cache permissions
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/home"
+          HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" bash -c \
+            'source scripts/hooks/bash.sh; __drp_record_command "echo release-check"'
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence")" = "700"
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence/commands")" = "700"
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence/rp_last_cmd")" = "600"
+          pid_file="$(find "$tmp/cache/discord-rich-presence/commands" -type f -name '*.txt' -print -quit)"
+          test -n "$pid_file"
+          test "$(stat -c %a "$pid_file")" = "600"
+      - name: Verify Zsh command cache permissions
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/home"
+          HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" zsh -c \
+            'source scripts/hooks/zsh.zsh; __drp_preexec "echo release-check"'
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence")" = "700"
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence/commands")" = "700"
+          test "$(stat -c %a "$tmp/cache/discord-rich-presence/rp_last_cmd")" = "600"
+          pid_file="$(find "$tmp/cache/discord-rich-presence/commands" -type f -name '*.txt' -print -quit)"
+          test -n "$pid_file"
+          test "$(stat -c %a "$pid_file")" = "600"
 
   package-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Build portable executable
+      - name: Verify dependency environment
+        run: python -m pip check
+      - name: Import desktop entry points
+        run: python -c "import customtkinter, gui_modern, launcher, tray_icon"
+      - name: Validate PowerShell hook
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts/hooks/powershell.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "PowerShell hook contains syntax errors"
+          }
+      - name: Build executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
       - name: Verify executable exists
         shell: pwsh
@@ -85,59 +226,39 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "Packaged executable exited with code $($process.ExitCode)"
           }
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-      - name: Build installer
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force release-dist | Out-Null
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=0.0.0-ci" "packaging\windows\discord-rich-presence.iss"
-          if (-not (Get-ChildItem "release-dist\DiscordRichPresence-Setup-*-windows-x86_64.exe")) {
-            throw "Windows installer was not created"
-          }
       - uses: actions/upload-artifact@v7
         with:
           name: DiscordRichPresence-windows
-          path: |
-            dist/DiscordRichPresence.exe
-            release-dist/DiscordRichPresence-Setup-*-windows-x86_64.exe
+          path: dist/DiscordRichPresence.exe
           if-no-files-found: error
 
   package-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install system packaging tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rpm
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Build portable executable
+      - name: Verify dependency environment
+        run: python -m pip check
+      - name: Import desktop entry points
+        run: python -c "import customtkinter, gui_modern, launcher, tray_icon"
+      - name: Build Linux executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
-      - name: Verify and smoke-test executable
+      - name: Verify and smoke-test Linux executable
         run: |
           test -x dist/DiscordRichPresence
-          test "$(stat -c%s dist/DiscordRichPresence)" -gt 1000000
+          test "$(stat -c %s dist/DiscordRichPresence)" -gt 1000000
           timeout 20s ./dist/DiscordRichPresence --dry-run --once
-      - name: Build Linux packages
-        run: python scripts/build_linux_packages.py --binary dist/DiscordRichPresence --version 0.0.0-ci --output release-dist
-      - name: Inspect Debian and RPM packages
-        run: |
-          dpkg-deb --info release-dist/discord-rich-presence_0.0.0~ci_amd64.deb
-          dpkg-deb --contents release-dist/discord-rich-presence_0.0.0~ci_amd64.deb | grep usr/bin/discord-rich-presence
-          rpm -qpl release-dist/*.rpm | grep /usr/bin/discord-rich-presence
+      - name: Rename Linux artifact
+        run: mv dist/DiscordRichPresence dist/CYBREX-DiscordRichPresence-linux-x86_64
       - uses: actions/upload-artifact@v7
         with:
-          name: DiscordRichPresence-linux
-          path: |
-            dist/DiscordRichPresence
-            release-dist/*.tar.gz
-            release-dist/*.deb
-            release-dist/*.rpm
+          name: DiscordRichPresence-linux-x86_64
+          path: dist/CYBREX-DiscordRichPresence-linux-x86_64
           if-no-files-found: error

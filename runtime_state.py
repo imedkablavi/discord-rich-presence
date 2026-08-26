@@ -60,26 +60,62 @@ class RuntimeState:
         except psutil.AccessDenied:
             return True
 
+    @staticmethod
+    def _chmod_private(path: Path, mode: int) -> None:
+        if os.name != 'posix':
+            return
+        try:
+            os.chmod(path, mode)
+        except OSError:
+            pass
+
+    def _ensure_private_dir(self) -> None:
+        self.runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self._chmod_private(self.runtime_dir, 0o700)
+
     def _identity(self) -> Dict[str, Any]:
         return {'pid': self.pid, 'create_time': self.create_time}
 
     def _write_atomic(self, path: Path, data: Dict[str, Any]):
-        self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(path.suffix + '.tmp')
-        temp.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True), encoding='utf-8')
-        os.replace(temp, path)
+        self._ensure_private_dir()
+        temp = path.with_suffix(path.suffix + f'.{self.pid}.tmp')
+        payload = json.dumps(data, ensure_ascii=False, sort_keys=True).encode('utf-8')
+        fd = os.open(temp, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        try:
+            os.write(fd, payload)
+            try:
+                os.fsync(fd)
+            except OSError:
+                pass
+        finally:
+            os.close(fd)
+        self._chmod_private(temp, 0o600)
+        try:
+            os.replace(temp, path)
+            self._chmod_private(path, 0o600)
+        except Exception:
+            try:
+                temp.unlink()
+            except OSError:
+                pass
+            raise
 
     def acquire(self) -> bool:
         """Acquire the per-user service lock. Returns False if another instance is live."""
-        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_private_dir()
         identity = self._identity()
 
         for _ in range(2):
             try:
-                fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = os.open(
+                    self.lock_path,
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                    0o600,
+                )
             except FileExistsError:
                 existing = self._read_json(self.lock_path)
                 if self._same_process(existing):
+                    self._chmod_private(self.lock_path, 0o600)
                     return False
                 try:
                     self.lock_path.unlink()
@@ -93,6 +129,7 @@ class RuntimeState:
                 os.write(fd, json.dumps(identity).encode('utf-8'))
             finally:
                 os.close(fd)
+            self._chmod_private(self.lock_path, 0o600)
             try:
                 self.stop_path.unlink()
             except FileNotFoundError:

@@ -5,156 +5,337 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version used for non-publishing package validation"
-        required: true
-        default: "2.1.0-rc1"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          python-version: "3.12"
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - name: Resolve version
-        shell: pwsh
-        run: |
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $version = "${{ github.ref_name }}".TrimStart('v')
-          } else {
-            $version = "${{ inputs.version }}".TrimStart('v')
-          }
-          "BUILD_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: Stamp application version
-        shell: pwsh
-        run: python -c "import os, pathlib; pathlib.Path('version.py').write_text('__version__ = \"' + os.environ['BUILD_VERSION'] + '\"\n', encoding='utf-8')"
+      - name: Install validation dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Verify dependency environment
+        run: python -m pip check
+      - name: Stamp release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/write-version.py "${{ github.ref_name }}"
+      - name: Compile Python sources
+        run: python -m compileall -q .
+      - name: Run critical Ruff checks
+        run: python -m ruff check . --select E9,F63,F7,F82
+      - name: Run regression suite
+        run: python -m pytest -q
+
+  security-audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install release audit tooling
+        run: python -m pip install "pip-audit>=2.9,<3" "bandit>=1.8,<2"
+      - name: Audit runtime and build dependencies
+        run: pip-audit -r requirements-dev.txt
+      - name: Scan Python for high-severity security issues
+        if: runner.os == 'Linux' && always()
+        run: bandit -q -r . -x ./tests,./build,./dist -lll
+
+  windows:
+    needs: [validate, security-audit]
+    runs-on: windows-latest
+    timeout-minutes: 45
+    outputs:
+      windows-signed: ${{ steps.signing.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Build Windows portable executable
+      - name: Verify dependency environment
+        run: python -m pip check
+      - name: Stamp release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/write-version.py "${{ github.ref_name }}"
+      - name: Import desktop entry points
+        run: python -c "import app_version, customtkinter, gui_modern, launcher, tray_icon, updater"
+      - name: Build Windows executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
-      - name: Smoke-test portable executable
+      - name: Detect Windows signing configuration
+        id: signing
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          $ready = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_BASE64) -and `
+                   -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_PASSWORD)
+          "enabled=$($ready.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Block unsigned stable Windows releases
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && steps.signing.outputs.enabled != 'true'
+        shell: pwsh
+        run: throw "Stable Windows releases must be code-signed. Configure and verify the signing integration first, or publish a prerelease tag."
+      - name: Sign Windows executable
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: ./scripts/sign-windows.ps1 -Path "dist/DiscordRichPresence.exe"
+      - name: Note unsigned validation or prerelease build
+        if: steps.signing.outputs.enabled != 'true'
+        shell: pwsh
+        run: Write-Warning "Windows artifacts are unsigned. Stable tagged publication is blocked until signing succeeds."
+      - name: Smoke-test packaged executable
         shell: pwsh
         run: |
+          if (-not (Test-Path "dist/DiscordRichPresence.exe" -PathType Leaf)) { throw "Packaged executable was not created" }
+          if ((Get-Item "dist/DiscordRichPresence.exe").Length -lt 1000000) { throw "Packaged executable is unexpectedly small" }
           $process = Start-Process -FilePath "dist/DiscordRichPresence.exe" -ArgumentList "--dry-run", "--once" -PassThru
           if (-not $process.WaitForExit(20000)) {
             $process.Kill()
-            throw "Portable executable did not exit after dry-run smoke test"
+            throw "Packaged executable did not exit after a one-cycle dry run"
           }
-          if ($process.ExitCode -ne 0) { throw "Portable executable exited with $($process.ExitCode)" }
-      - name: Install Inno Setup
+          if ($process.ExitCode -ne 0) { throw "Packaged executable exited with code $($process.ExitCode)" }
+      - name: Install pinned Inno Setup compiler
         shell: pwsh
-        run: choco install innosetup --no-progress -y
-      - name: Assemble Windows release assets
+        run: choco install innosetup --version=6.7.1 --yes --no-progress
+      - name: Build Windows installer
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force release-dist | Out-Null
-          Copy-Item "dist/DiscordRichPresence.exe" "release-dist/DiscordRichPresence-windows-x86_64.exe"
-          Compress-Archive -Path "dist/DiscordRichPresence.exe", "README.md", "config.example.yaml", "LICENSE" -DestinationPath "release-dist/DiscordRichPresence-$env:BUILD_VERSION-windows-x86_64-portable.zip"
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:BUILD_VERSION" "packaging\windows\discord-rich-presence.iss"
-      - uses: actions/upload-artifact@v7
+          $version = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.0.0-dev' }
+          $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
+          & $iscc "/DAppVersion=$version" "packaging/windows/CYBREX-Presence.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path "dist/CYBREX-Presence-Setup.exe" -PathType Leaf)) { throw "Windows installer was not created" }
+          if ((Get-Item "dist/CYBREX-Presence-Setup.exe").Length -lt 1000000) { throw "Windows installer is unexpectedly small" }
+      - name: Sign Windows installer
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: ./scripts/sign-windows.ps1 -Path "dist/CYBREX-Presence-Setup.exe"
+      - name: Silent-install, launch and uninstall
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP "CYBREX-Presence-Release-QA"
+          $installer = Resolve-Path "dist/CYBREX-Presence-Setup.exe"
+          $setup = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$target" -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Installer exited with code $($setup.ExitCode)" }
+          $installed = Join-Path $target "DiscordRichPresence.exe"
+          if (-not (Test-Path $installed -PathType Leaf)) { throw "Installed executable was not found" }
+          $process = Start-Process -FilePath $installed -ArgumentList "--dry-run", "--once" -PassThru
+          if (-not $process.WaitForExit(20000)) {
+            $process.Kill()
+            throw "Installed executable did not exit after a one-cycle dry run"
+          }
+          if ($process.ExitCode -ne 0) { throw "Installed executable exited with code $($process.ExitCode)" }
+          $uninstaller = Join-Path $target "unins000.exe"
+          if (-not (Test-Path $uninstaller -PathType Leaf)) { throw "Uninstaller was not created" }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with code $($uninstall.ExitCode)" }
+      - name: Validate and package Browser Companion
+        shell: pwsh
+        run: |
+          python -m json.tool browser_extension/manifest.json | Out-Null
+          node --check browser_extension/background.js
+          node --check browser_extension/content.js
+          node --check browser_extension/options.js
+          $stage = Join-Path $env:RUNNER_TEMP "CYBREX-Browser-Companion"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          foreach ($file in @("manifest.json", "background.js", "content.js", "options.html", "options.js", "README.md")) {
+            Copy-Item "browser_extension/$file" $stage
+          }
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/CYBREX-Browser-Companion.zip" -Force
+      - name: Generate Windows SHA-256 checksums
+        shell: pwsh
+        run: |
+          foreach ($file in @("dist/DiscordRichPresence.exe", "dist/CYBREX-Presence-Setup.exe", "dist/CYBREX-Browser-Companion.zip")) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            $name = Split-Path $file -Leaf
+            "$hash  $name" | Set-Content -Encoding ascii "$file.sha256"
+          }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: release-windows
-          path: release-dist/*
+          name: release-windows-and-extension
+          path: |
+            dist/DiscordRichPresence.exe
+            dist/DiscordRichPresence.exe.sha256
+            dist/CYBREX-Presence-Setup.exe
+            dist/CYBREX-Presence-Setup.exe.sha256
+            dist/CYBREX-Browser-Companion.zip
+            dist/CYBREX-Browser-Companion.zip.sha256
           if-no-files-found: error
 
   linux:
-    runs-on: ubuntu-latest
+    needs: [validate, security-audit]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          python-version: "3.12"
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - name: Resolve version
-        shell: bash
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            version="${{ github.ref_name }}"
-          else
-            version="${{ inputs.version }}"
-          fi
-          echo "BUILD_VERSION=${version#v}" >> "$GITHUB_ENV"
-      - name: Stamp application version
-        run: python -c "import os, pathlib; pathlib.Path('version.py').write_text('__version__ = \"' + os.environ['BUILD_VERSION'] + '\"\n', encoding='utf-8')"
-      - name: Install system packaging tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rpm
       - name: Install build dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Build Linux portable executable
+      - name: Verify dependency environment
+        run: python -m pip check
+      - name: Stamp release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/write-version.py "${{ github.ref_name }}"
+      - name: Import desktop entry points
+        run: python -c "import app_version, customtkinter, gui_modern, launcher, tray_icon, updater"
+      - name: Build Linux executable
         run: pyinstaller --clean --noconfirm discord-rich-presence.spec
-      - name: Smoke-test portable executable
-        run: timeout 20s ./dist/DiscordRichPresence --dry-run --once
-      - name: Assemble Linux release assets
+      - name: Smoke-test packaged executable
         run: |
-          python scripts/build_linux_packages.py --binary dist/DiscordRichPresence --version "$BUILD_VERSION" --output release-dist
-          cp dist/DiscordRichPresence release-dist/DiscordRichPresence-linux-x86_64
-          chmod +x release-dist/DiscordRichPresence-linux-x86_64
-      - uses: actions/upload-artifact@v7
+          test -x dist/DiscordRichPresence
+          test "$(stat -c %s dist/DiscordRichPresence)" -gt 1000000
+          timeout 20s ./dist/DiscordRichPresence --dry-run --once
+      - name: Rename and checksum Linux executable
+        run: |
+          mv dist/DiscordRichPresence dist/CYBREX-DiscordRichPresence-linux-x86_64
+          (cd dist && sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > CYBREX-DiscordRichPresence-linux-x86_64.sha256)
+      - name: Build Linux user-level installer bundle
+        run: |
+          set -euo pipefail
+          mkdir -p dist/CYBREX-Presence-linux-x86_64
+          cp dist/CYBREX-DiscordRichPresence-linux-x86_64 dist/CYBREX-Presence-linux-x86_64/CYBREX-DiscordRichPresence-linux-x86_64
+          cp packaging/linux/install-user.sh dist/CYBREX-Presence-linux-x86_64/install-user.sh
+          chmod 755 dist/CYBREX-Presence-linux-x86_64/CYBREX-DiscordRichPresence-linux-x86_64 dist/CYBREX-Presence-linux-x86_64/install-user.sh
+          (cd dist/CYBREX-Presence-linux-x86_64 && sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > SHA256SUMS)
+          tar -C dist -czf dist/CYBREX-Presence-linux-x86_64.tar.gz CYBREX-Presence-linux-x86_64
+          (cd dist && sha256sum CYBREX-Presence-linux-x86_64.tar.gz > CYBREX-Presence-linux-x86_64.tar.gz.sha256)
+      - name: Install, launch and uninstall Linux bundle
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/cybrex-release-home"
+          export XDG_DATA_HOME="$HOME/.local/share"
+          mkdir -p "$HOME"
+          bash dist/CYBREX-Presence-linux-x86_64/install-user.sh
+          target="$HOME/.local/lib/cybrex-presence/DiscordRichPresence"
+          link="$HOME/.local/bin/cybrex-presence"
+          desktop="$XDG_DATA_HOME/applications/cybrex-presence.desktop"
+          test -x "$target"
+          test -w "$target"
+          test -L "$link"
+          test "$(readlink -f "$link")" = "$target"
+          test -f "$desktop"
+          timeout 20s "$target" --dry-run --once
+          bash dist/CYBREX-Presence-linux-x86_64/install-user.sh --uninstall
+          test ! -e "$target"
+          test ! -e "$link"
+          test ! -e "$desktop"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-linux
-          path: release-dist/*
+          path: |
+            dist/CYBREX-DiscordRichPresence-linux-x86_64
+            dist/CYBREX-DiscordRichPresence-linux-x86_64.sha256
+            dist/CYBREX-Presence-linux-x86_64.tar.gz
+            dist/CYBREX-Presence-linux-x86_64.tar.gz.sha256
           if-no-files-found: error
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [windows, linux]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          python-version: "3.12"
-      - uses: actions/download-artifact@v7
+          name: release-windows-and-extension
+          path: release-assets
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          pattern: release-*
-          merge-multiple: true
-          path: release-dist
-      - name: Require update signing key
+          name: release-linux
+          path: release-assets
+      - name: Verify release checksums before publishing
+        run: |
+          cd release-assets
+          sha256sum -c DiscordRichPresence.exe.sha256
+          sha256sum -c CYBREX-Presence-Setup.exe.sha256
+          sha256sum -c CYBREX-Browser-Companion.zip.sha256
+          sha256sum -c CYBREX-DiscordRichPresence-linux-x86_64.sha256
+          sha256sum -c CYBREX-Presence-linux-x86_64.tar.gz.sha256
+      - name: Create checksums and build provenance
         env:
-          UPDATE_SIGNING_PRIVATE_KEY_B64: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY_B64 }}
+          WINDOWS_SIGNED: ${{ needs.windows.outputs.windows-signed }}
         run: |
-          if [ -z "$UPDATE_SIGNING_PRIVATE_KEY_B64" ]; then
-            echo "UPDATE_SIGNING_PRIVATE_KEY_B64 is required for a tagged release" >&2
-            exit 1
-          fi
-      - name: Install signing dependency
-        run: python -m pip install "cryptography>=44,<47"
-      - name: Create signed updater manifest
-        env:
-          UPDATE_SIGNING_PRIVATE_KEY_B64: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY_B64 }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
-          python scripts/sign_release_manifest.py \
-            --version "$VERSION" \
-            --base-url "$BASE_URL" \
-            --private-key-b64 "$UPDATE_SIGNING_PRIVATE_KEY_B64" \
-            --output release-dist/update-manifest.json \
-            --asset release-dist/DiscordRichPresence-windows-x86_64.exe windows x86_64 portable \
-            --asset release-dist/DiscordRichPresence-linux-x86_64 linux x86_64 binary
-      - name: Generate SHA-256 checksums
-        run: |
-          cd release-dist
-          sha256sum * > SHA256SUMS.txt
+          cat > release-assets/BUILD-PROVENANCE.txt <<EOF
+          repository=${GITHUB_REPOSITORY}
+          tag=${GITHUB_REF_NAME}
+          commit=${GITHUB_SHA}
+          workflow_run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          windows_authenticode=${WINDOWS_SIGNED}
+          EOF
+          (
+            cd release-assets
+            cat DiscordRichPresence.exe.sha256 \
+                CYBREX-Presence-Setup.exe.sha256 \
+                CYBREX-Browser-Companion.zip.sha256 \
+                CYBREX-DiscordRichPresence-linux-x86_64.sha256 \
+                CYBREX-Presence-linux-x86_64.tar.gz.sha256 \
+              > SHA256SUMS.txt
+          )
       - name: Publish GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
           release_flags=()
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
             release_flags+=(--prerelease)
           fi
-          gh release create "${GITHUB_REF_NAME}" release-dist/* \
+          gh release create "${GITHUB_REF_NAME}" \
+            release-assets/CYBREX-Presence-Setup.exe \
+            release-assets/CYBREX-Presence-Setup.exe.sha256 \
+            release-assets/DiscordRichPresence.exe \
+            release-assets/DiscordRichPresence.exe.sha256 \
+            release-assets/CYBREX-Presence-linux-x86_64.tar.gz \
+            release-assets/CYBREX-Presence-linux-x86_64.tar.gz.sha256 \
+            release-assets/CYBREX-DiscordRichPresence-linux-x86_64 \
+            release-assets/CYBREX-DiscordRichPresence-linux-x86_64.sha256 \
+            release-assets/CYBREX-Browser-Companion.zip \
+            release-assets/CYBREX-Browser-Companion.zip.sha256 \
+            release-assets/SHA256SUMS.txt \
+            release-assets/BUILD-PROVENANCE.txt \
             --generate-notes \
-            --title "Discord Rich Presence ${GITHUB_REF_NAME}" \
+            --title "CYBREX Presence ${GITHUB_REF_NAME}" \
             "${release_flags[@]}"

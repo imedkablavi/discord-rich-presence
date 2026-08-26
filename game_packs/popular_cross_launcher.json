@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "description": "Major popular titles primarily associated with Riot, Battle.net, Epic, Microsoft, standalone and other launcher ecosystems.",
+  "games": [
+    "Fortnite",
+    "VALORANT",
+    "League of Legends",
+    "Minecraft",
+    "Roblox",
+    "World of Warcraft",
+    "Diablo IV",
+    "Hearthstone",
+    "StarCraft II",
+    "Rocket League",
+    "Genshin Impact",
+    "Honkai: Star Rail",
+    "Zenless Zone Zero",
+    "Escape from Tarkov",
+    "osu!",
+    "The Sims 4",
+    "World of Tanks",
+    "World of Warships",
+    "Guild Wars 2",
+    "Old School RuneScape"
+  ]
+}

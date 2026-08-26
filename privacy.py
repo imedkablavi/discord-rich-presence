@@ -2,14 +2,22 @@
 
 import logging
 import re
+import shlex
+import urllib.parse
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from config import Config
 
 
 class PrivacyRedactor:
     """Apply the documented off/balanced/strict privacy contracts."""
+
+    SENSITIVE_ARG_MARKERS = (
+        'password', 'passwd', 'token', 'secret', 'api_key', 'api-key',
+        'apikey', 'auth', 'authorization', 'access_key', 'access-key',
+        'private_key', 'private-key',
+    )
 
     def __init__(self, config: Config):
         self.config = config
@@ -55,13 +63,88 @@ class PrivacyRedactor:
                 result['filename'] = self._basename(str(result.get('filename', '')))
             if 'project' in result:
                 result['project'] = self._shorten_path(str(result.get('project', '') or ''))
-        elif activity_type == 'browser' and 'page_title' in result:
-            result['page_title'] = self._redact_sensitive_patterns(str(result.get('page_title', '')))
+        elif activity_type == 'browser':
+            raw_title = str(result.get('page_title', '') or '')
+            safe_title = self._redact_sensitive_patterns(raw_title)
+            result['page_title'] = safe_title
+            if safe_title != raw_title:
+                result['url'] = None
+            elif bool(result.get('url_is_exact')):
+                # Exact Companion URLs have their own structured sanitizer below.
+                # Do not run the generic text regexes over the serialized URL a
+                # second time or keys such as access_token become malformed.
+                result['url'] = self._sanitize_exact_browser_url(result.get('url'))
 
         for key, value in list(result.items()):
-            if isinstance(value, str):
-                result[key] = self._redact_sensitive_patterns(value)
+            if not isinstance(value, str):
+                continue
+            if activity_type == 'browser' and key == 'url':
+                continue
+            result[key] = self._redact_sensitive_patterns(value)
         return result
+
+    def _sanitize_exact_browser_url(self, value: Any) -> Optional[str]:
+        """Limit exact companion URLs according to the balanced-mode URL policy."""
+        raw = str(value or '').strip()
+        if not raw:
+            return None
+        policy = str(self.config.get('privacy.browser_url_mode', 'domain') or 'domain').lower()
+        if policy == 'none':
+            return None
+        if policy not in {'domain', 'path', 'full'}:
+            policy = 'domain'
+
+        try:
+            parsed = urllib.parse.urlsplit(raw)
+            host = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            return None
+        if parsed.scheme not in {'http', 'https'} or not host:
+            return None
+
+        # Rebuild netloc from hostname/port only. Userinfo is intentionally
+        # discarded so credentials can never be published even if a browser or
+        # custom integration somehow supplies them.
+        if ':' in host and not host.startswith('['):
+            host = f'[{host}]'
+        netloc = host
+        if port:
+            netloc = f'{netloc}:{port}'
+
+        if policy == 'domain':
+            return urllib.parse.urlunsplit((parsed.scheme, netloc, '', '', ''))
+
+        # A token or reset secret can live in a URL path in either ``path`` or
+        # ``full`` mode. Decode path segments for pattern detection, redact, then
+        # re-encode them before the policy decides whether query data is kept.
+        try:
+            decoded_path = urllib.parse.unquote(parsed.path or '/', errors='strict')
+        except (UnicodeDecodeError, ValueError):
+            return None
+        redacted_path = self._redact_sensitive_patterns(decoded_path)
+        safe_path = urllib.parse.quote(
+            redacted_path,
+            safe="/:@-._~!$&'()*+,;=[]",
+        ) or '/'
+
+        if policy == 'path':
+            return urllib.parse.urlunsplit((parsed.scheme, netloc, safe_path, '', ''))
+
+        query_items = []
+        try:
+            for key, item_value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True):
+                normalized = key.lower().replace('-', '_')
+                sensitive_key = any(marker.replace('-', '_') in normalized for marker in self.SENSITIVE_ARG_MARKERS)
+                redacted_value = self._redact_sensitive_patterns(item_value)
+                query_items.append((key, '[REDACTED]' if sensitive_key else redacted_value))
+        except ValueError:
+            query_items = []
+        query = urllib.parse.urlencode(query_items, doseq=True)
+
+        # Fragments are intentionally dropped even in full mode because OAuth
+        # and SPA tokens are commonly placed there.
+        return urllib.parse.urlunsplit((parsed.scheme, netloc, safe_path, query, ''))
 
     def _apply_strict_mode(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         activity_type = activity.get('type')
@@ -79,7 +162,7 @@ class PrivacyRedactor:
             return {
                 'type': 'browser', 'browser_name': 'Browser',
                 'is_private': bool(activity.get('is_private')), 'page_title': 'Browsing',
-                'service': '', 'url': None
+                'service': '', 'url': None, 'url_is_exact': False
             }
         if activity_type == 'media':
             return {
@@ -92,18 +175,46 @@ class PrivacyRedactor:
             }
         return {'type': 'application', 'app_name': 'Application', 'window_title': ''}
 
+    @staticmethod
+    def _split_command(command: str) -> List[str]:
+        try:
+            # posix=False preserves quoted Windows/PowerShell-looking tokens while
+            # still keeping a quoted multi-word value as one token.
+            return shlex.split(command, posix=False)
+        except ValueError:
+            # Never fail activity processing because a shell line contains an
+            # unmatched quote; the conservative whitespace fallback still lets
+            # the pattern redactor run.
+            return command.split()
+
     def _redact_command_balanced(self, command: str) -> str:
         if not command:
             return command
-        parts = command.split()
+        parts = self._split_command(command)
         if not parts:
             return command
+
         redacted = [parts[0]]
+        redact_next = False
         for part in parts[1:]:
-            lower = part.lower()
-            if any(keyword in lower for keyword in ('password', 'token', 'secret', 'key', 'api')):
+            if redact_next:
                 redacted.append('[REDACTED]')
-            elif self._looks_like_path(part):
+                redact_next = False
+                continue
+
+            lower = part.lower()
+            normalized = lower.lstrip('-/').replace('.', '_')
+            sensitive = any(marker in normalized for marker in self.SENSITIVE_ARG_MARKERS)
+            if sensitive:
+                if '=' in part or (':' in part and not part.startswith(('http://', 'https://'))):
+                    name = re.split(r'[=:]', part, maxsplit=1)[0]
+                    redacted.append(f'{name}=[REDACTED]')
+                else:
+                    redacted.append(part if part.startswith('-') else '[REDACTED]')
+                    redact_next = True
+                continue
+
+            if self._looks_like_path(part):
                 redacted.append(self._basename(part))
             elif len(part) > 32 and '=' not in part:
                 redacted.append('[...]')
@@ -120,7 +231,6 @@ class PrivacyRedactor:
         if self.hide_home_paths:
             home = str(Path.home())
             redacted = redacted.replace(home, '~')
-            # Windows paths can arrive with either slash style.
             redacted = redacted.replace(home.replace('/', '\\'), '~')
         return re.sub(r'\b[A-Za-z0-9_-]{40,}\b', '[TOKEN]', redacted)
 
