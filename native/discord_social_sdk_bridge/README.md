@@ -6,39 +6,60 @@ The optional helper in this directory uses Discord Social SDK `Activity::SetName
 
 ## Trust boundary
 
-- The official Discord Social SDK is **not vendored** in this repository.
-- The helper communicates with the Python process only over its private stdin/stdout pipes.
+- The raw official Discord Social SDK archive is **not vendored** in this repository.
+- The helper communicates with the Python process only over private stdin/stdout pipes.
 - It does not open a localhost/network listener.
-- It does not implement Discord user OAuth, access-token, refresh-token, or account-login flows.
+- It does not implement Discord user OAuth, access-token, refresh-token, or account-login flows. Direct desktop Rich Presence does not require those flows.
 - The helper receives only the already-sanitized Rich Presence fields used by CYBREX.
+- Unknown protocol fields are rejected.
+- If an asynchronous Rich Presence update times out, the helper recreates its SDK client before accepting another update so pending native callback state cannot grow without bound.
 - If the helper is missing or fails, CYBREX automatically falls back to legacy RPC rather than stopping Presence.
 
 ## Maintainer build
 
-Download the current official C++ Social SDK for the CYBREX Discord application from Discord's Developer Portal and extract it locally. Do not commit the SDK archive, libraries, credentials, or account material to this repository.
+Download the current official standalone C++ Social SDK for the CYBREX Discord application from Discord's Developer Portal and extract it locally. Do not commit the SDK archive, SDK libraries, credentials, or account material to this repository.
 
-Configure and build the helper with CMake:
+The preferred build/staging command is:
 
 ```bash
-cmake -S native/discord_social_sdk_bridge \
-  -B native/discord_social_sdk_bridge/build \
-  -DDISCORD_SOCIAL_SDK_ROOT=/absolute/path/to/extracted/discord-social-sdk
-
-cmake --build native/discord_social_sdk_bridge/build --config Release
+python scripts/build_social_sdk_bridge.py \
+  --sdk-root /absolute/path/to/discord_social_sdk \
+  --sdk-version 1.10.18687 \
+  --output-dir build/social-sdk-bundle
 ```
 
-The current CMake configuration expects the official SDK archive to expose `include/discordpp.h` plus the release library/runtime directories used by the Discord C++ SDK. If Discord changes its archive layout, update the CMake paths after checking the current official documentation rather than guessing or downloading third-party copies.
+The script validates `discordpp.h`, `cdiscord.h`, the platform runtime, linker input and `License-Notices.txt`, builds the helper with CMake, then stages only:
 
-## Local discovery
+- `cybrex-discord-social-sdk` / `cybrex-discord-social-sdk.exe`
+- `libdiscord_partner_sdk.so` / `discord_partner_sdk.dll`
+- `Discord-Social-SDK-Notices.txt`
+- `SOCIAL_SDK_MANIFEST.json` with SHA-256 and size metadata
 
-CYBREX searches for the helper next to the packaged application, in the local source/build directories, and on `PATH`. A developer can explicitly point to a locally built helper with:
+The current bridge API was compile-validated against Discord Social SDK **1.10.18687**. This is a build compatibility statement, not a claim that every Discord Desktop/environment combination has been manually qualified.
+
+## One-file packaging
+
+Official CYBREX builds can set:
+
+```bash
+export CYBREX_SOCIAL_SDK_BUNDLE_DIR="$PWD/build/social-sdk-bundle"
+pyinstaller --clean --noconfirm discord-rich-presence.spec
+```
+
+The PyInstaller spec embeds the verified helper and Discord runtime inside the normal single CYBREX executable. At runtime PyInstaller extracts them together under its private runtime directory, and `social_sdk_transport.py` discovers the helper there first. This preserves the existing single-file installer and updater model; users do not need to manage a separate SDK installation.
+
+A build without `CYBREX_SOCIAL_SDK_BUNDLE_DIR` remains valid and falls back to legacy RPC. A build that sets the variable but provides an incomplete bundle fails closed during packaging.
+
+## Local development discovery
+
+A developer can also explicitly point CYBREX to a locally built helper with:
 
 ```bash
 export CYBREX_DISCORD_SOCIAL_SDK_HELPER=/absolute/path/to/cybrex-discord-social-sdk
 ```
 
-On Linux, keep the official Discord Social SDK runtime library next to the helper as produced by the CMake post-build step. On Windows, keep the corresponding SDK DLL next to the helper executable.
+On Linux, keep `libdiscord_partner_sdk.so` next to the helper. On Windows, keep `discord_partner_sdk.dll` next to the helper executable.
 
 ## Release requirement
 
-Do not claim dynamic top-level activity names in a public release until the helper is built from the official SDK and validated on current Discord Desktop on both intended operating systems. Legacy RPC remains the safe fallback.
+Do not promote a Stable release as supporting dynamic top-level activity names until the helper is built from the official SDK and manually validated with current Discord Desktop on both intended operating systems. Legacy RPC remains the safe fallback.
