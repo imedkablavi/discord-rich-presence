@@ -45,6 +45,16 @@ def test_pack_builds_safe_steam_activity(tmp_path):
     assert activity['artwork_url'].endswith('/steam/apps/123/header.jpg')
 
 
+def test_bundled_pack_detects_squad_game_process_exactly():
+    registry = GamePackRegistry()
+    activity = registry.activity('SquadGame.exe')
+    assert activity is not None
+    assert activity['game_name'] == 'Squad'
+    assert activity['launcher'] == 'Steam'
+    assert activity['steam_appid'] == 393380
+    assert registry.activity('SquadGameServer.exe') is None
+
+
 def test_invalid_schema_fails_closed(tmp_path):
     path = _write(tmp_path, {'schema': 99, 'games': []})
     with pytest.raises(ValueError, match='schema'):
