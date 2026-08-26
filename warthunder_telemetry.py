@@ -42,6 +42,9 @@ _COUNTRY_PREFIXES = {
     "fr", "france", "it", "italy", "cn", "china", "sw", "sweden", "il",
     "israel",
 }
+_ACRONYM_TOKENS = {
+    "mk", "f", "bf", "fw", "mig", "su", "yak", "t", "m", "p", "a", "iaf",
+}
 
 
 def _clean_text(value: object, maximum: int = _MAX_TEXT) -> str:
@@ -69,10 +72,10 @@ def _friendly_vehicle(raw: object) -> tuple[str, str]:
         upper = token.upper()
         if len(token) <= 4 and any(ch.isdigit() for ch in token):
             display_parts.append(upper)
-        elif token.lower() in {"mk", "f", "bf", "fw", "mig", "su", "yak", "t", "m", "p", "a"}:
+        elif token.lower() in _ACRONYM_TOKENS:
             display_parts.append(upper)
         else:
-            display_parts.append(token.upper() if len(token) <= 3 else token.capitalize())
+            display_parts.append(token.capitalize())
     return " ".join(display_parts)[:80], model_id
 
 
