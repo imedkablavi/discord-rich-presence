@@ -18,9 +18,6 @@ def _normalize_packaged_args():
     if not getattr(sys, 'frozen', False):
         return
 
-    # The source GUI starts the service as `python main.py`. In a one-file build
-    # sys.executable is the application itself, so treat a trailing main.py
-    # argument as a request to start this executable in service/tray mode.
     sys.argv[:] = [
         arg for index, arg in enumerate(sys.argv)
         if index == 0 or _argument_name(arg) != 'main.py'
@@ -35,8 +32,6 @@ def _setup_message(message: str, *, error: bool = False) -> None:
     if stream is not None:
         print(message, file=stream, flush=True)
         return
-    # PyInstaller windowed builds have no console streams. Keep setup/repair
-    # commands usable there by falling back to a small native dialog.
     if getattr(sys, 'frozen', False):
         try:
             from tkinter import messagebox
@@ -49,7 +44,6 @@ def _setup_message(message: str, *, error: bool = False) -> None:
 
 
 def _handle_cs2_setup_command() -> Optional[int]:
-    """Allow packaged users to repair/install CS2 GSI without a source checkout."""
     if '--install-cs2-gsi' not in sys.argv:
         return None
 
@@ -99,16 +93,12 @@ def _handle_update_command() -> Optional[int]:
         if not getattr(sys, 'frozen', False):
             raise UpdateError('Automatic installation is only available in packaged builds.')
 
-        # Stop a separate tray/service instance before replacing the executable.
-        # The Windows helper still waits for this updater process itself to exit.
         try:
             from runtime_state import RuntimeState
             runtime = RuntimeState()
             if runtime.read_active():
                 runtime.terminate_active(timeout=5)
         except Exception:
-            # Failing to find/stop a stale runtime record must not bypass checksum
-            # verification; the platform-specific replace step remains fail-safe.
             pass
 
         result = install_update(info, restart_args=['--gui'])
@@ -145,6 +135,11 @@ def _handle_game_library_command() -> Optional[int]:
 
 
 def main() -> int:
+    # Apply before any Config instance is created. Optional malformed Rich
+    # Presence URLs are dropped instead of making the whole app unstartable.
+    from config_hardening import apply_config_hardening
+    apply_config_hardening()
+
     update_result = _handle_update_command()
     if update_result is not None:
         return update_result
@@ -176,11 +171,7 @@ def main() -> int:
 
     _normalize_packaged_args()
 
-    # Install fixed-worker loopback servers before importing the service stack.
-    # This prevents long-running Browser Companion / CS2 traffic from creating a
-    # fresh OS thread for every request and growing RSS on Linux.
     from resource_hardening import apply_resource_hardening
-
     apply_resource_hardening()
     from main import main as service_main
     service_main()
