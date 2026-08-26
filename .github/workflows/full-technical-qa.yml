@@ -78,9 +78,9 @@ jobs:
       - name: Run 5k HTTP + 30k activity memory soak
         run: PYTHONPATH=. python scripts/qa_memory_soak.py
 
-  linux-packaged-gui-soak:
+  linux-packaged-resource-soak:
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -98,7 +98,9 @@ jobs:
       - name: Smoke packaged executable
         run: timeout 20s ./dist/DiscordRichPresence --dry-run --once
       - name: Soak packaged GUI process tree
-        run: xvfb-run -a python scripts/qa_process_tree_soak.py ./dist/DiscordRichPresence
+        run: xvfb-run -a python scripts/qa_process_tree_soak.py ./dist/DiscordRichPresence gui
+      - name: Soak packaged tray + offline Discord reconnect path
+        run: xvfb-run -a python scripts/qa_process_tree_soak.py ./dist/DiscordRichPresence tray
 
   full-regression-suite:
     runs-on: ubuntu-latest
