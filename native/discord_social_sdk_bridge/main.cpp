@@ -12,6 +12,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace {
 constexpr std::size_t kMaxLineBytes = 16 * 1024;
@@ -19,6 +20,14 @@ constexpr auto kCallbackTimeout = std::chrono::seconds(4);
 using Fields = std::unordered_map<std::string, std::string>;
 
 enum class ReadStatus { Line, TooLong, Eof };
+enum class ApplyResult { Success, Failed, TimedOut };
+
+const std::unordered_set<std::string> kAllowedUpdateFields = {
+    "name", "activity_type", "details", "state", "details_url", "state_url",
+    "large_image", "large_text", "large_url", "small_image", "small_text",
+    "small_url", "start", "end", "button1_label", "button1_url",
+    "button2_label", "button2_url"
+};
 
 ReadStatus read_bounded_line(std::istream& input, std::string& output) {
     output.clear();
@@ -56,7 +65,9 @@ std::optional<std::string> percent_decode(const std::string& input) {
         const int hi = hex_value(input[i + 1]);
         const int lo = hex_value(input[i + 2]);
         if (hi < 0 || lo < 0) return std::nullopt;
-        output.push_back(static_cast<char>((hi << 4) | lo));
+        const char decoded = static_cast<char>((hi << 4) | lo);
+        if (decoded == '\0') return std::nullopt;
+        output.push_back(decoded);
         i += 2;
     }
     return output;
@@ -64,6 +75,7 @@ std::optional<std::string> percent_decode(const std::string& input) {
 
 bool parse_line(const std::string& line, std::string& command, Fields& fields) {
     if (line.empty() || line.size() > kMaxLineBytes) return false;
+    fields.clear();
     std::size_t start = 0;
     std::size_t end = line.find('\t');
     command = line.substr(0, end);
@@ -112,21 +124,29 @@ const std::string* field(const Fields& fields, const char* key) {
     return it == fields.end() ? nullptr : &it->second;
 }
 
+bool valid_update_fields(const Fields& fields) {
+    for (const auto& item : fields) {
+        if (kAllowedUpdateFields.find(item.first) == kAllowedUpdateFields.end()) return false;
+    }
+    return true;
+}
+
 void print_ok() { std::cout << "OK\n" << std::flush; }
 void print_error(const char* code) {
     std::cout << "ERR\tcode=" << code << "\n" << std::flush;
 }
 
-bool apply_activity(const std::shared_ptr<discordpp::Client>& client, const Fields& fields) {
+ApplyResult apply_activity(const std::shared_ptr<discordpp::Client>& client, const Fields& fields) {
+    if (!valid_update_fields(fields)) return ApplyResult::Failed;
     const std::string* name = field(fields, "name");
-    if (!name || name->size() < 2 || name->size() > 128) return false;
+    if (!name || name->size() < 2 || name->size() > 128) return ApplyResult::Failed;
 
     discordpp::Activity activity{};
     activity.SetName(*name);
 
     if (const auto* raw = field(fields, "activity_type")) {
         auto parsed = parse_int(*raw);
-        if (!parsed || *parsed < 0 || *parsed > 6) return false;
+        if (!parsed || *parsed < 0 || *parsed > 6) return ApplyResult::Failed;
         activity.SetType(static_cast<discordpp::ActivityTypes>(*parsed));
     }
     if (const auto* value = field(fields, "details")) activity.SetDetails(*value);
@@ -154,12 +174,12 @@ bool apply_activity(const std::shared_ptr<discordpp::Client>& client, const Fiel
         discordpp::ActivityTimestamps timestamps{};
         if (start_raw) {
             auto value = parse_u64(*start_raw);
-            if (!value) return false;
+            if (!value) return ApplyResult::Failed;
             timestamps.SetStart(*value);
         }
         if (end_raw) {
             auto value = parse_u64(*end_raw);
-            if (!value) return false;
+            if (!value) return ApplyResult::Failed;
             timestamps.SetEnd(*value);
         }
         activity.SetTimestamps(timestamps);
@@ -171,7 +191,7 @@ bool apply_activity(const std::shared_ptr<discordpp::Client>& client, const Fiel
         const auto* label = field(fields, label_key.c_str());
         const auto* url = field(fields, url_key.c_str());
         if (!label && !url) continue;
-        if (!label || !url) return false;
+        if (!label || !url) return ApplyResult::Failed;
         discordpp::ActivityButton button{};
         button.SetLabel(*label);
         button.SetUrl(*url);
@@ -191,13 +211,20 @@ bool apply_activity(const std::shared_ptr<discordpp::Client>& client, const Fiel
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     discordpp::RunCallbacks();
-    return finished.load(std::memory_order_acquire) && successful.load(std::memory_order_relaxed);
+    if (!finished.load(std::memory_order_acquire)) return ApplyResult::TimedOut;
+    return successful.load(std::memory_order_relaxed) ? ApplyResult::Success : ApplyResult::Failed;
+}
+
+std::shared_ptr<discordpp::Client> make_client(std::uint64_t application_id) {
+    auto client = std::make_shared<discordpp::Client>();
+    client->SetApplicationId(application_id);
+    return client;
 }
 }  // namespace
 
 int main() {
-    auto client = std::make_shared<discordpp::Client>();
-    bool application_set = false;
+    std::shared_ptr<discordpp::Client> client = std::make_shared<discordpp::Client>();
+    std::optional<std::uint64_t> application_id;
     std::string line;
 
     while (true) {
@@ -224,19 +251,19 @@ int main() {
                 print_error("invalid_application_id");
                 continue;
             }
-            auto application_id = parse_u64(*field(fields, "application_id"));
-            if (!application_id || *application_id == 0) {
+            auto parsed = parse_u64(*field(fields, "application_id"));
+            if (!parsed || *parsed == 0) {
                 print_error("invalid_application_id");
                 continue;
             }
-            client->SetApplicationId(*application_id);
-            application_set = true;
+            application_id = *parsed;
+            client = make_client(*application_id);
             print_ok();
             continue;
         }
         if (command == "CLEAR") {
-            if (!application_set || !fields.empty()) {
-                print_error(!application_set ? "application_not_set" : "unexpected_fields");
+            if (!application_id || !fields.empty()) {
+                print_error(!application_id ? "application_not_set" : "unexpected_fields");
                 continue;
             }
             client->ClearRichPresence();
@@ -245,11 +272,22 @@ int main() {
             continue;
         }
         if (command == "UPDATE") {
-            if (!application_set) {
+            if (!application_id) {
                 print_error("application_not_set");
                 continue;
             }
-            if (apply_activity(client, fields)) print_ok(); else print_error("update_failed");
+            const ApplyResult result = apply_activity(client, fields);
+            if (result == ApplyResult::Success) {
+                print_ok();
+            } else if (result == ApplyResult::TimedOut) {
+                // A timed-out async callback may retain SDK-owned pending state.
+                // Recreate the client before accepting another update so repeated
+                // desktop RPC failures cannot accumulate memory indefinitely.
+                client = make_client(*application_id);
+                print_error("update_timeout");
+            } else {
+                print_error("update_failed");
+            }
             continue;
         }
         if (command == "QUIT") {
@@ -257,7 +295,7 @@ int main() {
                 print_error("unexpected_fields");
                 continue;
             }
-            if (application_set) {
+            if (application_id) {
                 client->ClearRichPresence();
                 discordpp::RunCallbacks();
             }
