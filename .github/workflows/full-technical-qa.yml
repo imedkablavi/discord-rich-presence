@@ -57,8 +57,10 @@ jobs:
           tests/test_resource_limits.py
           tests/test_browser_resource_stress.py
           tests/test_rpc_failure_cleanup.py
-          tests/test_memory_guard.py
-          tests/test_config_url_resilience.py
+          tests/test_pre_release_hardening.py
+          tests/test_runtime_regressions.py
+          tests/test_rpc_url_security.py
+          tests/test_url_safety.py
 
   linux-core-memory-soak:
     runs-on: ubuntu-22.04
