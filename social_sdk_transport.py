@@ -30,8 +30,19 @@ _HELPER_NAME = (
 )
 
 
+def _pyinstaller_runtime_dir() -> Optional[Path]:
+    """Return PyInstaller's extraction directory when running a one-file build."""
+    raw = getattr(sys, "_MEIPASS", None)
+    if not raw:
+        return None
+    try:
+        return Path(raw).resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
 def discover_social_sdk_helper() -> Optional[Path]:
-    """Find a locally installed helper without downloading or executing it."""
+    """Find a locally bundled/installed helper without downloading or executing it."""
     explicit = os.environ.get("CYBREX_DISCORD_SOCIAL_SDK_HELPER", "").strip()
     if explicit:
         candidate = Path(explicit).expanduser()
@@ -43,13 +54,22 @@ def discover_social_sdk_helper() -> Optional[Path]:
 
     executable_dir = Path(sys.executable).resolve(strict=False).parent
     source_dir = Path(__file__).resolve(strict=False).parent
-    candidates = [
+    candidates: list[Path] = []
+
+    # PyInstaller one-file builds extract bundled native helpers and their
+    # runtime libraries under sys._MEIPASS. Keep this first so the executable
+    # uses the helper that was verified and shipped with the same release.
+    runtime_dir = _pyinstaller_runtime_dir()
+    if runtime_dir is not None:
+        candidates.append(runtime_dir / _HELPER_NAME)
+
+    candidates.extend([
         executable_dir / _HELPER_NAME,
         source_dir / _HELPER_NAME,
         source_dir / "bin" / _HELPER_NAME,
         source_dir / "native" / "discord_social_sdk_bridge" / "build" / _HELPER_NAME,
         source_dir / "native" / "discord_social_sdk_bridge" / "build" / "Release" / _HELPER_NAME,
-    ]
+    ])
     on_path = shutil.which(_HELPER_NAME)
     if on_path:
         candidates.append(Path(on_path))
