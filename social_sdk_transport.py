@@ -56,9 +56,6 @@ def discover_social_sdk_helper() -> Optional[Path]:
     source_dir = Path(__file__).resolve(strict=False).parent
     candidates: list[Path] = []
 
-    # PyInstaller one-file builds extract bundled native helpers and their
-    # runtime libraries under sys._MEIPASS. Keep this first so the executable
-    # uses the helper that was verified and shipped with the same release.
     runtime_dir = _pyinstaller_runtime_dir()
     if runtime_dir is not None:
         candidates.append(runtime_dir / _HELPER_NAME)
@@ -171,19 +168,20 @@ class SocialSDKPresence:
 
     def _read_responses(self) -> None:
         process = self._process
+        responses = self._responses
         if process is None or process.stdout is None:
             return
         try:
             for line in process.stdout:
                 try:
-                    self._responses.put(line, timeout=0.5)
+                    responses.put(line, timeout=0.5)
                 except queue.Full:
                     break
         except (OSError, UnicodeError):
             pass
         finally:
             try:
-                self._responses.put_nowait(None)
+                responses.put_nowait(None)
             except queue.Full:
                 pass
 
@@ -237,30 +235,42 @@ class SocialSDKPresence:
 
     def _terminate_process(self) -> None:
         process = self._process
+        reader = self._reader_thread
         self._process = None
+        self._reader_thread = None
         self._next_activity_name = None
-        if process is None:
-            return
-        try:
-            if process.stdin:
-                process.stdin.close()
-        except OSError:
-            pass
-        if process.poll() is None:
+        if process is not None:
             try:
-                process.terminate()
-                process.wait(timeout=2.0)
-            except (OSError, subprocess.TimeoutExpired):
+                if process.stdin:
+                    process.stdin.close()
+            except OSError:
+                pass
+            if process.poll() is None:
                 try:
-                    process.kill()
-                    process.wait(timeout=1.0)
+                    process.terminate()
+                    process.wait(timeout=2.0)
                 except (OSError, subprocess.TimeoutExpired):
-                    pass
-        try:
-            if process.stdout:
-                process.stdout.close()
-        except OSError:
-            pass
+                    try:
+                        process.kill()
+                        process.wait(timeout=1.0)
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+            try:
+                if process.stdout:
+                    process.stdout.close()
+            except OSError:
+                pass
+
+        # Handshake failures used to terminate the helper without joining this
+        # reader until a later close(). Reap it here so reconnect loops cannot
+        # accumulate short-lived reader threads or queues.
+        if (
+            reader is not None
+            and reader is not threading.current_thread()
+            and reader.is_alive()
+        ):
+            reader.join(timeout=1.0)
+        self._responses = queue.Queue(maxsize=16)
 
     def close(self) -> None:
         if self._closed:
@@ -273,7 +283,3 @@ class SocialSDKPresence:
             except SocialSDKError:
                 pass
         self._terminate_process()
-        reader = self._reader_thread
-        self._reader_thread = None
-        if reader is not None and reader.is_alive():
-            reader.join(timeout=1.0)
