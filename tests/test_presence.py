@@ -202,18 +202,24 @@ def test_squad_uses_local_map_mode_server_and_population(tmp_path: Path, monkeyp
     assert '203.0.113.' not in repr(payload)
 
 
-def test_squad_strict_privacy_hides_server_and_population(tmp_path: Path, monkeypatch):
+def test_squad_strict_privacy_keeps_generic_game_contract(tmp_path: Path, monkeypatch):
     cfg = Config(tmp_path / 'config.yaml')
     cfg.set('privacy.mode', 'strict')
     builder = PresenceBuilder(cfg)
-    monkeypatch.setattr(builder.squad_telemetry, 'snapshot', lambda: {
-        'squad_telemetry': True,
-        'map': 'Gorodok',
-        'mode': 'AAS',
-        'server_name': 'Private Community Server',
-        'player_count': 90,
-        'max_players': 100,
-    })
+    calls = {'count': 0}
+
+    def snapshot():
+        calls['count'] += 1
+        return {
+            'squad_telemetry': True,
+            'map': 'Gorodok',
+            'mode': 'AAS',
+            'server_name': 'Private Community Server',
+            'player_count': 90,
+            'max_players': 100,
+        }
+
+    monkeypatch.setattr(builder.squad_telemetry, 'snapshot', snapshot)
     payload = builder.build({
         'type': 'gaming',
         'game_name': 'Squad',
@@ -221,7 +227,10 @@ def test_squad_strict_privacy_hides_server_and_population(tmp_path: Path, monkey
         'game_source': 'Steam',
         'steam_appid': 393380,
     })
-    assert payload['details'] == 'Squad · AAS'
-    assert payload['state'] == 'Gorodok'
+    assert payload['details'] == 'Game'
+    assert payload['state'] == 'Gaming'
     assert 'Private Community Server' not in repr(payload)
     assert '90/100' not in repr(payload)
+    # Strict mode strips the game identity before game-specific enrichment, so
+    # CYBREX does not even read the local Squad log in this privacy mode.
+    assert calls['count'] == 0
