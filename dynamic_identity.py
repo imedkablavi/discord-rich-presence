@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
 
 from pypresence import DiscordNotFound, InvalidID, InvalidPipe, Presence as LegacyPresence
@@ -11,7 +10,6 @@ from rpc_contract import sanitize_rpc_payload
 from social_sdk_transport import SocialSDKError, SocialSDKPresence, social_sdk_available
 
 
-LOGGER = logging.getLogger(__name__)
 _PATCHED = False
 
 
@@ -21,7 +19,7 @@ def _transport_mode(config) -> str:  # noqa: ANN001
 
 
 def activity_display_name(activity: Dict[str, Any]) -> str:
-    """Return the human-facing application/service identity for one activity."""
+    """Return the actual foreground program/game identity for Discord's top line."""
     if not isinstance(activity, dict):
         return "CYBREX Activity"
     kind = str(activity.get("type") or "application").strip().lower()
@@ -31,15 +29,32 @@ def activity_display_name(activity: Dict[str, Any]) -> str:
     elif kind == "coding":
         value = activity.get("editor") or "Code Editor"
     elif kind == "browser":
-        value = activity.get("service") or activity.get("browser_name") or "Browser"
+        # The service/site stays in details/state. The top-level identity should
+        # represent the actual desktop program the user is running.
+        value = activity.get("browser_name") or "Browser"
     elif kind == "media":
-        value = activity.get("service") or activity.get("player") or "Media Player"
+        value = activity.get("player") or activity.get("service") or "Media Player"
     elif kind == "terminal":
         value = activity.get("terminal_name") or activity.get("shell") or "Terminal"
     else:
         value = activity.get("app_name") or "Application"
 
     text = str(value or "CYBREX Activity").strip()
+    friendly = {
+        "org.kde.konsole": "Konsole",
+        "org.kde.dolphin": "Dolphin",
+        "org.kde.kate": "Kate",
+        "org.kde.okular": "Okular",
+        "org.kde.discover": "Discover",
+        "org.kde.systemsettings": "System Settings",
+        "code": "Visual Studio Code",
+        "code oss": "VS Code OSS",
+        "msedge": "Microsoft Edge",
+        "google chrome": "Google Chrome",
+    }
+    mapped = friendly.get(text.lower())
+    if mapped:
+        return mapped[:128]
     if text.lower().startswith(("org.", "com.", "io.", "net.")) and "." in text:
         text = text.rsplit(".", 1)[-1]
     text = text.replace("_", " ").replace("-", " ").strip()
@@ -152,11 +167,14 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
         name = str(payload.get("_cybrex_activity_name") or "").strip()[:128]
         clean = sanitize_rpc_payload(payload)
         if not name:
-            name = str(clean.get("large_text") or clean.get("state") or clean.get("details") or "CYBREX Activity")[:128]
+            name = str(
+                clean.get("large_text")
+                or clean.get("state")
+                or clean.get("details")
+                or "CYBREX Activity"
+            )[:128]
         self.current_activity_name = name
 
-        # Connect before delegating so a freshly-created SocialSDKPresence can
-        # receive the exact activity identity for this first update.
         if not self.dry_run and not self.connected:
             if not self.connect_discord():
                 self._runtime_update(activity_name=name, transport=self.rpc_transport)
@@ -164,7 +182,15 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
         if isinstance(self.rpc, SocialSDKPresence):
             self.rpc.set_activity_name(name)
 
+        active_rpc = self.rpc
         result = original_update_presence(self, payload)
+        if not result and isinstance(active_rpc, SocialSDKPresence):
+            # main.py clears self.rpc on update failure. Close the captured
+            # helper explicitly so a reconnect cannot leave an orphan process.
+            try:
+                active_rpc.close()
+            except Exception:
+                pass
         self._runtime_update(
             activity_name=name if result else None,
             transport=self.rpc_transport,
@@ -172,7 +198,13 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
         return result
 
     def clear_presence(self) -> bool:
+        active_rpc = self.rpc
         result = original_clear_presence(self)
+        if not result and isinstance(active_rpc, SocialSDKPresence):
+            try:
+                active_rpc.close()
+            except Exception:
+                pass
         if result:
             self.current_activity_name = None
             self._runtime_update(
