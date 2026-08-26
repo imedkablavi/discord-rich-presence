@@ -176,3 +176,52 @@ def test_strict_browser_does_not_emit_urls_or_buttons(tmp_path: Path):
     assert 'details_url' not in payload
     assert 'large_url' not in payload
     assert 'buttons' not in payload
+
+
+def test_squad_uses_local_map_mode_server_and_population(tmp_path: Path, monkeypatch):
+    builder = _builder(tmp_path)
+    monkeypatch.setattr(builder.squad_telemetry, 'snapshot', lambda: {
+        'squad_telemetry': True,
+        'layer': 'Yehorivka_RAAS_v2',
+        'map': 'Yehorivka',
+        'mode': 'RAAS',
+        'server_name': 'EU Tactical Server #1',
+        'player_count': 78,
+        'max_players': 100,
+        'queue': 4,
+    })
+    payload = builder.build({
+        'type': 'gaming',
+        'game_name': 'Squad',
+        'launcher': 'Steam',
+        'game_source': 'Steam',
+        'steam_appid': 393380,
+    })
+    assert payload['details'] == 'Squad · RAAS'
+    assert payload['state'] == 'Yehorivka · EU Tactical Server #1 · 78/100 (+4 queue)'
+    assert '203.0.113.' not in repr(payload)
+
+
+def test_squad_strict_privacy_hides_server_and_population(tmp_path: Path, monkeypatch):
+    cfg = Config(tmp_path / 'config.yaml')
+    cfg.set('privacy.mode', 'strict')
+    builder = PresenceBuilder(cfg)
+    monkeypatch.setattr(builder.squad_telemetry, 'snapshot', lambda: {
+        'squad_telemetry': True,
+        'map': 'Gorodok',
+        'mode': 'AAS',
+        'server_name': 'Private Community Server',
+        'player_count': 90,
+        'max_players': 100,
+    })
+    payload = builder.build({
+        'type': 'gaming',
+        'game_name': 'Squad',
+        'launcher': 'Steam',
+        'game_source': 'Steam',
+        'steam_appid': 393380,
+    })
+    assert payload['details'] == 'Squad · AAS'
+    assert payload['state'] == 'Gorodok'
+    assert 'Private Community Server' not in repr(payload)
+    assert '90/100' not in repr(payload)
