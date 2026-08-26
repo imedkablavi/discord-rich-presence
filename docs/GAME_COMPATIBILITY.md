@@ -28,7 +28,7 @@ CYBREX must not invent map/server/mode values for Tier-1 titles.
 
 A game may expose reliable, read-only local state without requiring account credentials or game-memory access. CYBREX can enrich those games only from verified local evidence and must fall back to Tier 1 when that evidence is unavailable.
 
-**Squad** is handled in this tier. CYBREX recognizes Steam AppID `393380` and the exact `SquadGame` foreground process as a conservative fallback. While Squad is foreground, CYBREX can tail the local `SquadGame.log` with a bounded read and extract high-confidence current layer/map/mode. A server name or population is published only when the same recent log window also contains current join/loading evidence; unrelated server-browser search results are rejected. IP addresses, EOS IDs, Steam IDs, tokens and other account/network identifiers are never copied into Presence. Strict privacy mode suppresses server name and population.
+**Squad** is handled in this tier. CYBREX recognizes Steam AppID `393380` and the exact `SquadGame` foreground process as a conservative fallback. While Squad is foreground, CYBREX can tail the local `SquadGame.log` with a bounded read and extract high-confidence current layer/map/mode. A server name or population is published only when the same recent log window also contains current join/loading evidence; unrelated server-browser search results are rejected. IP addresses, EOS IDs, Steam IDs, tokens and other account/network identifiers are never copied into Presence. In Strict privacy mode CYBREX keeps the generic `Game · Gaming` contract and does not read the Squad log at all.
 
 This is intentionally read-only: no DLL/code injection, memory reading, packet capture, EOS credential emulation or RCON is used.
 
