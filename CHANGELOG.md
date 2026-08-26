@@ -71,13 +71,13 @@
 - Add security, privacy, troubleshooting, browser companion, release, and contribution documentation.
 - Add Dependabot and structured bug/feature issue templates.
 
-## 2.0.0 - Windows support
+## 2.0.0 — Windows support
 
 The repository added Windows foreground-window and media integrations, gaming detection, Git helpers, system-tray support, a modern GUI, and broader editor/language mappings.
 
 Some documentation from the original 2.0.0 notes referenced installer/support files that are not present in the current repository snapshot; those claims have been removed here so the changelog only describes code that is currently available.
 
-## 1.0.0 - Initial Linux implementation
+## 1.0.0 — Initial Linux implementation
 
 Initial Linux/X11 activity detection, browser/media/coding/terminal detectors, Discord RPC publishing, and privacy configuration.
 

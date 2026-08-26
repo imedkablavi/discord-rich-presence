@@ -186,11 +186,11 @@ The config loader validates Client IDs, button limits, URLs, privacy regexes, de
 
 The desktop control panel has five sections:
 
-- **Overview** - real service/RPC/activity state, foreground capability, logs, updates
-- **Activity** - detector switches that directly control the running detection pipeline
-- **Privacy** - redaction level, lock-screen clearing, browser detail permissions
-- **Preferences** - Discord ID, profile buttons, startup, signed update source
-- **About** - version, project links, platform detection capability
+- **Overview** — real service/RPC/activity state, foreground capability, logs, updates
+- **Activity** — detector switches that directly control the running detection pipeline
+- **Privacy** — redaction level, lock-screen clearing, browser detail permissions
+- **Preferences** — Discord ID, profile buttons, startup, signed update source
+- **About** — version, project links, platform detection capability
 
 The status view does not claim that something is being shown on Discord when RPC is disconnected. A per-user runtime lock prevents multiple service instances from competing for the same RPC session.
 
