@@ -95,10 +95,15 @@ class SocialSDKPresence:
         self._reader_thread: Optional[threading.Thread] = None
         self._command_lock = threading.Lock()
         self._closed = False
+        self._next_activity_name: Optional[str] = None
 
     @property
     def helper_name(self) -> str:
         return self.helper_path.name if self.helper_path else "unavailable"
+
+    def set_activity_name(self, value: str | None) -> None:
+        text = str(value or "").strip()
+        self._next_activity_name = text[:128] if len(text) >= 2 else None
 
     def connect(self) -> None:
         if self._closed:
@@ -200,9 +205,12 @@ class SocialSDKPresence:
     def update(self, *, name: str | None = None, **payload: Any) -> None:
         if self._process is None or self._process.poll() is not None:
             self.connect()
-        self._command(encode_update(payload, name=name))
+        effective_name = str(name or self._next_activity_name or "").strip() or None
+        self._next_activity_name = None
+        self._command(encode_update(payload, name=effective_name))
 
     def clear(self) -> None:
+        self._next_activity_name = None
         if self._process is None or self._process.poll() is not None:
             return
         self._command(encode_command("CLEAR"))
@@ -210,6 +218,7 @@ class SocialSDKPresence:
     def _terminate_process(self) -> None:
         process = self._process
         self._process = None
+        self._next_activity_name = None
         if process is None:
             return
         try:
