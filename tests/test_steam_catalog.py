@@ -59,6 +59,73 @@ def test_catalog_resolves_windows_style_foreground_exe_by_install_path(monkeypat
     assert game.name == 'Path Matched Game'
 
 
+def test_linux_wayland_missing_pid_recovers_one_exact_game_process(monkeypatch, tmp_path: Path):
+    root = tmp_path / 'Steam'
+    steamapps = root / 'steamapps'
+    _write_manifest(steamapps, 393380, 'Squad', 'Squad')
+
+    monkeypatch.setattr(steam_catalog, '_steamapps_locations', lambda: [(root, steamapps)])
+    monkeypatch.setattr(steam_catalog.platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(
+        steam_catalog.psutil,
+        'process_iter',
+        lambda attrs: [SimpleNamespace(info={'pid': 4242, 'name': 'SquadGame.exe'})],
+    )
+    catalog = SteamGameCatalog()
+    monkeypatch.setattr(catalog, '_appid_from_process_tree', lambda pid: 393380 if pid == 4242 else None)
+
+    game = catalog.resolve({'app_name': 'SquadGame.exe', 'pid': None})
+    assert game is not None
+    assert game.appid == 393380
+    assert game.name == 'Squad'
+
+
+def test_linux_wayland_missing_pid_fails_closed_on_duplicate_process_names(monkeypatch, tmp_path: Path):
+    root = tmp_path / 'Steam'
+    steamapps = root / 'steamapps'
+    _write_manifest(steamapps, 393380, 'Squad', 'Squad')
+
+    monkeypatch.setattr(steam_catalog, '_steamapps_locations', lambda: [(root, steamapps)])
+    monkeypatch.setattr(steam_catalog.platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(
+        steam_catalog.psutil,
+        'process_iter',
+        lambda attrs: [
+            SimpleNamespace(info={'pid': 4242, 'name': 'SquadGame.exe'}),
+            SimpleNamespace(info={'pid': 4243, 'name': 'SquadGame.exe'}),
+        ],
+    )
+    catalog = SteamGameCatalog()
+    calls = {'count': 0}
+
+    def ancestry(_pid):
+        calls['count'] += 1
+        return 393380
+
+    monkeypatch.setattr(catalog, '_appid_from_process_tree', ancestry)
+    assert catalog.resolve({'app_name': 'SquadGame.exe', 'pid': None}) is None
+    assert calls['count'] == 0
+
+
+def test_linux_wayland_missing_pid_never_scans_generic_host_as_game(monkeypatch, tmp_path: Path):
+    root = tmp_path / 'Steam'
+    steamapps = root / 'steamapps'
+    _write_manifest(steamapps, 123456, 'A Browser-Like Game', 'BrowserGame')
+    monkeypatch.setattr(steam_catalog, '_steamapps_locations', lambda: [(root, steamapps)])
+    monkeypatch.setattr(steam_catalog.platform, 'system', lambda: 'Linux')
+
+    called = {'value': False}
+
+    def process_iter(_attrs):
+        called['value'] = True
+        return []
+
+    monkeypatch.setattr(steam_catalog.psutil, 'process_iter', process_iter)
+    catalog = SteamGameCatalog()
+    assert catalog.resolve({'app_name': 'chrome', 'pid': None}) is None
+    assert called['value'] is False
+
+
 def test_catalog_filters_steam_runtime_tools(monkeypatch, tmp_path: Path):
     root = tmp_path / 'Steam'
     steamapps = root / 'steamapps'
