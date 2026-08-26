@@ -83,12 +83,17 @@ def _handle_update_command() -> Optional[int]:
     if not check_only and not install:
         return None
 
-    from updater import UpdateError, check_for_update, install_update, update_summary
+    from config import Config
+    from update_manager import check_for_update, configured_update_channel
+    from updater import UpdateError, install_update, update_summary
 
     try:
-        info = check_for_update()
+        config = Config()
+        channel = configured_update_channel(config)
+        info = check_for_update(channel=channel)
         if check_only or info is None:
-            _setup_message(update_summary(info))
+            summary = update_summary(info)
+            _setup_message(f'{summary}\nUpdate channel: {channel.title()}')
             return 0
 
         if not getattr(sys, 'frozen', False):
