@@ -74,7 +74,7 @@ jobs:
       - name: Install runtime QA dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Run 5k HTTP + 30k activity memory soak
-        run: python scripts/qa_memory_soak.py
+        run: PYTHONPATH=. python scripts/qa_memory_soak.py
 
   linux-packaged-gui-soak:
     runs-on: ubuntu-22.04
