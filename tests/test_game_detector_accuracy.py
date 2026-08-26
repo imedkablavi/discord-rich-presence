@@ -128,3 +128,58 @@ def test_warthunder_strict_privacy_does_not_probe_telemetry():
 def test_process_name_containing_aces_is_not_warthunder():
     detector = _detector_without_services()
     assert detector.detect({'app_name': 'traces-ui', 'title': '', 'pid': None}) is None
+
+
+def test_strict_privacy_disables_cs2_listener_signature():
+    detector = object.__new__(GamingDetector)
+    detector.config = _Config('strict')
+    gaming_enabled, gsi_enabled, _auto, _port, _ttl = detector._gsi_signature()
+    assert gaming_enabled is True
+    assert gsi_enabled is False
+
+
+def test_strict_privacy_does_not_query_deep_game_integrations():
+    calls = {'league': 0, 'fivem': 0, 'minecraft': 0, 'cs2': 0, 'war': 0}
+    detector = object.__new__(GamingDetector)
+    detector.config = _Config('strict')
+
+    class League:
+        def snapshot(self):
+            calls['league'] += 1
+            return {}
+
+    class Bridge:
+        config = None
+        def start(self):
+            calls['fivem'] += 1
+            return True
+        def latest(self):
+            calls['minecraft'] += 1
+            return {}
+
+    class CS2:
+        def latest(self):
+            calls['cs2'] += 1
+            return {}
+
+    class War:
+        def snapshot(self):
+            calls['war'] += 1
+            return {}
+
+    detector.league_client = League()
+    detector.fivem_bridge = Bridge()
+    detector.minecraft_bridge = Bridge()
+    detector.cs2_gsi = CS2()
+    detector.warthunder_telemetry = War()
+
+    for method in (
+        detector._enrich_league,
+        detector._enrich_fivem,
+        detector._enrich_minecraft,
+        detector._enrich_cs2,
+        detector._enrich_warthunder,
+    ):
+        method({'type': 'gaming', 'game_name': 'Game'})
+
+    assert calls == {'league': 0, 'fivem': 0, 'minecraft': 0, 'cs2': 0, 'war': 0}
