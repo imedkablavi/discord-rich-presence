@@ -9,6 +9,7 @@ from pypresence.types import ActivityType
 from config import Config
 from icon_resolver import IconResolver
 from privacy import PrivacyRedactor
+from squad_telemetry import SQUAD_STEAM_APPID, SquadTelemetryReader
 
 
 class PresenceBuilder:
@@ -50,6 +51,7 @@ class PresenceBuilder:
         self.config = config
         self.redactor = PrivacyRedactor(config)
         self.icons = IconResolver(config)
+        self.squad_telemetry = SquadTelemetryReader()
         self.activity_start_times: Dict[str, int] = {}
         self.media_timelines: Dict[str, Dict[str, int]] = {}
 
@@ -284,6 +286,53 @@ class PresenceBuilder:
         self._add_buttons(payload)
         return payload
 
+    @staticmethod
+    def _is_squad_activity(activity: Dict[str, Any], game_name: str) -> bool:
+        try:
+            appid = int(activity.get('steam_appid', 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            appid = 0
+        normalized = ''.join(char for char in game_name.lower() if char.isalnum())
+        return appid == SQUAD_STEAM_APPID or normalized == 'squad'
+
+    def _squad_presence_text(self, activity: Dict[str, Any], game_name: str, launcher: str) -> tuple[str, str]:
+        telemetry = self.squad_telemetry.snapshot()
+        if not telemetry:
+            return game_name, str(activity.get('game_source', '') or launcher)
+
+        mode = str(telemetry.get('mode', '') or '').strip()
+        map_name = str(telemetry.get('map', '') or '').strip()
+        layer = str(telemetry.get('layer', '') or '').strip()
+        server_name = str(telemetry.get('server_name', '') or '').strip()
+        privacy_mode = str(self.config.get('privacy.mode', 'balanced') or 'balanced').lower()
+
+        details = ' · '.join(part for part in (game_name, mode) if part)
+        state_parts = [map_name or layer]
+        if privacy_mode != 'strict' and server_name:
+            state_parts.append(server_name)
+
+        if privacy_mode != 'strict':
+            try:
+                players = int(telemetry.get('player_count'))
+            except (TypeError, ValueError, OverflowError):
+                players = -1
+            try:
+                maximum = int(telemetry.get('max_players'))
+            except (TypeError, ValueError, OverflowError):
+                maximum = -1
+            try:
+                queue = int(telemetry.get('queue'))
+            except (TypeError, ValueError, OverflowError):
+                queue = -1
+            if 0 <= players <= 256 and 1 <= maximum <= 256:
+                population = f'{players}/{maximum}'
+                if 1 <= queue <= 256:
+                    population += f' (+{queue} queue)'
+                state_parts.append(population)
+
+        state = ' · '.join(part for part in state_parts if part) or launcher
+        return details or game_name, state
+
     def _build_gaming(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         game_name = str(activity.get('game_name') or activity.get('launcher') or 'Game')
         launcher = str(activity.get('launcher') or 'Gaming')
@@ -328,6 +377,8 @@ class PresenceBuilder:
             if score_is_meaningful:
                 state_parts.append(f'{ct_score}–{t_score}')
             state = ' · '.join(state_parts) or launcher
+        elif self._is_squad_activity(activity, game_name):
+            details, state = self._squad_presence_text(activity, game_name, launcher)
         else:
             details = game_name
             state = source or launcher
