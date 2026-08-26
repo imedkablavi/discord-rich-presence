@@ -1,11 +1,8 @@
-"""Accuracy hardening layered on top of the stable game detector.
-
-Keeping these corrections in a small subclass makes the release fixes explicit
-and independently testable without duplicating the mature detector catalogue.
-"""
+"""Accuracy/privacy hardening layered on top of the stable game detector."""
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Optional
 
 from .gaming import GamingDetector as BaseGamingDetector
@@ -13,13 +10,22 @@ from warthunder_telemetry import WAR_THUNDER_STEAM_APPID, WarThunderTelemetryRea
 
 
 class GamingDetector(BaseGamingDetector):
-    """Game detector with strict launcher boundaries and War Thunder telemetry."""
+    """Game detector with strict launcher boundaries and safe deep telemetry."""
 
     WAR_THUNDER_PROCESSES = frozenset({"aces", "aces64"})
 
     def __init__(self, config):  # noqa: ANN001
         super().__init__(config)
         self.warthunder_telemetry = WarThunderTelemetryReader()
+
+    def _strict_privacy(self) -> bool:
+        return str(self.config.get("privacy.mode", "balanced") or "balanced").lower() == "strict"
+
+    def _gsi_signature(self) -> tuple[bool, bool, bool, int, float]:
+        gaming_enabled, gsi_enabled, auto_install, port, ttl = super()._gsi_signature()
+        if self._strict_privacy():
+            gsi_enabled = False
+        return gaming_enabled, gsi_enabled, auto_install, port, ttl
 
     @staticmethod
     def _normalized_process(value: object) -> str:
@@ -30,15 +36,12 @@ class GamingDetector(BaseGamingDetector):
     def _is_minecraft_window(app_name: str, title: str) -> bool:
         app = GamingDetector._normalized_process(app_name)
         window = str(title or "").strip().lower()
-        # The launcher is not the game. Bedrock can expose minecraft directly;
-        # Java is accepted only with an explicit Minecraft window title.
         if app == "minecraft":
             return True
         if app == "minecraftlauncher":
             return False
         if app not in {"java", "javaw"}:
             return False
-        import re
         return bool(re.match(r"^minecraft(?:\s|$|\*)", window))
 
     @staticmethod
@@ -50,10 +53,28 @@ class GamingDetector(BaseGamingDetector):
         name = "".join(ch for ch in str(activity.get("game_name") or "").lower() if ch.isalnum())
         return appid == WAR_THUNDER_STEAM_APPID or name == "warthunder"
 
+    def _enrich_league(self, activity: Dict[str, Any]) -> None:
+        if self._strict_privacy():
+            return
+        super()._enrich_league(activity)
+
+    def _enrich_fivem(self, activity: Dict[str, Any]) -> None:
+        if self._strict_privacy():
+            return
+        super()._enrich_fivem(activity)
+
+    def _enrich_minecraft(self, activity: Dict[str, Any]) -> None:
+        if self._strict_privacy():
+            return
+        super()._enrich_minecraft(activity)
+
+    def _enrich_cs2(self, activity: Dict[str, Any]) -> None:
+        if self._strict_privacy():
+            return
+        super()._enrich_cs2(activity)
+
     def _enrich_warthunder(self, activity: Dict[str, Any]) -> None:
-        # Strict mode must not probe game telemetry at all, not merely hide it
-        # after collection.
-        if str(self.config.get("privacy.mode", "balanced") or "balanced").lower() == "strict":
+        if self._strict_privacy():
             return
         snapshot = self.warthunder_telemetry.snapshot()
         if not snapshot:
@@ -79,8 +100,8 @@ class GamingDetector(BaseGamingDetector):
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         app = self._normalized_process(window_info.get("app_name") if window_info else "")
 
-        # This exact launcher boundary prevents the old substring matcher from
-        # interpreting MinecraftLauncher as a running Minecraft game.
+        # MinecraftLauncher is a launcher, never evidence that Minecraft itself
+        # is running. This exact boundary runs before legacy substring aliases.
         if app == "minecraftlauncher":
             if not window_info or not self.config.get("rules.enabled_detectors.gaming", False):
                 return None
@@ -98,8 +119,7 @@ class GamingDetector(BaseGamingDetector):
             return activity
 
         # Native/standalone and some Wayland sessions expose only the official
-        # War Thunder client process. Accept only exact client process names;
-        # never substring-match arbitrary processes containing "aces".
+        # client process. Accept exact names only; never substring-match "aces".
         if activity is None and app in self.WAR_THUNDER_PROCESSES:
             activity = {
                 "type": "gaming",
