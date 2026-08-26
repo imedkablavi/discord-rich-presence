@@ -36,6 +36,12 @@
       "launcher": "Steam",
       "steam_appid": 2507950,
       "processes": ["deltaforceclient", "deltaforceclient-win64-shipping"]
+    },
+    {
+      "name": "Squad",
+      "launcher": "Steam",
+      "steam_appid": 393380,
+      "processes": ["squadgame"]
     }
   ]
 }
