@@ -91,3 +91,19 @@ def test_squad_without_current_local_evidence_falls_back_to_game_identity(tmp_pa
     })
     assert payload['details'] == 'Squad'
     assert payload['state'] == 'Steam'
+
+
+def test_warthunder_uses_verified_local_context_without_fake_map_or_server(tmp_path: Path):
+    payload = _builder(tmp_path).build({
+        'type': 'gaming',
+        'game_name': 'War Thunder',
+        'launcher': 'Steam',
+        'game_source': 'Ground · T 80bvm · In Battle',
+        'steam_appid': 236390,
+        'warthunder_local': True,
+    })
+    assert payload['details'] == 'War Thunder'
+    assert payload['state'] == 'Ground · T 80bvm · In Battle'
+    serialized = repr(payload).lower()
+    assert 'server' not in serialized
+    assert 'map' not in serialized
