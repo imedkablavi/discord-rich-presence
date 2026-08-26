@@ -15,20 +15,39 @@ import psutil
 LOGGER = logging.getLogger(__name__)
 _STARTED = False
 _START_LOCK = threading.Lock()
+_WAIT_EVENT = threading.Event()
 _INTERVAL_SECS = 30.0
 _WARN_RSS_BYTES = 384 * 1024 * 1024
 _GROWTH_BYTES = 96 * 1024 * 1024
+_TRIM = None
+_TRIM_RESOLVED = False
 
 
-def _malloc_trim() -> bool:
-    """Ask glibc to return unused heap pages to the OS when available."""
+def _resolve_malloc_trim():
+    global _TRIM, _TRIM_RESOLVED
+    if _TRIM_RESOLVED:
+        return _TRIM
+    _TRIM_RESOLVED = True
     if not sys.platform.startswith('linux'):
-        return False
+        return None
     try:
         libc = ctypes.CDLL('libc.so.6')
         trim = libc.malloc_trim
         trim.argtypes = [ctypes.c_size_t]
         trim.restype = ctypes.c_int
+        # Keep the CDLL alive through the function object's reference chain.
+        _TRIM = trim
+    except Exception:
+        _TRIM = None
+    return _TRIM
+
+
+def _malloc_trim() -> bool:
+    """Ask glibc to return unused heap pages to the OS when available."""
+    trim = _resolve_malloc_trim()
+    if trim is None:
+        return False
+    try:
         return bool(trim(0))
     except Exception:
         return False
@@ -55,7 +74,7 @@ def _guard_loop() -> None:
     last_trim_rss = baseline_rss
 
     while True:
-        threading.Event().wait(_INTERVAL_SECS)
+        _WAIT_EVENT.wait(_INTERVAL_SECS)
         try:
             rss, threads, fds = _resource_snapshot(process)
         except (psutil.Error, OSError):
