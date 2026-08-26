@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import urllib.parse
 from typing import Iterable, Optional
 
 from config import Config
@@ -13,22 +12,23 @@ from url_safety import public_https_url
 class IconResolver:
     """Prefer application-specific raster artwork with safe user overrides."""
 
-    # Discord's legacy RPC path is most reliable with raster HTTPS artwork.
-    # Google S2 provides a small PNG for public domains and requires no API key.
+    # Keep the established Google S2 URL contract for existing integrations.
+    # The expansion below adds more real programs without changing previously
+    # released artwork URLs and Discord cache behavior.
     BUILTIN_ICON_DOMAINS = {
         # Browsers
         "brave": "brave.com",
         "brave browser": "brave.com",
-        "chrome": "google.com/chrome",
-        "google chrome": "google.com/chrome",
+        "chrome": "chrome.google.com",
+        "google chrome": "chrome.google.com",
         "chromium": "chromium.org",
         "firefox": "firefox.com",
         "firefox browser": "firefox.com",
-        "edge": "microsoft.com/edge",
-        "msedge": "microsoft.com/edge",
-        "microsoft edge": "microsoft.com/edge",
+        "edge": "microsoftedge.microsoft.com",
+        "msedge": "microsoftedge.microsoft.com",
+        "microsoft edge": "microsoftedge.microsoft.com",
         "opera": "opera.com",
-        "opera gx": "opera.com/gx",
+        "opera gx": "opera.com",
         "vivaldi": "vivaldi.com",
         "floorp": "floorp.app",
         "zen browser": "zen-browser.app",
@@ -45,8 +45,8 @@ class IconResolver:
         "telegram": "telegram.org",
         "telegram desktop": "telegram.org",
         "whatsapp": "whatsapp.com",
-        "microsoft teams": "microsoft.com/microsoft-teams",
-        "teams": "microsoft.com/microsoft-teams",
+        "microsoft teams": "microsoft.com",
+        "teams": "microsoft.com",
         "zoom": "zoom.us",
 
         # Editors / IDEs / creative tools
@@ -57,21 +57,21 @@ class IconResolver:
         "vscodium": "vscodium.com",
         "cursor": "cursor.com",
         "zed": "zed.dev",
-        "pycharm": "jetbrains.com/pycharm",
-        "intellij idea": "jetbrains.com/idea",
-        "webstorm": "jetbrains.com/webstorm",
-        "phpstorm": "jetbrains.com/phpstorm",
-        "goland": "jetbrains.com/go",
-        "rider": "jetbrains.com/rider",
-        "clion": "jetbrains.com/clion",
-        "rubymine": "jetbrains.com/ruby",
-        "jetbrains toolbox": "jetbrains.com/toolbox-app",
-        "android studio": "developer.android.com/studio",
+        "pycharm": "jetbrains.com",
+        "intellij idea": "jetbrains.com",
+        "webstorm": "jetbrains.com",
+        "phpstorm": "jetbrains.com",
+        "goland": "jetbrains.com",
+        "rider": "jetbrains.com",
+        "clion": "jetbrains.com",
+        "rubymine": "jetbrains.com",
+        "jetbrains toolbox": "jetbrains.com",
+        "android studio": "developer.android.com",
         "sublime text": "sublimetext.com",
         "vim": "vim.org",
         "neovim": "neovim.io",
         "nvim": "neovim.io",
-        "emacs": "gnu.org/software/emacs",
+        "emacs": "gnu.org",
         "trae": "trae.ai",
         "obsidian": "obsidian.md",
         "notion": "notion.so",
@@ -82,21 +82,21 @@ class IconResolver:
         "figma": "figma.com",
 
         # Shells / Linux desktop apps
-        "powershell": "microsoft.com/powershell",
-        "powershell core": "microsoft.com/powershell",
-        "windows terminal": "microsoft.com/windows/terminal",
-        "bash": "gnu.org/software/bash",
+        "powershell": "microsoft.com",
+        "powershell core": "microsoft.com",
+        "windows terminal": "microsoft.com",
+        "bash": "gnu.org",
         "zsh": "zsh.org",
         "fish": "fishshell.com",
-        "konsole": "apps.kde.org/konsole",
-        "dolphin": "apps.kde.org/dolphin",
+        "konsole": "kde.org",
+        "dolphin": "kde.org",
         "kate": "kate-editor.org",
         "okular": "okular.kde.org",
-        "discover": "apps.kde.org/discover",
-        "system settings": "kde.org/plasma-desktop",
-        "kde plasma": "kde.org/plasma-desktop",
-        "gnome terminal": "apps.gnome.org/Console",
-        "nautilus": "apps.gnome.org/Nautilus",
+        "discover": "kde.org",
+        "system settings": "kde.org",
+        "kde plasma": "kde.org",
+        "gnome terminal": "gnome.org",
+        "nautilus": "gnome.org",
         "thunderbird": "thunderbird.net",
         "libreoffice": "libreoffice.org",
 
@@ -104,7 +104,7 @@ class IconResolver:
         "github desktop": "desktop.github.com",
         "gitkraken": "gitkraken.com",
         "postman": "postman.com",
-        "docker desktop": "docker.com/products/docker-desktop",
+        "docker desktop": "docker.com",
         "docker": "docker.com",
         "virtualbox": "virtualbox.org",
         "vmware": "vmware.com",
@@ -125,12 +125,12 @@ class IconResolver:
         "heroic": "heroicgameslauncher.com",
         "heroic games launcher": "heroicgameslauncher.com",
         "gog": "gog.com",
-        "gog galaxy": "gog.com/galaxy",
+        "gog galaxy": "gog.com",
         "battle.net": "battle.net",
         "battlenet": "battle.net",
         "ubisoft connect": "ubisoft.com",
-        "ea desktop": "ea.com/ea-app",
-        "ea app": "ea.com/ea-app",
+        "ea desktop": "ea.com",
+        "ea app": "ea.com",
         "riot client": "riotgames.com",
         "xbox": "xbox.com",
 
@@ -201,10 +201,8 @@ class IconResolver:
         return cls.ALIASES.get(text, text)
 
     @staticmethod
-    def _png_favicon_url(domain_or_path: str) -> str:
-        target = "https://" + str(domain_or_path or "").strip().lstrip("/")
-        encoded = urllib.parse.quote(target, safe="")
-        return f"https://www.google.com/s2/favicons?domain_url={encoded}&sz=256"
+    def _png_favicon_url(domain: str) -> str:
+        return f"https://www.google.com/s2/favicons?domain={domain}&sz=256"
 
     def _names(self, values: Iterable[object]) -> list[str]:
         names: list[str] = []
@@ -227,8 +225,6 @@ class IconResolver:
             value = normalized_overrides.get(name)
             if not value:
                 continue
-            # Asset keys are allowed. URLs must meet the same public HTTPS
-            # boundary as every other Rich Presence external image.
             if value.lower().startswith(("http://", "https://")):
                 safe = public_https_url(value, 300)
                 if safe:
