@@ -51,7 +51,7 @@ def test_aircraft_without_army_gets_conservative_air_label(monkeypatch):
     )
     snapshot = read_warthunder_snapshot()
     assert snapshot['branch'] == 'Air'
-    assert snapshot['vehicle'] == 'So 4050 Vautour 2A Iaf'
+    assert snapshot['vehicle'] == 'So 4050 Vautour 2A IAF'
 
 
 def test_reader_caches_short_interval(monkeypatch):
