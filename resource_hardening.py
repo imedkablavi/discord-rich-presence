@@ -1,14 +1,4 @@
-"""Runtime resource hardening for legacy loopback listeners.
-
-The Browser Companion and CS2 GSI listeners historically subclassed
-ThreadingHTTPServer directly. Their semaphore limited simultaneous requests but
-still created a fresh OS thread for every request. On long-running Linux systems
-that can grow RSS through thread-stack and allocator arena churn.
-
-This module swaps those legacy server classes for fixed-worker equivalents
-without changing their HTTP/API behavior. It is idempotent and intentionally
-small so the older bridge implementations can be migrated cleanly later.
-"""
+"""Runtime resource hardening for long-running CYBREX services."""
 
 from __future__ import annotations
 
@@ -49,8 +39,49 @@ class _CS2FixedServer(FixedWorkerLoopbackHTTPServer):
         )
 
 
+def _patch_pypresence_cleanup() -> None:
+    """Ensure failed connect/update/clear paths close their IPC transport."""
+    import pypresence
+
+    original = pypresence.Presence
+    if getattr(original, "_cybrex_resource_safe", False):
+        return
+
+    class ResourceSafePresence(original):
+        _cybrex_resource_safe = True
+
+        def _close_after_failure(self) -> None:
+            try:
+                super().close()
+            except Exception:
+                pass
+
+        def connect(self, *args, **kwargs):
+            try:
+                return super().connect(*args, **kwargs)
+            except Exception:
+                self._close_after_failure()
+                raise
+
+        def update(self, *args, **kwargs):
+            try:
+                return super().update(*args, **kwargs)
+            except Exception:
+                self._close_after_failure()
+                raise
+
+        def clear(self, *args, **kwargs):
+            try:
+                return super().clear(*args, **kwargs)
+            except Exception:
+                self._close_after_failure()
+                raise
+
+    pypresence.Presence = ResourceSafePresence
+
+
 def apply_resource_hardening() -> None:
-    """Install fixed-worker server classes for legacy high-frequency bridges."""
+    """Install bounded HTTP workers and fail-safe Discord RPC cleanup."""
     global _APPLIED
     if _APPLIED:
         return
@@ -63,6 +94,7 @@ def apply_resource_hardening() -> None:
 
         browser_companion._CompanionHTTPServer = _BrowserFixedServer
         cs2_gsi._CS2HTTPServer = _CS2FixedServer
+        _patch_pypresence_cleanup()
         _APPLIED = True
 
 
