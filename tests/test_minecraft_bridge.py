@@ -90,10 +90,11 @@ def test_minecraft_dimension_validation_rejects_urls_and_traversal():
     })['dimension'] == ''
 
 
-def test_minecraft_window_requires_java_plus_explicit_title():
+def test_minecraft_window_requires_game_process_or_java_plus_explicit_title():
     assert GamingDetector._is_minecraft_window('javaw', 'Minecraft 26.2')
     assert GamingDetector._is_minecraft_window('java', 'Minecraft* 1.21.11')
-    assert GamingDetector._is_minecraft_window('minecraftlauncher', 'Minecraft Launcher')
+    assert GamingDetector._is_minecraft_window('minecraft', 'Minecraft')
+    assert not GamingDetector._is_minecraft_window('minecraftlauncher', 'Minecraft Launcher')
     assert not GamingDetector._is_minecraft_window('javaw', 'IntelliJ IDEA')
     assert not GamingDetector._is_minecraft_window('python', 'Minecraft tools')
 
