@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import squad_telemetry
 from squad_telemetry import SquadTelemetryReader, discover_squad_log_paths, parse_squad_log_tail
@@ -65,11 +66,41 @@ LogWorld: StartLoadingDestination to: Sanxian_RAAS_v1
     assert snapshot['map'] == 'Sanxian Islands'
 
 
+def test_ip_like_server_value_is_rejected_with_population():
+    log = '''
+LogOnlineSession: JoinSession complete
+LogOnlineSession: ServerName_s="203.0.113.22:7787"
+LogOnlineSession: PlayerCount_l=90 MaxPlayers_l=100 QueueCount_l=6
+LogWorld: StartLoadingDestination to: Gorodok_AAS_v1
+'''
+    snapshot = parse_squad_log_tail(log)
+    assert snapshot['map'] == 'Gorodok'
+    assert 'server_name' not in snapshot
+    assert 'player_count' not in snapshot
+    assert 'max_players' not in snapshot
+    assert 'queue' not in snapshot
+
+
 def test_windows_log_discovery_uses_localappdata(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(squad_telemetry.platform, 'system', lambda: 'Windows')
     monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
     paths = discover_squad_log_paths()
     assert paths == (tmp_path / 'SquadGame' / 'Saved' / 'Logs' / 'SquadGame.log',)
+
+
+def test_linux_secondary_steam_library_uses_resolved_install_path(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(squad_telemetry.platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(squad_telemetry, '_linux_steam_roots', lambda: ())
+    install = tmp_path / 'SecondaryLibrary/steamapps/common/Squad'
+    game = SimpleNamespace(install_path=install)
+    paths = discover_squad_log_paths(game)
+    expected_users = tmp_path / 'SecondaryLibrary/steamapps/compatdata/393380/pfx/drive_c/users'
+    expected_users.mkdir(parents=True)
+    (expected_users / 'steamuser').mkdir()
+    paths = discover_squad_log_paths(game)
+    assert paths == (
+        expected_users / 'steamuser/AppData/Local/SquadGame/Saved/Logs/SquadGame.log',
+    )
 
 
 def test_reader_caches_unchanged_log(monkeypatch, tmp_path: Path):
@@ -90,6 +121,7 @@ def test_reader_caches_unchanged_log(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(squad_telemetry, '_read_tail', counted)
     reader = SquadTelemetryReader()
+    monkeypatch.setattr(reader, '_installed_squad', lambda: None)
     assert reader.snapshot()['map'] == 'Gorodok'
     assert reader.snapshot()['map'] == 'Gorodok'
     assert calls['count'] == 1
