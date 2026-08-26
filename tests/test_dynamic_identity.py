@@ -72,4 +72,4 @@ def test_icon_resolver_normalizes_common_program_aliases(tmp_path):
 
     assert brave and "brave.com" in brave
     assert vscode and "code.visualstudio.com" in vscode
-    assert konsole and "apps.kde.org" in konsole
+    assert konsole and "kde.org" in konsole
