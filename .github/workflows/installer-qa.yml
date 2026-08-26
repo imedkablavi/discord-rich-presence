@@ -186,8 +186,13 @@ jobs:
           test ! -e "$desktop"
       - name: Archive user-level installer bundle
         run: |
+          set -euo pipefail
           tar -C dist -czf dist/CYBREX-Presence-linux-x86_64.tar.gz CYBREX-Presence-linux-x86_64
-          sha256sum dist/CYBREX-Presence-linux-x86_64.tar.gz > dist/CYBREX-Presence-linux-x86_64.tar.gz.sha256
+          (
+            cd dist
+            sha256sum CYBREX-Presence-linux-x86_64.tar.gz > CYBREX-Presence-linux-x86_64.tar.gz.sha256
+          )
+          grep -Eq '^[0-9a-f]{64}  CYBREX-Presence-linux-x86_64\.tar\.gz$' dist/CYBREX-Presence-linux-x86_64.tar.gz.sha256
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CYBREX-Presence-Linux-User-Installer
