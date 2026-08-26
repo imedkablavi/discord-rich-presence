@@ -42,6 +42,18 @@ _NON_GAME_NAME_MARKERS = (
     'steamvr',
 )
 
+# If a Wayland compositor gives us a reliable foreground window class but
+# transiently omits its PID, we may correlate that class to one running process.
+# Generic hosts are excluded because an exact match would still be ambiguous in
+# meaning even when only one such process happened to be running.
+_GENERIC_PROCESS_NAMES = frozenset({
+    'steam', 'steamwebhelper', 'gamescope', 'xwayland',
+    'wine', 'wine64', 'wineserver', 'explorer', 'services',
+    'java', 'javaw', 'python', 'python3', 'node',
+    'chrome', 'chromium', 'brave', 'firefox', 'msedge',
+    'discord', 'code', 'electron',
+})
+
 
 @dataclass(frozen=True)
 class SteamGame:
@@ -124,6 +136,8 @@ class SteamGameCatalog:
                 return game
 
         pid = _clean_pid(window_info.get('pid'))
+        if not pid and platform.system().lower() == 'linux':
+            pid = self._unique_pid_for_window_class(app_name)
         if pid:
             appid = self._appid_from_process_tree(pid)
             if appid:
@@ -138,6 +152,41 @@ class SteamGameCatalog:
                     return game
 
         return None
+
+    @staticmethod
+    def _unique_pid_for_window_class(app_name: object) -> Optional[int]:
+        """Correlate one exact active-window class to one Linux process.
+
+        This is not a foreground-process scan: the compositor already selected
+        the foreground window. We only repair a missing PID, fail closed on
+        generic classes, and reject two-or-more exact process-name matches.
+        The resulting PID still has to prove Steam ownership through ancestry or
+        an installed-game path before ``resolve`` can return a game.
+        """
+        target = _normalize_process_name(app_name)
+        if len(target) < 4 or target in _GENERIC_PROCESS_NAMES or target.startswith('steam_app_'):
+            return None
+
+        match_pid: Optional[int] = None
+        try:
+            iterator = psutil.process_iter(['pid', 'name'])
+        except (psutil.Error, OSError):
+            return None
+        try:
+            for proc in iterator:
+                try:
+                    name = _normalize_process_name(proc.info.get('name'))
+                    pid = _clean_pid(proc.info.get('pid'))
+                except (psutil.Error, OSError, ValueError, TypeError):
+                    continue
+                if not pid or name != target:
+                    continue
+                if match_pid is not None and pid != match_pid:
+                    return None
+                match_pid = pid
+        except (psutil.Error, OSError):
+            return None
+        return match_pid
 
     def _appid_from_process_tree(self, pid: int) -> Optional[int]:
         """Find Steam's AppID marker in the foreground process ancestry.
@@ -194,6 +243,13 @@ class SteamGameCatalog:
             except (ValueError, OSError):
                 continue
         return None
+
+
+def _normalize_process_name(value: object) -> str:
+    text = str(value or '').strip().lower().replace('\\', '/').rsplit('/', 1)[-1]
+    if text.endswith('.exe'):
+        text = text[:-4]
+    return re.sub(r'[^a-z0-9_.+-]+', '', text)
 
 
 def _clean_pid(value: object) -> Optional[int]:
