@@ -1,0 +1,100 @@
+name: Publish v2.1.0-rc4 verified artifacts
+
+on:
+  push:
+    branches:
+      - "release/v2.1.0-rc4-publish"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-v2.1.0-rc4-recovery
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: "v2.1.0-rc4"
+  VERIFIED_COMMIT: "cee437d8270158fe5c5924d245118144268282ed"
+  VERIFIED_RUN_ID: "32953436656"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download verified Windows and Browser Companion artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: rc4-fixed-windows-and-extension
+          path: release-assets
+          repository: imedkablavi/discord-rich-presence
+          run-id: ${{ env.VERIFIED_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Download verified Linux artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: rc4-fixed-linux
+          path: release-assets
+          repository: imedkablavi/discord-rich-presence
+          run-id: ${{ env.VERIFIED_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Verify all release checksums again
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum -c DiscordRichPresence.exe.sha256
+          sha256sum -c CYBREX-Presence-Setup.exe.sha256
+          sha256sum -c CYBREX-Browser-Companion.zip.sha256
+          sha256sum -c CYBREX-DiscordRichPresence-linux-x86_64.sha256
+          sha256sum -c CYBREX-Presence-linux-x86_64.tar.gz.sha256
+      - name: Create combined checksums and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-assets/BUILD-PROVENANCE.txt <<EOF
+          repository=imedkablavi/discord-rich-presence
+          tag=${RELEASE_TAG}
+          commit=${VERIFIED_COMMIT}
+          verified_workflow_run=https://github.com/imedkablavi/discord-rich-presence/actions/runs/${VERIFIED_RUN_ID}
+          windows_authenticode=false
+          release_channel=prerelease
+          recovery_publish=true
+          EOF
+          (
+            cd release-assets
+            cat DiscordRichPresence.exe.sha256 \
+                CYBREX-Presence-Setup.exe.sha256 \
+                CYBREX-Browser-Companion.zip.sha256 \
+                CYBREX-DiscordRichPresence-linux-x86_64.sha256 \
+                CYBREX-Presence-linux-x86_64.tar.gz.sha256 \
+              > SHA256SUMS.txt
+          )
+      - name: Publish immutable GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" --repo imedkablavi/discord-rich-presence >/dev/null 2>&1; then
+            echo "${RELEASE_TAG} already exists; refusing to overwrite it."
+            exit 1
+          fi
+          gh release create "${RELEASE_TAG}" \
+            release-assets/CYBREX-Presence-Setup.exe \
+            release-assets/CYBREX-Presence-Setup.exe.sha256 \
+            release-assets/DiscordRichPresence.exe \
+            release-assets/DiscordRichPresence.exe.sha256 \
+            release-assets/CYBREX-Presence-linux-x86_64.tar.gz \
+            release-assets/CYBREX-Presence-linux-x86_64.tar.gz.sha256 \
+            release-assets/CYBREX-DiscordRichPresence-linux-x86_64 \
+            release-assets/CYBREX-DiscordRichPresence-linux-x86_64.sha256 \
+            release-assets/CYBREX-Browser-Companion.zip \
+            release-assets/CYBREX-Browser-Companion.zip.sha256 \
+            release-assets/SHA256SUMS.txt \
+            release-assets/BUILD-PROVENANCE.txt \
+            --repo imedkablavi/discord-rich-presence \
+            --target "${VERIFIED_COMMIT}" \
+            --generate-notes \
+            --prerelease \
+            --title "CYBREX Presence ${RELEASE_TAG}"
