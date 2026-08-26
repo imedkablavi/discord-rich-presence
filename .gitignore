@@ -12,6 +12,13 @@ dist/
 build/
 *.egg-info/
 
+# Discord Social SDK is downloaded from the Developer Portal and must not be
+# vendored as a raw SDK archive/source dependency in this public repository.
+DiscordSocialSdk-*.zip
+DiscordSocialSdk-CYBREX-*.zip
+discord_social_sdk/
+vendor/discord_social_sdk/
+
 # Virtual environments
 venv/
 .venv/
