@@ -29,8 +29,6 @@ def activity_display_name(activity: Dict[str, Any]) -> str:
     elif kind == "coding":
         value = activity.get("editor") or "Code Editor"
     elif kind == "browser":
-        # The service/site stays in details/state. The top-level identity should
-        # represent the actual desktop program the user is running.
         value = activity.get("browser_name") or "Browser"
     elif kind == "media":
         value = activity.get("player") or activity.get("service") or "Media Player"
@@ -57,7 +55,9 @@ def activity_display_name(activity: Dict[str, Any]) -> str:
         return mapped[:128]
     if text.lower().startswith(("org.", "com.", "io.", "net.")) and "." in text:
         text = text.rsplit(".", 1)[-1]
-    text = text.replace("_", " ").replace("-", " ").strip()
+    # Preserve punctuation in real product names (Counter-Strike, Battle.net,
+    # etc.). Only normalize the common underscore process-name separator.
+    text = text.replace("_", " ").strip()
     if text and text.islower():
         text = text.title()
     return (text or "CYBREX Activity")[:128]
@@ -174,10 +174,14 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
                 or "CYBREX Activity"
             )[:128]
         self.current_activity_name = name
+        transport = getattr(self, "rpc_transport", "legacy_rpc")
 
         if not self.dry_run and not self.connected:
             if not self.connect_discord():
-                self._runtime_update(activity_name=name, transport=self.rpc_transport)
+                self._runtime_update(
+                    activity_name=name,
+                    transport=getattr(self, "rpc_transport", transport),
+                )
                 return False
         if isinstance(self.rpc, SocialSDKPresence):
             self.rpc.set_activity_name(name)
@@ -185,15 +189,13 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
         active_rpc = self.rpc
         result = original_update_presence(self, payload)
         if not result and isinstance(active_rpc, SocialSDKPresence):
-            # main.py clears self.rpc on update failure. Close the captured
-            # helper explicitly so a reconnect cannot leave an orphan process.
             try:
                 active_rpc.close()
             except Exception:
                 pass
         self._runtime_update(
             activity_name=name if result else None,
-            transport=self.rpc_transport,
+            transport=getattr(self, "rpc_transport", transport),
         )
         return result
 
