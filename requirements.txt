@@ -14,8 +14,11 @@ psutil>=7.2.2,<8
 arabic-reshaper>=3.0,<4
 python-bidi>=0.6,<1
 
-# Linux media integration
-pydbus>=0.6,<1; sys_platform == 'linux'
+# Linux native media discovery intentionally uses the external `playerctl`
+# command when available. We do not bundle pydbus/GLib proxies into the long-
+# running process because repeated proxy construction caused unacceptable RSS
+# growth on real Linux desktop sessions. Browser Companion remains the precise
+# fallback for browser media when playerctl is unavailable.
 
 # Windows integrations
 pywin32>=305; sys_platform == 'win32'
