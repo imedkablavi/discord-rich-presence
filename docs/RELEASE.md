@@ -29,25 +29,25 @@ Key rotation is a release/security event. When possible, ship the new public key
 
 Windows:
 
-- `DiscordRichPresence-windows-x86_64.exe` — raw executable consumed by the signed updater.
-- `DiscordRichPresence-<version>-windows-x86_64-portable.zip` — portable bundle.
-- `DiscordRichPresence-Setup-<version>-windows-x86_64.exe` — per-user Inno Setup installer with uninstall support.
+- `DiscordRichPresence-windows-x86_64.exe` - raw executable consumed by the signed updater.
+- `DiscordRichPresence-<version>-windows-x86_64-portable.zip` - portable bundle.
+- `DiscordRichPresence-Setup-<version>-windows-x86_64.exe` - per-user Inno Setup installer with uninstall support.
 
 The Windows installer uses the current user's application directory rather than a protected system directory. This keeps normal updates non-privileged while preserving shortcuts, startup registration, and uninstall support.
 
 Linux:
 
-- `DiscordRichPresence-linux-x86_64` — raw portable executable used by the signed updater when its install directory is user-writable.
-- `DiscordRichPresence-<version>-linux-x86_64.tar.gz` — distribution-neutral portable bundle.
-- `discord-rich-presence_<version>_amd64.deb` — Debian/Ubuntu package.
-- `discord-rich-presence-<version>-*.x86_64.rpm` — Fedora/Bazzite/RPM-family package.
+- `DiscordRichPresence-linux-x86_64` - raw portable executable used by the signed updater when its install directory is user-writable.
+- `DiscordRichPresence-<version>-linux-x86_64.tar.gz` - distribution-neutral portable bundle.
+- `discord-rich-presence_<version>_amd64.deb` - Debian/Ubuntu package.
+- `discord-rich-presence-<version>-*.x86_64.rpm` - Fedora/Bazzite/RPM-family package.
 
 Native DEB/RPM files stay owned by the package manager. The application must not silently overwrite those package-managed files.
 
 Release metadata:
 
-- `update-manifest.json` — Ed25519-signed metadata containing HTTPS URL, signed size, SHA-256, platform, architecture, and asset kind.
-- `SHA256SUMS.txt` — checksums for all uploaded release assets.
+- `update-manifest.json` - Ed25519-signed metadata containing HTTPS URL, signed size, SHA-256, platform, architecture, and asset kind.
+- `SHA256SUMS.txt` - checksums for all uploaded release assets.
 
 ## Updater behavior
 
