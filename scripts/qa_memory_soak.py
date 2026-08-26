@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Deterministic long-running resource QA for CYBREX core paths.
 
-This is intentionally synthetic/offline: it stresses the same bounded HTTP and
-payload-building paths without requiring Discord, a browser, or a real game.
+This is intentionally synthetic/offline: it stresses the same bounded HTTP,
+game-telemetry and payload-building paths without requiring Discord, a browser,
+or a real game.
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ from config import Config
 from memory_guard import _malloc_trim
 from presence import PresenceBuilder
 from resource_hardening import apply_resource_hardening
+import warthunder_telemetry
+from warthunder_telemetry import WarThunderTelemetryReader
 
 MIB = 1024 * 1024
 
@@ -92,6 +95,35 @@ def churn_presence(builder: PresenceBuilder, count: int) -> None:
         builder.build(kinds[i % len(kinds)](i))
 
 
+def churn_warthunder(count: int) -> None:
+    """Stress War Thunder parsing/cache without touching a live game port."""
+    original = warthunder_telemetry._request_json
+    calls = {"count": 0}
+
+    def fake(path: str):
+        calls["count"] += 1
+        if path == "/indicators":
+            return {"valid": True, "army": "tank", "type": "tankModels/ussr_t_80bvm"}
+        if path == "/mission.json":
+            return {"status": "running"}
+        return None
+
+    warthunder_telemetry._request_json = fake
+    try:
+        reader = WarThunderTelemetryReader()
+        for _ in range(count):
+            # Expire deliberately so this is parser/allocation stress rather than
+            # merely exercising the three-second cache hit.
+            reader._cache_until = 0.0
+            value = reader.snapshot()
+            if value.get("branch") != "Ground":
+                raise RuntimeError(f"War Thunder telemetry regression: {value}")
+        if calls["count"] != count * 2:
+            raise RuntimeError(f"unexpected War Thunder request count: {calls['count']}")
+    finally:
+        warthunder_telemetry._request_json = original
+
+
 def main() -> int:
     apply_resource_hardening()
     with tempfile.TemporaryDirectory(prefix="cybrex-memory-qa-") as temp:
@@ -102,9 +134,8 @@ def main() -> int:
         config.set("images.use_external_app_icons", True)
 
         builder = PresenceBuilder(config)
-        # Warm imports/caches before the baseline so the assertion measures
-        # growth, not one-time interpreter initialization.
         churn_presence(builder, 1000)
+        churn_warthunder(500)
         gc.collect()
         _malloc_trim()
         baseline_rss, baseline_threads, baseline_fds = snapshot()
@@ -119,10 +150,10 @@ def main() -> int:
             if int(status.get("records", 0)) > 100:
                 raise RuntimeError(f"browser record bound violated: {status}")
             churn_presence(builder, 30000)
+            churn_warthunder(20000)
         finally:
             bridge.stop()
 
-        # Let fixed workers exit, then return free heap pages where glibc allows.
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline:
             if not any(t.name.startswith("cybrex-browser") for t in threading.enumerate()):
@@ -139,7 +170,8 @@ def main() -> int:
             f"final_rss={final_rss / MIB:.1f}MiB "
             f"growth={growth / MIB:.1f}MiB "
             f"threads={baseline_threads}->{final_threads} "
-            f"fds={baseline_fds}->{final_fds}"
+            f"fds={baseline_fds}->{final_fds} "
+            "warthunder_snapshots=20000"
         )
 
         if growth > 96 * MIB:
