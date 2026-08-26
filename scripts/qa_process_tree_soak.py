@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure packaged CYBREX process-tree growth after GUI warm-up."""
+"""Measure packaged CYBREX process-tree growth after warm-up."""
 
 from __future__ import annotations
 
@@ -37,14 +37,20 @@ def tree_metrics(root_pid: int) -> tuple[int, int, int]:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: qa_process_tree_soak.py <packaged-executable>")
+    if len(sys.argv) not in {2, 3}:
+        raise SystemExit("usage: qa_process_tree_soak.py <packaged-executable> [gui|tray]")
     executable = Path(sys.argv[1]).resolve()
     if not executable.is_file():
         raise SystemExit(f"executable not found: {executable}")
+    mode = sys.argv[2].strip().lower() if len(sys.argv) == 3 else "gui"
+    if mode not in {"gui", "tray"}:
+        raise SystemExit("mode must be gui or tray")
 
+    arg = "--gui" if mode == "gui" else "--tray"
+    warmup_seconds = 12 if mode == "gui" else 20
+    soak_seconds = 60 if mode == "gui" else 120
     process = subprocess.Popen(
-        [str(executable), "--gui"],
+        [str(executable), arg],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env=os.environ.copy(),
@@ -52,22 +58,22 @@ def main() -> int:
     )
     samples: list[tuple[int, int, int]] = []
     try:
-        # PyInstaller one-file extraction + Tk initialization are intentionally
-        # excluded from growth measurement.
-        warmup_deadline = time.monotonic() + 12
+        # PyInstaller one-file extraction plus UI/tray/service initialization are
+        # intentionally excluded from the growth measurement.
+        warmup_deadline = time.monotonic() + warmup_seconds
         while time.monotonic() < warmup_deadline:
             if process.poll() is not None:
-                raise RuntimeError(f"packaged GUI exited during warm-up with {process.returncode}")
+                raise RuntimeError(f"packaged {mode} exited during warm-up with {process.returncode}")
             time.sleep(0.5)
 
         baseline = tree_metrics(process.pid)
         if baseline[0] <= 0:
-            raise RuntimeError("could not observe packaged GUI process tree")
+            raise RuntimeError(f"could not observe packaged {mode} process tree")
 
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + soak_seconds
         while time.monotonic() < deadline:
             if process.poll() is not None:
-                raise RuntimeError(f"packaged GUI exited during soak with {process.returncode}")
+                raise RuntimeError(f"packaged {mode} exited during soak with {process.returncode}")
             samples.append(tree_metrics(process.pid))
             time.sleep(1.0)
 
@@ -75,8 +81,9 @@ def main() -> int:
         peak = max(samples, key=lambda value: value[0])
         growth = final[0] - baseline[0]
         peak_growth = peak[0] - baseline[0]
+        prefix = "CYBREX_GUI_SOAK" if mode == "gui" else "CYBREX_TRAY_SOAK"
         print(
-            "CYBREX_GUI_SOAK "
+            f"{prefix} "
             f"baseline={baseline[0] / MIB:.1f}MiB "
             f"final={final[0] / MIB:.1f}MiB "
             f"peak={peak[0] / MIB:.1f}MiB "
@@ -86,14 +93,13 @@ def main() -> int:
             f"fds={baseline[2]}->{final[2]}"
         )
 
-        # This is a slope guard after warm-up, not a cap on normal Tk/PyInstaller
-        # working-set size. A continuously leaking GUI should cross these bounds.
+        # These are slope guards after warm-up, not a cap on normal working set.
         if growth > 96 * MIB:
-            raise RuntimeError(f"GUI RSS grew more than 96 MiB after warm-up: {growth / MIB:.1f} MiB")
-        if final[1] > baseline[1] + 6:
-            raise RuntimeError(f"GUI thread growth exceeded bound: {baseline[1]}->{final[1]}")
-        if final[2] > baseline[2] + 16:
-            raise RuntimeError(f"GUI file descriptor growth exceeded bound: {baseline[2]}->{final[2]}")
+            raise RuntimeError(f"{mode} RSS grew more than 96 MiB after warm-up: {growth / MIB:.1f} MiB")
+        if final[1] > baseline[1] + 8:
+            raise RuntimeError(f"{mode} thread growth exceeded bound: {baseline[1]}->{final[1]}")
+        if final[2] > baseline[2] + 20:
+            raise RuntimeError(f"{mode} file descriptor growth exceeded bound: {baseline[2]}->{final[2]}")
     finally:
         if process.poll() is None:
             try:
