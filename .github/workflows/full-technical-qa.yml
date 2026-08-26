@@ -1,0 +1,121 @@
+name: Full Technical QA
+
+on:
+  push:
+    branches:
+      - fix/ui-arabic-theme
+    paths:
+      - "**.py"
+      - "requirements*.txt"
+      - "discord-rich-presence.spec"
+      - ".github/workflows/full-technical-qa.yml"
+  pull_request:
+    paths:
+      - "**.py"
+      - "requirements*.txt"
+      - "discord-rich-presence.spec"
+      - ".github/workflows/full-technical-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-technical-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  resource-regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install QA dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Verify dependency environment
+        run: python -m pip check
+      - name: Compile sources
+        run: python -m compileall -q .
+      - name: Critical Ruff checks
+        run: python -m ruff check . --select E9,F63,F7,F82
+      - name: Run resource and lifecycle regressions
+        run: >-
+          python -m pytest -q
+          tests/test_resource_limits.py
+          tests/test_browser_resource_stress.py
+          tests/test_rpc_failure_cleanup.py
+          tests/test_memory_guard.py
+          tests/test_config_url_resilience.py
+
+  linux-core-memory-soak:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install runtime QA dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run 5k HTTP + 30k activity memory soak
+        run: python scripts/qa_memory_soak.py
+
+  linux-packaged-gui-soak:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Build packaged Linux executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Smoke packaged executable
+        run: timeout 20s ./dist/DiscordRichPresence --dry-run --once
+      - name: Soak packaged GUI process tree
+        run: xvfb-run -a python scripts/qa_process_tree_soak.py ./dist/DiscordRichPresence
+
+  full-regression-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Full pytest suite
+        run: python -m pytest -q
+      - name: Dependency vulnerability audit
+        run: |
+          python -m pip install "pip-audit>=2.9,<3" "bandit>=1.8,<2"
+          pip-audit -r requirements-dev.txt
+      - name: High-severity source scan
+        run: bandit -q -r . -x ./tests,./build,./dist -lll
