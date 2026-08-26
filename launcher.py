@@ -135,10 +135,11 @@ def _handle_game_library_command() -> Optional[int]:
 
 
 def main() -> int:
-    # Apply before any Config instance is created. Optional malformed Rich
-    # Presence URLs are dropped instead of making the whole app unstartable.
     from config_hardening import apply_config_hardening
     apply_config_hardening()
+
+    from memory_guard import start_memory_guard
+    start_memory_guard()
 
     update_result = _handle_update_command()
     if update_result is not None:
