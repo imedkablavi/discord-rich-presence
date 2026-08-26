@@ -157,7 +157,7 @@ def main() -> int:
         sys.argv.remove('--gui')
         from config import Config
         from gui_instance import GUIInstanceLock
-        from gui_modern_v3 import ModernControlPanel
+        from gui_modern_v4 import ModernControlPanel
 
         gui_lock = GUIInstanceLock()
         if not gui_lock.acquire():
