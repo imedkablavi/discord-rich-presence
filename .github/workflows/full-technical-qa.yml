@@ -3,7 +3,7 @@ name: Full Technical QA
 on:
   push:
     branches:
-      - fix/ui-arabic-theme
+      - main
     paths:
       - "**.py"
       - "requirements*.txt"
