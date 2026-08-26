@@ -1,10 +1,10 @@
 # League of Legends integration
 
-CYBREX Rich Presence can enrich a detected League of Legends match with display-safe local context such as the champion, role/position and game mode.
+CYBREX Presence can enrich a detected League of Legends match with display-safe local context such as champion, role or position, game mode and match time.
 
 ## Data source
 
-The integration uses Riot's documented **Live Client Data API** exposed by the running League game client on `https://127.0.0.1:2999`. It does not require a Riot API key, Riot Sign On, account password, process-memory access, DLL injection, input automation, packet interception or an overlay hook.
+The integration uses Riot's local Live Client Data API exposed by the running League game client on `https://127.0.0.1:2999`. It does not require a Riot API key, account password, process-memory access, DLL injection, input automation, packet interception or overlay hooks.
 
 To minimize collection, CYBREX requests only:
 
@@ -12,21 +12,23 @@ To minimize collection, CYBREX requests only:
 - `/liveclientdata/activeplayername`
 - `/liveclientdata/playerlist`
 
-`activeplayername` is used only in memory to identify which entry in `playerlist` belongs to the local player. The retained snapshot contains only:
+`activeplayername` is used only in memory to identify the local player's entry in `playerlist`. The retained snapshot contains only:
 
 - champion name
-- role/position
+- role or position
 - game mode
 - current match time
 
-CYBREX does **not** retain or publish Riot ID, Summoner Name, KDA, items, runes, enemy information, other-player state, hidden information or information intended to create a competitive advantage.
+CYBREX does not retain or publish Riot ID, Summoner Name, KDA, items, runes, enemy information, other-player state, hidden information or information intended to create a competitive advantage.
+
+In Strict privacy mode the deep League telemetry path is not queried.
 
 ## Fail-closed behavior
 
-If the local API is unavailable, returns malformed/oversized data, or the local player cannot be identified confidently, the enhanced fields are omitted and CYBREX falls back to the normal `League of Legends · Riot Client` presence.
+If the local API is unavailable, returns malformed or oversized data, or the local player cannot be identified confidently, enhanced fields are omitted and CYBREX falls back to normal League of Legends game identity Presence.
 
 ## Riot notice
 
-CYBREX Rich Presence is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are trademarks or registered trademarks of Riot Games, Inc.
+CYBREX Presence is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are trademarks or registered trademarks of Riot Games, Inc.
 
-Before distributing the League integration as a player-facing production product, the project owner should review Riot's current Developer API Policy and product-registration requirements and register/update the product in the Riot Developer Portal as required.
+Distribution and use of this integration must continue to comply with Riot's current developer and product policies.

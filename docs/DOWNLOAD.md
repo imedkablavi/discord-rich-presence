@@ -1,46 +1,46 @@
 # Download CYBREX Presence
 
-Official CYBREX Presence desktop builds are distributed through this repository's [GitHub Releases](https://github.com/imedkablavi/discord-rich-presence/releases).
+Official desktop builds are distributed through this repository's [GitHub Releases](https://github.com/imedkablavi/discord-rich-presence/releases).
 
 ## Release channels
 
-- **Stable:** intended for normal users after release qualification. Stable Windows publication is blocked until the configured code-signing path succeeds.
-- **Prerelease / release candidate:** intended for validation before stable promotion. A prerelease may be unsigned and must not be represented as a signed stable build.
+- **Stable:** normal-user channel after release qualification. Stable Windows publication requires verified Authenticode signing.
+- **Preview:** release candidates used for qualification before stable promotion. A preview build may be unsigned and is labeled as a GitHub prerelease.
 
-The latest currently published release candidate is available from the repository's Releases page. Check the release label before installing it.
+Always check the release label before installing.
 
 ## Windows
 
-The normal Windows distribution is:
+Published Windows assets include:
 
-- `CYBREX-Presence-Setup.exe` — per-user installer;
-- `DiscordRichPresence.exe` — portable executable.
+- `CYBREX-Presence-Setup.exe`: per-user installer
+- `DiscordRichPresence.exe`: portable executable
 
-For a signed build, verify its Authenticode signature in Windows before relying on publisher identity. An unsigned artifact may trigger Windows SmartScreen.
+For a signed build, verify the Authenticode signature before relying on publisher identity. An unsigned prerelease may trigger Windows SmartScreen.
 
 ## Linux x86_64
 
-The normal Linux distributions are:
+Published Linux assets include:
 
-- `CYBREX-Presence-linux-x86_64.tar.gz` — user-level installation bundle;
-- `CYBREX-DiscordRichPresence-linux-x86_64` — portable executable.
+- `CYBREX-Presence-linux-x86_64.tar.gz`: user-level installation bundle
+- `CYBREX-DiscordRichPresence-linux-x86_64`: portable executable
 
-The user-level installer does not require `sudo` and verifies the bundle SHA-256 manifest before installation when the manifest is present.
+The user-level installer does not require `sudo`. It verifies the bundle checksum manifest when present and fails closed if verification cannot be completed successfully.
 
 ## Integrity verification
 
-Release assets include SHA-256 sidecars and the generic release pipeline publishes:
+Release assets include SHA-256 sidecars. The release pipeline also publishes:
 
-- `SHA256SUMS.txt` — combined release checksums;
-- `BUILD-PROVENANCE.txt` — repository, tag, commit, workflow run and Windows signing-path status.
+- `SHA256SUMS.txt`: combined release checksums
+- `BUILD-PROVENANCE.txt`: repository, tag, commit, workflow run and Windows signing status
 
-Example verification on Linux:
+Linux example:
 
 ```bash
 sha256sum -c CYBREX-DiscordRichPresence-linux-x86_64.sha256
 ```
 
-Example verification on Windows PowerShell:
+Windows PowerShell example:
 
 ```powershell
 Get-FileHash .\CYBREX-Presence-Setup.exe -Algorithm SHA256
@@ -49,18 +49,8 @@ Get-AuthenticodeSignature .\CYBREX-Presence-Setup.exe
 
 Compare hashes only with values published on the same official GitHub Release.
 
-## Code signing policy
-
-The project is applying to the SignPath Foundation open-source code-signing program.
-
-> Free code signing provided by SignPath.io, certificate by SignPath Foundation.
-
-This statement describes the intended SignPath provider relationship and does **not** claim that an existing artifact is signed before SignPath approval and CI integration are complete. The release workflow is designed to fail closed for stable Windows publication when signing is unavailable.
-
-See the full [Code signing policy](../CODE_SIGNING.md), [Security Policy](../SECURITY.md), and [Privacy Policy](PRIVACY.md).
-
 ## Official sources only
 
-Do not rely on binaries re-uploaded to file-sharing sites or unofficial mirrors. The authoritative source code, releases, checksums and build provenance are under:
+Do not rely on binaries re-uploaded to file-sharing sites or unofficial mirrors. The authoritative source code, releases, checksums and build provenance are published under this repository.
 
-`https://github.com/imedkablavi/discord-rich-presence`
+See [Code signing policy](../CODE_SIGNING.md), [Security Policy](../SECURITY.md) and [Privacy](PRIVACY.md).

@@ -2,29 +2,33 @@
 
 ## Discord shows no Rich Presence
 
-1. Confirm the Discord **desktop** client is running.
-2. Open the control panel and check **Discord RPC** on the Dashboard.
-3. Normal users should leave `discord.application_id_override` empty. A custom numeric application ID is only for users who intentionally maintain their own Discord application/assets.
-4. Check the local log for `Discord RPC unavailable`, `Invalid ID`, or detector errors.
-5. Run one local diagnostic cycle without publishing anything:
+1. Confirm the Discord desktop client is running.
+2. Open the control panel and check the Discord connection status.
+3. Normal users should leave `discord.application_id_override` empty.
+4. Check the local log for Discord connection or detector errors.
+5. Run one diagnostic cycle without publishing:
 
 ```bash
 python main.py --dry-run --once --verbose
 ```
 
-The full sanitized dry-run payload is printed to the terminal. Review it before sharing it publicly because it can still contain activity text relevant to the test.
+The sanitized dry-run payload is printed to the terminal. Review it before sharing because it can contain activity text relevant to the test.
 
-If the service can connect to Discord but no payload is produced, the next step is detector/platform troubleshooting rather than Discord authentication.
+## Discord still shows the CYBREX application name
+
+Dynamic top-level activity names require a package that includes the optional Discord Social SDK helper. When that helper is missing or fails, CYBREX falls back to legacy Discord RPC so Presence continues working. Legacy RPC may display the registered CYBREX Discord application name at the top of the card.
+
+The control panel reports the active Discord transport. If it reports legacy RPC, this behavior is expected.
 
 ## The service is already running
 
-Only one service instance is allowed per user. The GUI, tray, `run.bat`, packaged binary, and startup entry share the same runtime lock.
+Only one service instance is allowed per user. The GUI, tray, packaged binary and startup entry share the same runtime lock.
 
-If the Dashboard reports a live PID, stop the service from the control panel or tray. Stale lock files are recovered automatically when the recorded process no longer exists or the PID has been reused by another process.
+If the control panel reports a live PID, stop or restart the service from the control panel or tray. Stale locks are recovered when the recorded process no longer exists or the PID has been reused by another process.
 
 ## Browser Companion is not connecting
 
-The optional Companion sends browser snapshots only to `http://127.0.0.1:32191` by default.
+The optional Browser Companion sends snapshots only to `http://127.0.0.1:32191` by default.
 
 Check that the service is running and look for:
 
@@ -32,37 +36,31 @@ Check that the service is running and look for:
 Browser companion listening on http://127.0.0.1:32191
 ```
 
-For Brave/Chrome/Edge, do not choose the repository root in **Load unpacked**. Prepare a clean extension directory instead:
+From a source checkout, prepare a clean unpacked extension directory with:
 
 ```bash
 bash scripts/prepare-browser-companion.sh
 ```
 
-Then select the generated `CYBREX-Browser-Companion` directory and reload the extension after development updates.
+Select the generated `CYBREX-Browser-Companion` directory, not the repository root, in the browser's extension developer page.
 
-If the extension badge shows `OFF`, check whether another local program is already using port `32191`, whether the desktop service has Browser Companion disabled, or whether a browser/endpoint security product is blocking loopback extension requests.
-
-The extension aborts a local bridge request after a short timeout rather than leaving a request hanging indefinitely.
+If the extension reports the bridge as unavailable, check whether another local process owns port `32191`, Browser Companion is disabled or endpoint security is blocking loopback extension requests.
 
 ## A browser page is inaccurate
 
-Without Browser Companion, browser detection relies on the visible foreground window title and recognized service markers.
+Without Browser Companion, detection relies on visible foreground-window information and conservative service markers.
 
-With Browser Companion enabled, the service can receive exact local tab URL/title/focus/media metadata. Balanced privacy still publishes only the URL origin by default; exact URLs do not automatically become public Discord links.
+With Browser Companion enabled, CYBREX can receive exact local tab URL/title/focus/media metadata. Balanced privacy still publishes only the permitted URL scope. Private or incognito foreground windows do not reuse normal-tab metadata.
 
-Private/incognito foreground windows intentionally do not reuse normal-tab Companion metadata.
+## Rich Presence shows a generic image
 
-## Rich Presence keeps showing a generic image
-
-Known applications can use app-specific external raster artwork by default. Run:
+Run a local dry-run and inspect `large_image`:
 
 ```bash
 python main.py --dry-run --once --verbose
 ```
 
-Inspect `large_image`. If the payload contains a direct raster image URL but Discord still shows no image, the current Discord client/RPC path is likely not rendering that external asset. Do not keep changing random CDNs; use Discord Developer Portal asset keys for deterministic release artwork.
-
-To force Portal assets only:
+If the payload contains a public image URL but Discord does not render it, use configured Discord asset keys for deterministic artwork. To disable external app artwork:
 
 ```yaml
 images:
@@ -78,48 +76,52 @@ images:
     trae: "https://example.com/trae.png"
 ```
 
-PNG, JPEG, or WebP is recommended for direct image URLs. Unknown applications intentionally fall back to configured category/Portal assets.
+Unknown applications intentionally fall back to configured category assets.
 
 ## Terminal commands do not appear
 
-Terminal command tracking needs one of the supplied optional shell hooks:
+Terminal tracking needs one of the optional shell hooks:
 
 - Bash: source `scripts/hooks/bash.sh`
 - Zsh: source `scripts/hooks/zsh.zsh`
 - PowerShell: dot-source `scripts/hooks/powershell.ps1`
 
-Restart the shell after installing the hook. The service uses per-shell PID cache files and may intentionally show no command when it cannot safely associate a command with the focused terminal.
+Restart the shell after installing a hook. CYBREX uses per-shell PID cache files and may intentionally show no command when it cannot safely associate a command with the focused terminal.
 
-The hardened default command-cache lifetime is 15 minutes. Old commands can therefore disappear even when the terminal remains open; this is intentional privacy behavior.
+The default command-cache lifetime is 15 minutes.
 
 ## Linux foreground detection
 
-X11 requires `xprop`, commonly shipped by `x11-utils` or the equivalent package for your distribution.
+X11 uses `xprop`.
 
-KDE Plasma Wayland uses `kdotool`. Verify it directly:
+KDE Plasma Wayland uses `kdotool`:
 
 ```bash
 kdotool getactivewindow getwindowclassname getwindowname getwindowpid
 ```
 
-Sway uses `swaymsg`. Other Wayland compositors may not expose a reliable foreground-window API; the service returns no foreground activity instead of guessing from unrelated running processes.
+Sway uses `swaymsg`. Other Wayland compositors may not expose a reliable foreground-window API. CYBREX returns no foreground activity instead of guessing from unrelated running processes.
 
 ## Media is not detected on Linux
 
-Linux media detection prefers `playerctl` and falls back to pydbus/PyGObject when available. Confirm `playerctl` can see a playing MPRIS session:
+Linux media detection uses stateless `playerctl` probing when available. Confirm that `playerctl` can see an MPRIS player:
 
 ```bash
 playerctl --all-players status
 playerctl --all-players metadata --format '{{playerName}} | {{artist}} | {{title}} | {{position}} | {{mpris:length}}'
 ```
 
-If `playerctl` is unavailable, the pydbus fallback also needs PyGObject (`gi`) to be importable by the same Python environment. Installing the `pydbus` wheel alone does not guarantee that `gi` exists inside a virtual environment.
+The former persistent pydbus/GLib polling fallback is not used in the current runtime.
 
-## Background media hides coding/terminal activity
+## War Thunder activity is generic
 
-The default `smart` priority policy lets foreground coding/terminal/browser activity beat unrelated background media while still allowing foreground media to win.
+CYBREX can enrich War Thunder only while the game is identified confidently, Strict privacy is not active and the game's local `127.0.0.1:8111` telemetry is available and valid.
 
-Check:
+If port `8111` is unavailable or returns invalid data, CYBREX intentionally falls back to normal War Thunder game identity instead of guessing map, server or vehicle context.
+
+## Background media hides coding or terminal activity
+
+The default `smart` priority policy lets foreground coding, terminal and browser activity beat unrelated background media while still allowing foreground media to win.
 
 ```yaml
 rules:
@@ -127,57 +129,47 @@ rules:
     policy: smart
 ```
 
-Other options are `foreground_first`, `media_first`, and `custom`.
+Other supported policies are `foreground_first`, `media_first` and `custom`.
 
 ## Activity changes feel delayed
 
-`update_interval_secs` controls local polling. The default is 2 seconds and the supported range is 1-3600 seconds. Existing configuration files keep their saved value, so an older config may still contain `5`.
+`update_interval_secs` controls local polling. The default is 2 seconds and the supported range is 1 to 3600 seconds. Existing configuration files keep their saved value.
 
-Linux:
+Linux example:
 
 ```bash
 grep -n 'update_interval_secs' ~/.config/discord-rich-presence/config.yaml
 ```
 
-Setting it to `1` gives the fastest supported polling. Discord RPC updates are still sent only when the resulting normalized payload changes.
+Discord updates are sent only when the normalized payload changes.
 
 ## Windows packaged build does not start
 
 Check:
 
-- Discord Desktop is installed and running;
-- only one `DiscordRichPresence.exe` service instance is active;
-- `%LOCALAPPDATA%\discord-rich-presence\logs\app.log` for startup errors;
-- Windows Security/antivirus has not quarantined the executable.
+- Discord Desktop is running
+- only one CYBREX service instance is active
+- `%LOCALAPPDATA%\discord-rich-presence\logs\app.log` for startup errors
+- Windows Security or antivirus did not quarantine the executable
 
-Tagged releases include a `.sha256` checksum. If the release is unsigned, Windows SmartScreen may still warn even when the checksum is correct. Authenticode signing requires a real signing certificate configured by the project owner.
+Every tagged release includes checksum verification data. An unsigned prerelease can still trigger Windows SmartScreen.
 
 ## Linux packaged build does not start
 
-Make the downloaded release artifact executable if your browser removed its executable bit:
+If the executable bit was removed during download:
 
 ```bash
 chmod +x CYBREX-DiscordRichPresence-linux-x86_64
 ./CYBREX-DiscordRichPresence-linux-x86_64 --dry-run --once
 ```
 
-The Linux release binary still depends on system-level desktop integrations such as `kdotool`, `xprop`, `swaymsg`, or `playerctl` for the corresponding optional detectors.
-
-## Dependency/security audit fails
-
-Release QA runs `pip-audit` against runtime dependencies and treats known advisories as blockers. Do not suppress a new advisory just to make CI green. Upgrade/remove the affected dependency or document a narrowly justified exception only after investigating whether the advisory applies.
-
-For local verification:
-
-```bash
-python -m pip install -r requirements-dev.txt
-pip-audit -r requirements.txt
-bandit -q -r . -x ./tests,./build,./dist -lll
-```
+Optional Linux detectors depend on the relevant system integration tool such as `kdotool`, `xprop`, `swaymsg` or `playerctl`.
 
 ## Where are the logs?
 
-- Windows: `%LOCALAPPDATA%\discord-rich-presence\logs\app.log`
-- Linux: `~/.local/state/discord-rich-presence/app.log`
+```text
+Windows: %LOCALAPPDATA%\discord-rich-presence\logs\app.log
+Linux:   ~/.local/state/discord-rich-presence/app.log
+```
 
-Logs rotate automatically. Persistent logs intentionally avoid complete Rich Presence payloads; use an explicit dry run when you need to inspect the actual payload locally.
+Logs rotate automatically and avoid complete Rich Presence payloads. Use an explicit dry-run when you need to inspect the actual sanitized payload locally.

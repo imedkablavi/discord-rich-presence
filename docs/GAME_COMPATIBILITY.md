@@ -1,95 +1,87 @@
 # Game Compatibility
 
-CYBREX Presence has distinct levels of game support. Keeping them separate avoids misleading compatibility claims: detecting that a game is running is not the same as knowing its current map, server, mode or match state.
+CYBREX Presence separates standard game identity from enhanced game telemetry. Detecting that a game is running is not the same as knowing its current map, server, mode or match state.
 
-## Standard game support
+## Standard support
 
-The desktop app identifies installed/foreground games from local metadata where possible. Steam, Epic Games and Heroic are metadata-driven, so support is not limited to a hardcoded list: a game can work even when its title is not present in this repository's curated catalog.
+Steam, Epic Games and Heroic are resolved from local launcher metadata where possible. Support is therefore not limited to a hardcoded executable list.
 
-For release QA and product documentation, CYBREX also ships a curated compatibility catalog containing **346 popular titles** across Steam-heavy, cross-launcher and current-2026 targets. The source of truth is:
+The bundled curated catalog contains more than 300 popular compatibility targets. Catalog membership means the title is an explicit detection and QA target. It does not mean every launcher, storefront, operating-system build or hardware combination has been manually tested, and it does not imply live match telemetry.
 
-- `game_packs/popular_catalog.json`
-- `game_packs/popular_cross_launcher.json`
-- `game_packs/popular_2026.json`
+Launcher metadata remains authoritative. Community Game Packs use exact normalized process names as a conservative fallback. Generic launcher pages, store pages, news and unrelated window titles fail closed.
 
-The catalog includes representative titles such as Counter-Strike 2, Dota 2, GTA V, ELDEN RING, Baldur's Gate 3, Fortnite, VALORANT, League of Legends, Minecraft, Roblox, World of Warcraft, Diablo IV, Rocket League, Genshin Impact, Squad, War Thunder, Deadlock, PEAK and EA SPORTS FC 26.
+## Accuracy tiers
 
-A title being in the curated catalog means it is an explicit compatibility/QA target. It does **not** mean every launcher, operating system, game version or storefront build has been manually tested on real hardware, and it does not imply deep match telemetry.
+### Tier 1: game identity
 
-## Activity accuracy tiers
+Standard Presence can include canonical game name, launcher/source, Steam artwork or store link when available and elapsed activity time.
 
-### Tier 1 — game identity
+CYBREX does not invent map, server or mode values for Tier 1 games.
 
-For ordinary launcher-resolved games CYBREX can publish the canonical game name, launcher/source, Steam artwork/store link when available, and elapsed activity time. This is the baseline for the broad catalog.
+### Tier 2: bounded local metadata
 
-CYBREX must not invent map/server/mode values for Tier-1 titles.
+A game may expose reliable local state without requiring account credentials or game-memory access.
 
-### Tier 2 — local match metadata
+**Squad** can use a bounded read of recent local `SquadGame.log` data while the game is foreground. Map/layer/mode are published only from high-confidence current evidence. Server name or population is used only when current session evidence exists in the same recent window. IP addresses, account identifiers and tokens are excluded.
 
-A game may expose reliable, read-only local state without requiring account credentials or game-memory access. CYBREX can enrich those games only from verified local evidence and must fall back to Tier 1 when that evidence is unavailable.
+**War Thunder** is recognized through Steam AppID `236390` or conservative exact client process names. While War Thunder is foreground and Strict privacy is not active, CYBREX reads only fixed local `127.0.0.1:8111` endpoints used by the integration. Requests have sub-second timeouts, a 64 KiB response cap, connection-close semantics and a short cache. Presence may include Ground/Air/Naval/Helicopter branch, a conservative vehicle label and mission running/loading state.
 
-**Squad** is handled in this tier. CYBREX recognizes Steam AppID `393380` and the exact `SquadGame` foreground process as a conservative fallback. While Squad is foreground, CYBREX can tail the local `SquadGame.log` with a bounded read and extract high-confidence current layer/map/mode. A server name or population is published only when the same recent log window also contains current join/loading evidence; unrelated server-browser search results are rejected. IP addresses, EOS IDs, Steam IDs, tokens and other account/network identifiers are never copied into Presence. In Strict privacy mode CYBREX keeps the generic `Game · Gaming` contract and does not read the Squad log at all.
+War Thunder tactical map objects, chat and HUD/damage streams are not used. CYBREX does not invent map or server identity from local data that cannot support that claim. Invalid or unavailable telemetry falls back to Tier 1 game identity.
 
-**War Thunder** is also handled in this tier. CYBREX recognizes Steam AppID `236390`; when launcher metadata is unavailable, only exact client process names `aces` / `aces.exe` (and the conservative `aces64` variant) are accepted. While the game is foreground and privacy is not Strict, CYBREX reads only the fixed local `127.0.0.1:8111` endpoints `/indicators` and `/mission.json`, with sub-second timeouts, a 64 KiB response cap, connection-close semantics and a short cache. Presence may include a high-confidence branch such as Ground/Air/Naval, a conservative vehicle label derived from the local model identifier, and whether a mission is running/loading.
-
-CYBREX deliberately does **not** use War Thunder tactical map objects, chat, HUD/damage streams or network interception for Presence. The local map-info contract used here does not provide a trustworthy human-readable map/server identity, so CYBREX does not invent or infer map/server names. If port 8111 is unavailable or its data is invalid, War Thunder falls back to ordinary game identity Presence.
-
-These integrations are intentionally read-only: no DLL/code injection, memory reading, packet capture, credential emulation or administrative server access is used.
-
-### Tier 3 — documented live integration
-
-Current enhanced integrations are:
+### Tier 3: documented live integration
 
 | Game / platform | Source | Live fields when available |
 | --- | --- | --- |
-| Counter-Strike 2 | Valve Game State Integration on authenticated loopback | map, mode, team/score context |
-| League of Legends | Riot local Live Client API | supported live match context |
-| FiveM | optional CYBREX loopback companion | server/session context supplied by the companion |
-| Minecraft | optional CYBREX Fabric companion | dimension/server context supplied by the companion |
-| Squad | bounded read-only local game log | layer, map, mode; current server/population only when session evidence is strong |
-| War Thunder | bounded read-only local 8111 HTTP telemetry | vehicle branch, conservative vehicle label, mission running/loading state; no guessed map/server |
+| Counter-Strike 2 | Valve Game State Integration on authenticated loopback | map, mode, team and score context |
+| League of Legends | Riot local Live Client Data API | local-player match context |
+| FiveM | optional CYBREX loopback companion | minimal server/session context |
+| Minecraft Java | optional CYBREX Fabric companion | mode and dimension; server label only when explicitly enabled |
+| Squad | bounded read-only local game log | map/layer/mode and current server context when evidence is strong |
+| War Thunder | bounded read-only local HTTP telemetry | branch, conservative vehicle label and mission state |
 
-Enhanced support must not be inferred from membership in the 346-title catalog.
-
-## Why Squad does not query the public server browser
-
-Squad replaced its Steam backend calls with Epic Online Services. CYBREX does not reproduce the game's Steam-ticket/EOS authentication flow merely to obtain Presence metadata, and RCON requires server-admin credentials. For a normal player, local client evidence is a safer and more stable boundary. If Squad changes its log format, enrichment fails soft to ordinary `Squad · Steam` Presence instead of guessing.
+Enhanced support is narrower than the broad compatibility catalog.
 
 ## Detection order
 
-1. Resolve Steam from local Steam manifests/library metadata.
-2. Resolve Epic Games from local Epic manifest metadata.
-3. Resolve Heroic/Legendary from local Heroic metadata.
-4. Preserve exact launcher boundaries so launcher processes such as `MinecraftLauncher` cannot be mistaken for the game merely because their process name contains a game alias.
-5. Consult the validated Community Game Pack for conservative exact-process fallbacks.
-6. Apply the small built-in verified process aliases for known games/launchers.
-7. When the foreground process is a known launcher and local catalog resolution was unavailable, accept its window title only when it is a known alias or an **exact normalized match** to the curated 346-title catalog.
-8. Apply a game-specific enrichment provider only after the game identity is resolved; enrichment failure must never turn a correctly detected game into a false negative.
+1. Resolve Steam from local manifests and library metadata.
+2. Resolve Epic Games from local launcher metadata.
+3. Resolve Heroic/Legendary from local metadata.
+4. Keep launcher boundaries explicit so a launcher such as `MinecraftLauncher` is not mistaken for the game.
+5. Consult validated Community Game Packs for exact-process fallbacks.
+6. Apply a small set of built-in verified process aliases.
+7. For a known launcher with unavailable local catalog resolution, accept a window title only when it exactly matches a known curated title or alias.
+8. Apply game-specific enrichment only after game identity is established.
 
-Launcher metadata remains authoritative over all fallback aliases and title matching. Generic launcher pages such as Store, Library, News and arbitrary promotional window titles fail closed and are not reported as games.
+Enrichment failure never turns a correctly detected game into a false negative.
 
 ## Safety boundary
 
-CYBREX Presence does not need game-memory reading, DLL/code injection, anti-cheat bypasses, packet interception or input automation to provide standard or supported enhanced game Presence. Community Game Packs use exact normalized process names only; regex/wildcard process scanning and arbitrary command execution are not part of the pack format.
+CYBREX game Presence does not require process-memory reading, DLL/code injection, anti-cheat bypasses, packet interception or input automation.
 
-Game-specific integrations must meet all of these rules:
+Game-specific integrations follow these rules:
 
-- prefer an official/documented local API when one exists;
-- otherwise use bounded read-only local files only when the format has high-confidence markers;
-- never require a user's account/session token just to make Presence richer;
-- never publish IP addresses, account IDs, auth tokens or private server credentials;
-- never guess a server/map from stale browser results or tactical objects;
-- fail soft to Tier-1 game identity when richer data is unavailable;
-- Strict privacy must suppress deep game telemetry collection, not merely hide it after collection.
+- prefer official or documented local APIs
+- otherwise use bounded read-only local files only with high-confidence markers
+- do not require account/session tokens solely for richer Presence
+- do not publish IP addresses, account IDs, auth tokens or private server credentials
+- do not guess map/server state from stale or ambiguous evidence
+- fail soft to game identity when richer data is unavailable
+- Strict privacy suppresses deep telemetry collection at the source
 
-## Why the catalog is separate from process matching
+See [Anti-Cheat and Game Integration Boundary](ANTI_CHEAT.md).
 
-Hardcoding hundreds of guessed executable names would create false positives and would age badly as games update. The curated catalog therefore records supported product targets, while runtime detection uses authoritative local launcher metadata whenever available. Exact process aliases are added only when they are known and useful as a fallback. The launcher-title fallback also requires an exact curated title rather than substring matching.
+## Curated catalog
 
-## CI contract
+The source data is stored in:
 
-`tests/test_popular_games.py` fails if the bundled curated catalog drops below 300 unique titles, if its schema/normalization rules regress, or if launcher-title fallback starts accepting arbitrary non-curated titles. Game-pack tests verify exact process matching. Squad telemetry has dedicated parser/privacy/staleness tests. War Thunder has endpoint allowlist, parsing/cache, strict-privacy and Presence-accuracy tests, and its synthetic telemetry path is included in the Linux core memory soak. Gamer Integrations CI imports the game stack and runs the focused regression suite, while Installer QA is triggered by game activity/telemetry changes so Windows and Linux packaged builds are re-qualified.
+```text
+game_packs/popular_catalog.json
+game_packs/popular_cross_launcher.json
+game_packs/popular_2026.json
+```
 
-## Reporting a missing or inaccurate game
+Representative targets include Counter-Strike 2, Dota 2, GTA V, ELDEN RING, Baldur's Gate 3, Fortnite, VALORANT, League of Legends, Minecraft, Roblox, World of Warcraft, Diablo IV, Rocket League, Genshin Impact, Squad, War Thunder, Deadlock, PEAK and EA SPORTS FC 26.
 
-For a missing game, report the game title, launcher, operating system and executable/process name if known. For inaccurate enhanced activity, include only the non-sensitive expected map/mode/vehicle context and whether CYBREX showed stale or missing data. Do not include account tokens, private server credentials, raw player identifiers or other secrets.
+## Reporting an inaccurate game
+
+For a missing game, report the game title, launcher, operating system and executable/process name if known. For enhanced activity issues, include only the non-sensitive expected context and what CYBREX displayed. Do not include account tokens, private server credentials or raw player identifiers.

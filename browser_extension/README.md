@@ -1,91 +1,81 @@
 # CYBREX Browser Companion
 
-The Browser Companion is optional. It gives the desktop service exact browser-tab and media context that foreground-window titles and MPRIS often cannot provide reliably.
+The Browser Companion is optional. It gives the desktop service focused browser-tab, service and media context that foreground-window titles or media APIs cannot always provide reliably.
 
-It does not connect to Discord itself. It sends short-lived activity snapshots only to the local desktop service over `127.0.0.1`. The default bridge port is `32191`.
+It does not connect to Discord itself. It sends short-lived snapshots only to the local CYBREX desktop bridge on `127.0.0.1`. The default port is `32191`.
 
 ## What it adds
 
-- exact current web-tab URL and page title
+- focused tab URL and title for local classification
 - exact service/domain identification
-- browser video/audio playing state, position, and duration
-- YouTube title/channel enrichment
-- reliable background browser-media attribution
-- correct tab-aware activity priority when media is playing in another tab
-- declarative self-hosted/custom-domain support on the desktop side
+- browser audio/video playing state, position and duration
+- improved YouTube/media attribution
+- tab-aware activity priority when media is playing in another tab
 
 ## Permissions
 
-The extension runs its content script only on normal `http://` and `https://` pages. It does not request access to `file://` pages.
+The extension runs content scripts on normal `http://` and `https://` pages. It does not request `file://` access.
 
-The only ordinary extension permission is:
+The ordinary extension permission is:
 
-- `storage` — saves only the local bridge port selected in the Options page.
+- `storage`: stores the local bridge port selected in Options
 
-The extension deliberately does **not** request the broad `tabs` permission. Active tab/window IDs and extension messaging are sufficient for this integration; page URL/title data is read by the content script on the web page that already matches the declared HTTP/HTTPS content-script scope.
+The extension does not request the broad `tabs` permission.
 
-Its only explicit network host permission is:
+Its explicit loopback host permission is:
 
 ```text
 http://127.0.0.1/*
 ```
 
-That permission is limited to the IPv4 loopback host. It is intentionally written without an explicit port so the same manifest works in Chromium-family browsers and Firefox, and so a user can move the local bridge when the default port is occupied.
+Requests time out quickly when the local service is unavailable.
 
-The background component is not granted arbitrary cross-origin network access. Extension requests are aborted after a short timeout if the local service is unavailable.
+## Privacy
 
-## Privacy model
+Bridge records are bounded and memory-only. Closed tabs are removed when reported by the browser, old records expire and Companion state is cleared when the bridge stops.
 
-The bridge keeps a bounded set of recent snapshots in memory. Closed tabs are removed immediately when the browser reports their closure, old snapshots expire automatically, and the service clears Companion state when the bridge stops.
+Balanced privacy publishes only the permitted browser URL scope. Recognized social and messaging pages use a stricter contract: page titles, contact or conversation names, profile/post identifiers, deep social links and social-page media metadata are removed before Discord Presence is built.
 
-The desktop service does not upload browser history or Companion data to a CYBREX server.
+Private or incognito browsing is handled conservatively by the desktop application.
 
-Balanced privacy mode publishes only the URL origin by default (for example `https://www.youtube.com`), even though the extension can see the exact tab URL locally. This can be changed with `privacy.browser_url_mode`.
+See [Privacy](../docs/PRIVACY.md) and [Social Web Presence](../docs/SOCIAL_PRESENCE.md).
 
-Private/incognito metadata is treated conservatively by the desktop service. Browsers normally keep extensions disabled in private windows unless the user explicitly grants private-window access.
+## Prepare a clean unpacked extension
 
-## Prepare a clean unpacked extension directory
-
-For the simplest setup, especially when Brave/Chrome is installed as a Flatpak, run from the repository root:
+From the repository root:
 
 ```bash
 bash scripts/prepare-browser-companion.sh
 ```
 
-The helper copies only the required extension files to a clean `CYBREX-Browser-Companion` directory in the user's Downloads folder and prints the exact directory to select.
+Select the generated `CYBREX-Browser-Companion` directory in your browser's extension developer page. Do not select the repository root.
 
-Do **not** choose the `discord-rich-presence` repository root in **Load unpacked**. The repository contains Python directories such as `__pycache__`; Chromium-family browsers reject reserved extension filenames beginning with `_` when they are inside the selected extension directory.
+## Chromium-family browsers
 
-## Load unpacked in Brave / Chrome / Edge
+For Brave, Chrome or Edge:
 
 1. Open the browser extension management page.
-2. Enable **Developer mode**.
-3. Choose **Load unpacked**.
-4. Select either the clean directory printed by `scripts/prepare-browser-companion.sh` or this repository's `browser_extension` directory specifically.
-5. Start the desktop service and look for:
+2. Enable Developer mode.
+3. Choose Load unpacked.
+4. Select the generated Companion directory or the `browser_extension` directory.
+5. Start CYBREX Presence and verify the Companion status.
 
-```text
-Browser companion listening on http://127.0.0.1:32191
-```
+The toolbar badge reports whether the local bridge accepted the latest snapshot.
 
-The toolbar badge shows `ON` when the local bridge accepts a snapshot and `OFF` when it is unavailable.
-
-After the extension is loaded, reload it from the browser's extension page whenever development files under `browser_extension/` change.
-
-## Temporary install in Firefox
+## Firefox temporary installation
 
 1. Open `about:debugging`.
 2. Choose **This Firefox**.
 3. Choose **Load Temporary Add-on**.
 4. Select `manifest.json` from this directory.
 
-The manifest intentionally includes both the Manifest V3 service-worker background entry used by Chromium-family browsers and the background-script fallback used by Firefox.
+The manifest includes the background configuration needed by the supported Chromium and Firefox development paths.
 
 ## Change the bridge port
 
-The desktop configuration and extension must use the same port.
+The desktop and extension must use the same port.
 
-Desktop config:
+Desktop configuration example:
 
 ```yaml
 browser_companion:
@@ -93,10 +83,10 @@ browser_companion:
   port: 32191
 ```
 
-If you change that value, open the extension's **Options** page and enter the same port. Use **Test connection** there to verify that the desktop bridge is reachable.
+Set the same port in the extension Options page and use its connection test.
 
-The extension stores only this port number in `storage.local`; it does not persist the URLs/titles it sends to the desktop service.
+The extension stores only this port preference. It does not persist the URLs or titles it sends to the local desktop bridge.
 
-## Public store release
+## Distribution status
 
-The repository/release ZIP is suitable for unpacked local installation. Official Chrome Web Store or Firefox AMO publication requires the corresponding developer account, store metadata/privacy disclosures, and the store review/signing process. Do not describe the unpacked ZIP as store-signed until that process has actually been completed.
+GitHub Release ZIPs are suitable for local unpacked installation. Do not describe them as Chrome Web Store or Firefox AMO signed packages unless an official store publication has actually completed.

@@ -2,33 +2,41 @@
 
 ## Supported versions
 
-Security fixes are applied to the current release line and the `main` branch. Older builds should be upgraded before reporting a problem that may already be fixed.
+Security fixes are applied to the current release line and `main`. Older builds should be upgraded before reporting a problem that may already be fixed.
 
 ## Reporting a vulnerability
 
-Do not publish sensitive security reports, tokens, private paths, browser URLs, terminal history, or unredacted diagnostic output in a public issue.
+Do not publish sensitive security reports, tokens, private paths, browser URLs, terminal history or unredacted diagnostic output in a public issue.
 
-Use GitHub's private vulnerability reporting for this repository when available. Include:
+Use GitHub private vulnerability reporting for this repository when available. Include the affected version or commit, operating system, a minimal reproduction, the security impact and only the redacted logs needed to investigate it.
 
-- the affected version or commit;
-- operating system and Python version;
-- a short reproduction case;
-- what data or behavior is exposed;
-- any logs needed to reproduce the issue, with personal data removed.
-
-For ordinary bugs that do not expose private data or create a security-boundary issue, use a normal GitHub issue.
+Ordinary bugs that do not cross a security or privacy boundary can use the normal issue tracker.
 
 ## Security model
 
-The service is a local desktop application. It reads local activity selected by enabled detectors and sends only the final Rich Presence payload to Discord Desktop RPC. The project does not operate its own telemetry, analytics, browser-history, or command-history backend.
+CYBREX Presence is a local desktop application. Enabled detectors read local activity and the final sanitized Rich Presence payload is sent to the local Discord client. The project does not operate an activity, browser-history or command-history telemetry backend.
 
-The optional Browser Companion listens only on loopback (`127.0.0.1`) and applies origin checks, a marker header, request-size limits, short record TTLs, bounded in-memory storage, socket/request timeouts, and clean shutdown. Loopback is **not** a security boundary against another malicious process already running as the same OS user.
+Optional browser and game companion listeners bind to IPv4 loopback. They use bounded requests, short timeouts, bounded worker counts or fixed local endpoints, short state TTLs and explicit parsing rules. Loopback is not a security boundary against another malicious process already running as the same operating-system user.
 
-Links that can leave the application through Discord Rich Presence are filtered at the final RPC boundary. Public links and external artwork must use HTTPS; URL credentials, control characters, localhost names, private/link-local IP literals and common local DNS suffixes are rejected. This prevents a detector or custom configuration from accidentally publishing an internal service address to Discord.
+Links that can leave the application through Discord Presence are filtered at the final publication boundary. Public links and external artwork use HTTPS. URL credentials, control characters, localhost names, private/link-local IP literals and common local DNS suffixes are rejected.
 
-On POSIX systems, configuration/runtime/log/cache directories and sensitive files are hardened to user-only permissions where possible. Persistent logs intentionally do not record complete activity payloads.
+On POSIX systems, configuration, runtime, log and cache paths are hardened to user-only permissions where practical. Persistent logs intentionally avoid complete Rich Presence payloads.
 
-See [docs/PRIVACY.md](docs/PRIVACY.md) for detailed data paths and privacy behavior.
+See [Privacy](docs/PRIVACY.md) for the detailed data paths.
+
+## Game integration boundary
+
+Enhanced game integrations remain read-only and outside the game process. CYBREX does not use process-memory reading, DLL/code injection, input automation, packet interception, credential emulation or anti-cheat bypasses to enrich Presence.
+
+Strict privacy suppresses deep game telemetry collection rather than collecting rich state and hiding it only at publication time.
+
+See [Anti-Cheat and Game Integration Boundary](docs/ANTI_CHEAT.md) and [Game Compatibility](docs/GAME_COMPATIBILITY.md).
+
+## Discord Social SDK boundary
+
+The optional Discord Social SDK helper communicates with the Python application over private stdin/stdout pipes. It does not open a network listener and does not implement Discord user OAuth, bot-token, access-token or refresh-token flows.
+
+If the helper is unavailable or fails, CYBREX falls back to legacy Discord RPC. Helper protocol input is bounded and allowlisted, and helper failure paths are covered by resource-cleanup tests.
 
 ## Dependency and code checks
 
@@ -37,21 +45,21 @@ Release validation includes:
 - Python regression tests and critical Ruff checks;
 - `pip check` dependency consistency checks;
 - `pip-audit` for known published dependency vulnerabilities;
-- Bandit high-severity Python security scanning;
-- JavaScript/Manifest V3 validation for the Browser Companion;
-- shell-hook syntax and POSIX cache-permission checks;
+- Bandit high-severity Python scanning;
+- Browser Companion manifest and JavaScript validation;
+- shell-hook syntax and local-cache permission checks;
+- gamer integration privacy and anti-cheat boundary tests;
 - Windows and Linux packaged-binary smoke tests;
-- Windows installer silent install, installed-app launch and uninstall checks;
-- Linux user-level installer install, launch and uninstall checks.
+- Windows installer install, launch and uninstall checks;
+- Linux user-level installer install, launch and uninstall checks;
+- packaged process-tree memory/resource soaks on Linux.
 
-A dependency advisory that affects the resolved runtime requirements is treated as a release blocker until it is upgraded, removed, or explicitly investigated.
+A dependency advisory affecting resolved runtime requirements is treated as a release blocker until upgraded, removed or investigated and explicitly justified.
 
 ## Release integrity
 
-Tagged releases publish SHA-256 checksum files and a build-provenance record. The release workflow verifies checksums before publication.
+Tagged releases publish SHA-256 verification files and build provenance. The release workflow verifies checksums before publication.
 
-Release tags containing a prerelease suffix such as `-rc4` are published as GitHub prereleases. Stable Windows tags are blocked when the Windows signing integration is not configured; an unsigned Windows build may be used for CI validation or an explicitly marked prerelease, but it must not be represented as a signed stable release.
+Prerelease tags are published as GitHub prereleases. Stable Windows publication is blocked when Authenticode signing is not configured and verified. An unsigned Windows build may be used for CI or an explicitly marked prerelease, but it must not be represented as a signed stable release.
 
-The current workflow supports Authenticode PFX signing and the project is preparing SignPath Foundation integration for open-source signing. See [Code signing policy](CODE_SIGNING.md) for the current status and rules. Existing unsigned release candidates remain unsigned.
-
-Browser-store signing/publication is separate from the unpacked Browser Companion archive in this repository; official Chrome Web Store or Firefox AMO publication requires the corresponding store account and review/signing process.
+See [Code signing policy](CODE_SIGNING.md) and [Download and integrity verification](docs/DOWNLOAD.md).

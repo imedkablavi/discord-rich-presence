@@ -1,54 +1,50 @@
 # Code signing policy
 
-CYBREX Presence treats Windows code signing as a release-integrity control, not a marketing badge.
+CYBREX Presence treats Windows code signing as a release-integrity control.
 
-## Current status
+## Current policy
 
-The project is applying to the SignPath Foundation open-source program. The intended provider statement is:
+A Windows artifact is described as signed only when its Authenticode signature has been created and verified successfully during the release workflow.
 
-> Free code signing provided by SignPath.io, certificate by SignPath Foundation.
+The release pipeline supports Authenticode PFX signing for:
 
-Until SignPath approval and CI integration are complete, a Windows artifact must be described as **unsigned** unless its Authenticode signature has been verified successfully. Existing unsigned release candidates are not retroactively described as signed.
+- `DiscordRichPresence.exe`
+- `CYBREX-Presence-Setup.exe`
 
-The generic release workflow intentionally blocks a stable tag when no Windows signing integration is configured. Unsigned builds may be produced only for CI validation or an explicitly marked GitHub prerelease.
+Stable Windows publication is blocked when the signing path is not configured and verified. An explicitly marked GitHub prerelease may be unsigned, in which case the release must remain clearly identified as a prerelease and Windows SmartScreen may warn users.
 
-## Signing scope
+SHA-256 checksums and build provenance are published independently of Authenticode signing.
 
-When signing is active, the Windows release scope is:
+## Release requirements
 
-- `DiscordRichPresence.exe`;
-- `CYBREX-Presence-Setup.exe`.
+A release build must:
 
-Browser Companion archives, Linux archives, checksum files and provenance files are verified through the release pipeline but are not Authenticode artifacts.
+1. originate from this public repository and an explicit version tag;
+2. run the regression suite before packaging;
+3. pass dependency and high-severity static security checks;
+4. pass packaged Windows and Linux smoke tests;
+5. pass installer install, launch and uninstall checks;
+6. publish SHA-256 verification data and build provenance;
+7. not claim a signing status that the workflow did not verify.
 
-## Build and approval policy
+Prerelease tags contain a suffix such as `-rc6` and are published as GitHub prereleases.
 
-A signable release must:
+## Credential handling
 
-1. originate from this public GitHub repository;
-2. be built by the repository's GitHub Actions release workflow;
-3. pass the regression suite, dependency audit and high-severity static security checks;
-4. pass packaged Windows/Linux smoke tests and installer install/launch/uninstall checks;
-5. publish SHA-256 checksums and build provenance;
-6. be associated with an explicit version tag;
-7. receive explicit maintainer approval before a stable release is published.
+Signing certificates, private keys and certificate passwords must never be committed to the repository, included in release assets or pasted into issues, pull requests or public diagnostics.
 
-Release candidates use tags containing a prerelease suffix such as `-rc4` and must be published as GitHub prereleases. Stable tags must not bypass the signing gate.
+Repository secrets used for signing must remain limited to the release signing steps.
 
-## Maintainer and signing roles
+## User verification
 
-Primary maintainer / committer / release approver: **Imed Kablavi** (`imedkablavi` on GitHub).
+Windows users can inspect Authenticode status with PowerShell:
 
-The maintainer is responsible for reviewing release inputs, approving signing requests, protecting signing credentials, and revoking or stopping a release if provenance cannot be established.
+```powershell
+Get-AuthenticodeSignature .\CYBREX-Presence-Setup.exe
+```
 
-Repository and SignPath accounts participating in signing should use multi-factor authentication. Signing private keys or certificate secrets must never be committed to the repository, placed in release artifacts, or pasted into issues or chat transcripts.
+Release pages also publish SHA-256 values so users can verify exact artifact bytes independently of publisher identity.
 
-## Verification
+The release provenance file records the repository, tag, commit, workflow run and whether the Windows Authenticode path was enabled for that build.
 
-Windows users should verify a signed artifact through Windows file properties or PowerShell `Get-AuthenticodeSignature`. SHA-256 values are published separately so users can also verify exact artifact bytes.
-
-The release provenance file records the repository, tag, commit, workflow run, and whether the Windows Authenticode path was enabled for that build.
-
-## Privacy and security
-
-Code signing does not change the application's data-handling rules. See [Privacy](docs/PRIVACY.md) and [Security Policy](SECURITY.md).
+See [Download and integrity verification](docs/DOWNLOAD.md) and [Security Policy](SECURITY.md).
