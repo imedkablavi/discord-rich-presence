@@ -8,12 +8,14 @@ on:
       - "**.py"
       - "requirements*.txt"
       - "discord-rich-presence.spec"
+      - "native/discord_social_sdk_bridge/**"
       - ".github/workflows/full-technical-qa.yml"
   pull_request:
     paths:
       - "**.py"
       - "requirements*.txt"
       - "discord-rich-presence.spec"
+      - "native/discord_social_sdk_bridge/**"
       - ".github/workflows/full-technical-qa.yml"
   workflow_dispatch:
 
