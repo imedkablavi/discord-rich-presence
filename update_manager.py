@@ -27,6 +27,7 @@ _SEMVER_RE = re.compile(
     r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
 )
 _IDENTIFIER_RE = re.compile(r"[A-Za-z-]+|\d+")
+_PREVIEW_PREFIX_RE = re.compile(r"^(?:rc|alpha|beta|preview|pre)(?:[.-]?\d+)?", re.IGNORECASE)
 
 
 def normalize_channel(value: object) -> str:
@@ -36,9 +37,26 @@ def normalize_channel(value: object) -> str:
     return channel
 
 
+def _default_channel_for_version(current_version: str) -> str:
+    """Use Preview only for intentional published-preview style versions.
+
+    Local/CI development builds such as ``2.1.0-dev`` stay on Stable by default,
+    so a test build based on code newer than rc4 cannot accidentally offer the
+    older rc4 as an update and downgrade itself.
+    """
+    text = _normalized_version(current_version)
+    match = _SEMVER_RE.fullmatch(text)
+    if not match:
+        return "stable"
+    prerelease = str(match.group(4) or "").strip()
+    if prerelease and _PREVIEW_PREFIX_RE.match(prerelease):
+        return "preview"
+    return "stable"
+
+
 def configured_update_channel(config, current_version: str = APP_VERSION) -> str:  # noqa: ANN001
-    """Return the saved channel, defaulting RC builds to Preview and stable builds to Stable."""
-    fallback = "preview" if "-" in _normalized_version(current_version) else "stable"
+    """Return saved channel, otherwise choose a safe default for this build type."""
+    fallback = _default_channel_for_version(current_version)
     value = config.get("updates.channel", fallback)
     try:
         return normalize_channel(value)
