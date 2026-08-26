@@ -22,10 +22,14 @@ def test_version_key_orders_release_candidates_and_stable():
 
 def test_configured_channel_defaults_follow_build_type():
     assert update_manager.configured_update_channel(DummyConfig(), "2.1.0-rc4") == "preview"
+    assert update_manager.configured_update_channel(DummyConfig(), "2.1.0-beta2") == "preview"
+    assert update_manager.configured_update_channel(DummyConfig(), "2.1.0-alpha1") == "preview"
     assert update_manager.configured_update_channel(DummyConfig(), "2.1.0") == "stable"
+    assert update_manager.configured_update_channel(DummyConfig(), "2.1.0-dev") == "stable"
+    assert update_manager.configured_update_channel(DummyConfig(), "2.1.0-local") == "stable"
     assert (
         update_manager.configured_update_channel(
-            DummyConfig({"updates.channel": "preview"}), "2.1.0"
+            DummyConfig({"updates.channel": "preview"}), "2.1.0-dev"
         )
         == "preview"
     )
