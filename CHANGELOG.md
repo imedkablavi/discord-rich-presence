@@ -63,6 +63,7 @@
 - Added verified self-update with rollback behavior on Windows and Linux.
 - Added Windows Authenticode integration support. Stable Windows publication is blocked when signing is not configured and verified; explicitly marked prereleases may be unsigned.
 - Added CI installation, launch and uninstall qualification for Windows and Linux packages.
+- Reviewed public documentation and removed obsolete internal release-planning material from the release tree.
 
 ### Known limitations
 
