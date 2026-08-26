@@ -80,8 +80,17 @@ def _patch_pypresence_cleanup() -> None:
     pypresence.Presence = ResourceSafePresence
 
 
+def _patch_dynamic_discord_identity() -> None:
+    """Enable Social SDK dynamic activity names while preserving legacy fallback."""
+    from dynamic_identity import apply_dynamic_identity
+    from main import DiscordRichPresenceService
+    from presence import PresenceBuilder
+
+    apply_dynamic_identity(DiscordRichPresenceService, PresenceBuilder)
+
+
 def apply_resource_hardening() -> None:
-    """Install bounded HTTP workers and fail-safe Discord RPC cleanup."""
+    """Install bounded workers, RPC cleanup, and dynamic Discord identity routing."""
     global _APPLIED
     if _APPLIED:
         return
@@ -94,7 +103,11 @@ def apply_resource_hardening() -> None:
 
         browser_companion._CompanionHTTPServer = _BrowserFixedServer
         cs2_gsi._CS2HTTPServer = _CS2FixedServer
+
+        # Patch pypresence first so the legacy fallback used by dynamic_identity
+        # inherits the resource-safe cleanup behavior.
         _patch_pypresence_cleanup()
+        _patch_dynamic_discord_identity()
         _APPLIED = True
 
 
