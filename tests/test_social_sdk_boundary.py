@@ -62,3 +62,14 @@ def test_pyinstaller_spec_supports_optional_embedded_social_sdk_bundle():
     assert "cybrex-discord-social-sdk" in source
     assert "libdiscord_partner_sdk.so" in source
     assert "discord_partner_sdk.dll" in source
+
+
+def test_auto_social_sdk_failure_has_retry_cooldown_and_legacy_failover():
+    source = (ROOT / "dynamic_identity.py").read_text(encoding="utf-8")
+    assert "_SOCIAL_RETRY_COOLDOWN_SECS = 60.0" in source
+    assert "self._social_sdk_retry_after" in source
+    assert "time.monotonic() + _SOCIAL_RETRY_COOLDOWN_SECS" in source
+    # Failed native updates are closed, cooled down and retried through the
+    # existing sanitized legacy path rather than spawning a helper every loop.
+    assert "if not result and isinstance(active_rpc, SocialSDKPresence):" in source
+    assert source.count("result = original_update_presence(self, payload)") >= 2
