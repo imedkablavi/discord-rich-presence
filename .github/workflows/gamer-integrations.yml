@@ -22,6 +22,7 @@ on:
       - "tests/test_fivem_bridge.py"
       - "tests/test_minecraft_bridge.py"
       - "tests/test_squad_telemetry.py"
+      - "tests/test_game_activity_accuracy.py"
       - "tests/test_presence.py"
       - ".github/workflows/gamer-integrations.yml"
   push:
@@ -46,6 +47,7 @@ on:
       - "tests/test_fivem_bridge.py"
       - "tests/test_minecraft_bridge.py"
       - "tests/test_squad_telemetry.py"
+      - "tests/test_game_activity_accuracy.py"
       - "tests/test_presence.py"
       - ".github/workflows/gamer-integrations.yml"
   workflow_dispatch:
@@ -82,6 +84,7 @@ jobs:
           tests/test_fivem_bridge.py
           tests/test_minecraft_bridge.py
           tests/test_squad_telemetry.py
+          tests/test_game_activity_accuracy.py
           tests/test_presence.py
       - name: Install Lua syntax checker
         run: |
