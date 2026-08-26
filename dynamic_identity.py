@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict
 
 from pypresence import DiscordNotFound, InvalidID, InvalidPipe, Presence as LegacyPresence
@@ -11,6 +12,7 @@ from social_sdk_transport import SocialSDKError, SocialSDKPresence, social_sdk_a
 
 
 _PATCHED = False
+_SOCIAL_RETRY_COOLDOWN_SECS = 60.0
 
 
 def _transport_mode(config) -> str:  # noqa: ANN001
@@ -79,6 +81,7 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
         original_service_init(self, *args, **kwargs)
         self.rpc_transport = "legacy_rpc"
         self.current_activity_name = None
+        self._social_sdk_retry_after = 0.0
 
     def builder_build(self, activity):
         payload = original_builder_build(self, activity)
@@ -100,7 +103,13 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
 
         requested = _transport_mode(self.config)
         helper_ready = social_sdk_available()
-        attempted_social = requested == "social_sdk" or (requested == "auto" and helper_ready)
+        now = time.monotonic()
+        social_requested = requested == "social_sdk" or (requested == "auto" and helper_ready)
+        cooldown_active = (
+            requested == "auto"
+            and now < float(getattr(self, "_social_sdk_retry_after", 0.0) or 0.0)
+        )
+        attempted_social = social_requested and not cooldown_active
 
         if attempted_social:
             social = SocialSDKPresence(client_id)
@@ -111,12 +120,15 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
                     social.close()
                 except Exception:
                     pass
+                if requested == "auto":
+                    self._social_sdk_retry_after = now + _SOCIAL_RETRY_COOLDOWN_SECS
                 self.logger.warning("Discord Social SDK unavailable, using legacy RPC: %s", exc)
             else:
                 self.rpc = social
                 self.connected = True
                 self.reconnect_delay = 5
                 self.rpc_transport = "social_sdk"
+                self._social_sdk_retry_after = 0.0
                 self.logger.info("Connected through Discord Social SDK dynamic-name transport")
                 self._runtime_update(
                     connected=True,
@@ -133,7 +145,7 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
             self.connected = True
             self.reconnect_delay = 5
             self.rpc_transport = (
-                "legacy_rpc_fallback" if attempted_social else "legacy_rpc"
+                "legacy_rpc_fallback" if social_requested else "legacy_rpc"
             )
             self.logger.info("Connected to Discord legacy RPC")
             self._runtime_update(
@@ -149,7 +161,7 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
                 connected=False,
                 state="discord_offline",
                 last_error=str(exc)[:300],
-                transport="legacy_rpc_fallback" if attempted_social else "legacy_rpc",
+                transport="legacy_rpc_fallback" if social_requested else "legacy_rpc",
             )
         except Exception as exc:
             self.logger.error("Unexpected Discord connection error: %s", exc)
@@ -157,7 +169,7 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
                 connected=False,
                 state="rpc_error",
                 last_error=str(exc)[:300],
-                transport="legacy_rpc_fallback" if attempted_social else "legacy_rpc",
+                transport="legacy_rpc_fallback" if social_requested else "legacy_rpc",
             )
         self.connected = False
         self.rpc = None
@@ -193,6 +205,18 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
                 active_rpc.close()
             except Exception:
                 pass
+            self.connected = False
+            self.rpc = None
+
+            # In automatic mode, do not spawn a new native helper every detector
+            # cycle if the SDK/RPC path is unavailable. Cool down Social SDK and
+            # immediately retry this same sanitized payload through legacy RPC.
+            if _transport_mode(self.config) == "auto":
+                self._social_sdk_retry_after = time.monotonic() + _SOCIAL_RETRY_COOLDOWN_SECS
+                result = original_update_presence(self, payload)
+
+        if result and isinstance(self.rpc, SocialSDKPresence):
+            self._social_sdk_retry_after = 0.0
         self._runtime_update(
             activity_name=name if result else None,
             transport=getattr(self, "rpc_transport", transport),
@@ -207,6 +231,10 @@ def apply_dynamic_identity(service_cls, presence_builder_cls) -> None:  # noqa: 
                 active_rpc.close()
             except Exception:
                 pass
+            self.connected = False
+            self.rpc = None
+            if _transport_mode(self.config) == "auto":
+                self._social_sdk_retry_after = time.monotonic() + _SOCIAL_RETRY_COOLDOWN_SECS
         if result:
             self.current_activity_name = None
             self._runtime_update(
