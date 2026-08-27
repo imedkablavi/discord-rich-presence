@@ -8,6 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULE = runpy.run_path(str(ROOT / "scripts" / "build_social_sdk_bridge.py"))
 validate_sdk_root = MODULE["validate_sdk_root"]
 platform_layout = MODULE["platform_layout"]
+BRIDGE_SOURCE = ROOT / "native" / "discord_social_sdk_bridge" / "main.cpp"
+BRIDGE_CMAKE = ROOT / "native" / "discord_social_sdk_bridge" / "CMakeLists.txt"
 
 
 def _fake_sdk(tmp_path: Path, platform_name: str) -> Path:
@@ -48,3 +50,17 @@ def test_validate_sdk_layout_fails_closed_when_runtime_is_missing(tmp_path):
     (root / "lib" / "release" / "libdiscord_partner_sdk.so").unlink()
     with pytest.raises(FileNotFoundError):
         validate_sdk_root(root, "linux")
+
+
+def test_bridge_tracks_current_social_sdk_cxx_requirement():
+    cmake = BRIDGE_CMAKE.read_text(encoding="utf-8")
+    assert "set(CMAKE_CXX_STANDARD 20)" in cmake
+    assert "set(CMAKE_CXX_STANDARD_REQUIRED ON)" in cmake
+
+
+def test_native_update_callback_does_not_capture_stack_state_by_reference():
+    source = BRIDGE_SOURCE.read_text(encoding="utf-8")
+    assert "struct UpdateCallbackState" in source
+    assert "std::make_shared<UpdateCallbackState>()" in source
+    assert "[callback_state](discordpp::ClientResult result)" in source
+    assert "client->UpdateRichPresence(std::move(activity), [&]" not in source
