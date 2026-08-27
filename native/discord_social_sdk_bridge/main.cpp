@@ -13,11 +13,17 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace {
 constexpr std::size_t kMaxLineBytes = 16 * 1024;
 constexpr auto kCallbackTimeout = std::chrono::seconds(4);
 using Fields = std::unordered_map<std::string, std::string>;
+
+struct UpdateCallbackState {
+    std::atomic<bool> finished{false};
+    std::atomic<bool> successful{false};
+};
 
 enum class ReadStatus { Line, TooLong, Eof };
 enum class ApplyResult { Success, Failed, TimedOut };
@@ -198,21 +204,27 @@ ApplyResult apply_activity(const std::shared_ptr<discordpp::Client>& client, con
         activity.AddButton(button);
     }
 
-    std::atomic<bool> finished{false};
-    std::atomic<bool> successful{false};
-    client->UpdateRichPresence(std::move(activity), [&](discordpp::ClientResult result) {
-        successful.store(result.Successful(), std::memory_order_relaxed);
-        finished.store(true, std::memory_order_release);
+    // The SDK owns the asynchronous callback until it either fires or its
+    // client is destroyed. Keep callback state on the heap and capture it by
+    // value so a late callback after our timeout can never reference stack
+    // memory that has already gone out of scope.
+    auto callback_state = std::make_shared<UpdateCallbackState>();
+    client->UpdateRichPresence(std::move(activity), [callback_state](discordpp::ClientResult result) {
+        callback_state->successful.store(result.Successful(), std::memory_order_relaxed);
+        callback_state->finished.store(true, std::memory_order_release);
     });
 
     const auto deadline = std::chrono::steady_clock::now() + kCallbackTimeout;
-    while (!finished.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline) {
+    while (!callback_state->finished.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
         discordpp::RunCallbacks();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     discordpp::RunCallbacks();
-    if (!finished.load(std::memory_order_acquire)) return ApplyResult::TimedOut;
-    return successful.load(std::memory_order_relaxed) ? ApplyResult::Success : ApplyResult::Failed;
+    if (!callback_state->finished.load(std::memory_order_acquire)) return ApplyResult::TimedOut;
+    return callback_state->successful.load(std::memory_order_relaxed)
+        ? ApplyResult::Success
+        : ApplyResult::Failed;
 }
 
 std::shared_ptr<discordpp::Client> make_client(std::uint64_t application_id) {

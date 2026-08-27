@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 
 RELEASE_WORKFLOW = Path('.github/workflows/release.yml')
 WINDOWS_SIGN_SCRIPT = Path('scripts/sign-windows.ps1')
@@ -7,6 +9,12 @@ WINDOWS_SIGN_SCRIPT = Path('scripts/sign-windows.ps1')
 
 def _workflow_text() -> str:
     return RELEASE_WORKFLOW.read_text(encoding='utf-8')
+
+
+def test_release_workflow_is_valid_yaml():
+    parsed = yaml.safe_load(_workflow_text())
+    assert isinstance(parsed, dict)
+    assert 'jobs' in parsed
 
 
 def test_prerelease_tags_are_published_as_github_prereleases():
@@ -28,7 +36,22 @@ def test_tagged_release_runs_regressions_before_packaging():
     text = _workflow_text()
     assert 'name: Run regression suite' in text
     assert 'python -m pytest -q' in text
-    assert 'needs: [validate, security-audit]' in text
+    assert 'needs: [validate, security-audit, social-sdk-toolchain]' in text
+
+
+def test_release_requires_pinned_social_sdk_toolchain():
+    text = _workflow_text()
+    assert 'SOCIAL_SDK_VERSION: "1.10.18687"' in text
+    assert 'SOCIAL_SDK_TOOLCHAIN_RELEASE: "social-sdk-toolchain-1.10.18687"' in text
+    assert 'SOCIAL_SDK_TOOLCHAIN_ASSET: "CYBREX-DiscordSocialSdk-1.10.18687-toolchain.zip"' in text
+    assert 'SOCIAL_SDK_TOOLCHAIN_SHA256: "252d26b273887fb235691a40118d786b765539e86c7656f24ad44680bf549232"' in text
+    assert 'gh release download "${SOCIAL_SDK_TOOLCHAIN_RELEASE}"' in text
+    assert 'CYBREX_SOCIAL_SDK_BUNDLE_DIR' in text
+    assert 'Build Windows executable with Social SDK' in text
+    assert 'Build Linux executable with Social SDK' in text
+    assert 'Verify Social SDK is embedded in Windows executable' in text
+    assert 'Verify Social SDK is embedded in Linux executable' in text
+    assert 'discord_social_sdk_embedded=true' in text
 
 
 def test_release_publishes_checksums_and_provenance():
@@ -36,6 +59,8 @@ def test_release_publishes_checksums_and_provenance():
     assert 'SHA256SUMS.txt' in text
     assert 'BUILD-PROVENANCE.txt' in text
     assert 'windows_authenticode=${WINDOWS_SIGNED}' in text
+    assert 'discord_social_sdk=${SOCIAL_SDK_VERSION}' in text
+    assert 'discord_social_sdk_toolchain_sha256=${SOCIAL_SDK_TOOLCHAIN_SHA256}' in text
 
 
 def test_release_critical_actions_are_commit_pinned():

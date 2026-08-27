@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(cybrex_discord_social_sdk_bridge LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -20,6 +20,13 @@ endif()
 
 add_executable(cybrex-discord-social-sdk main.cpp)
 target_include_directories(cybrex-discord-social-sdk PRIVATE "${DISCORD_SDK_INCLUDE_DIR}")
+
+# Keep the tiny helper self-contained on Windows instead of requiring users to
+# install a matching Visual C++ redistributable solely for this bridge.
+if(MSVC)
+    set_property(TARGET cybrex-discord-social-sdk PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 if(WIN32)
     set(DISCORD_SDK_LINK "${DISCORD_SDK_LIB_DIR}/discord_partner_sdk.lib")
