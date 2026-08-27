@@ -1,0 +1,361 @@
+name: Release RC6 Rescue
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing prerelease tag to publish
+        required: true
+        default: v2.1.0-rc6
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-rc6-rescue-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  EXPECTED_TAG: "v2.1.0-rc6"
+  EXPECTED_COMMIT: "112632b6b67c80dc0c0aa27a4cf2cd92c201882e"
+  SOCIAL_SDK_VERSION: "1.10.18687"
+  SOCIAL_SDK_ASSET_ID: "532548383"
+  SOCIAL_SDK_ASSET: "CYBREX-DiscordSocialSdk-1.10.18687-toolchain.zip"
+  SOCIAL_SDK_SHA256: "252d26b273887fb235691a40118d786b765539e86c7656f24ad44680bf549232"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Reject unexpected tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.tag }}" = "${EXPECTED_TAG}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Verify tag commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_COMMIT}"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install QA dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Stamp version
+        run: python scripts/write-version.py "${{ inputs.tag }}"
+      - name: Compile and lint
+        shell: bash
+        run: |
+          python -m compileall -q .
+          python -m ruff check . --select E9,F63,F7,F82
+      - name: Full regression suite
+        run: python -m pytest -q
+      - name: Dependency audit
+        run: pip-audit -r requirements-dev.txt
+      - name: High-severity source scan
+        run: bandit -q -r . -x ./tests,./build,./dist -lll
+
+  social-sdk-toolchain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download private draft asset by immutable asset ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p social-sdk-toolchain
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${SOCIAL_SDK_ASSET_ID}" \
+            -H "Accept: application/octet-stream" \
+            > "social-sdk-toolchain/${SOCIAL_SDK_ASSET}"
+          test -s "social-sdk-toolchain/${SOCIAL_SDK_ASSET}"
+      - name: Verify pinned Social SDK archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${SOCIAL_SDK_SHA256}  social-sdk-toolchain/${SOCIAL_SDK_ASSET}" | sha256sum -c -
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: social-sdk-toolchain
+          path: social-sdk-toolchain/${{ env.SOCIAL_SDK_ASSET }}
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    needs: [validate, social-sdk-toolchain]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: social-sdk-toolchain
+          path: ${{ runner.temp }}/social-sdk-toolchain
+      - name: Verify and extract Social SDK input
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "social-sdk-toolchain/$env:SOCIAL_SDK_ASSET"
+          if (-not (Test-Path $archive -PathType Leaf)) { throw "Social SDK archive missing" }
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:SOCIAL_SDK_SHA256) { throw "Social SDK SHA-256 mismatch" }
+          $input = Join-Path $env:RUNNER_TEMP "discord-social-sdk-input"
+          Expand-Archive -Path $archive -DestinationPath $input -Force
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Stamp version
+        run: python scripts/write-version.py "${{ inputs.tag }}"
+      - name: Build Social SDK helper
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path $env:RUNNER_TEMP "discord-social-sdk-input/discord_social_sdk"
+          $bundle = Join-Path $env:RUNNER_TEMP "social-sdk-bundle"
+          $build = Join-Path $env:RUNNER_TEMP "social-sdk-build"
+          python scripts/build_social_sdk_bridge.py --sdk-root "$sdkRoot" --output-dir "$bundle" --build-dir "$build" --sdk-version "$env:SOCIAL_SDK_VERSION" --platform windows
+          if ($LASTEXITCODE -ne 0) { throw "Social SDK helper build failed" }
+          foreach ($name in @("cybrex-discord-social-sdk.exe", "discord_partner_sdk.dll", "Discord-Social-SDK-Notices.txt", "SOCIAL_SDK_MANIFEST.json")) {
+            if (-not (Test-Path (Join-Path $bundle $name) -PathType Leaf)) { throw "Missing Social SDK file: $name" }
+          }
+          "CYBREX_SOCIAL_SDK_BUNDLE_DIR=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build Windows executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Verify embedded Social SDK
+        shell: pwsh
+        run: |
+          $listing = (& pyi-archive_viewer -l "dist/DiscordRichPresence.exe" 2>&1 | Out-String)
+          foreach ($needle in @("cybrex-discord-social-sdk.exe", "discord_partner_sdk.dll", "Discord-Social-SDK-Notices.txt", "SOCIAL_SDK_MANIFEST.json")) {
+            if (-not $listing.Contains($needle)) { throw "Windows executable missing embedded Social SDK file: $needle" }
+          }
+      - name: Smoke packaged executable
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist/DiscordRichPresence.exe" -ArgumentList "--dry-run", "--once" -PassThru
+          if (-not $p.WaitForExit(20000)) { $p.Kill(); throw "Packaged executable timed out" }
+          if ($p.ExitCode -ne 0) { throw "Packaged executable exited with $($p.ExitCode)" }
+      - name: Install pinned Inno Setup
+        shell: pwsh
+        run: choco install innosetup --version=6.7.1 --yes --no-progress
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = "${{ inputs.tag }}".TrimStart('v')
+          $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
+          & $iscc "/DAppVersion=$version" "packaging/windows/CYBREX-Presence.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+      - name: Silent install smoke and uninstall
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP "CYBREX-Presence-RC6"
+          $setup = Start-Process -FilePath (Resolve-Path "dist/CYBREX-Presence-Setup.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$target" -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Installer failed" }
+          $installed = Join-Path $target "DiscordRichPresence.exe"
+          if (-not (Test-Path $installed)) { throw "Installed executable missing" }
+          $p = Start-Process -FilePath $installed -ArgumentList "--dry-run", "--once" -PassThru
+          if (-not $p.WaitForExit(20000)) { $p.Kill(); throw "Installed executable timed out" }
+          if ($p.ExitCode -ne 0) { throw "Installed executable failed" }
+          $u = Start-Process -FilePath (Join-Path $target "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($u.ExitCode -ne 0) { throw "Uninstall failed" }
+      - name: Package Browser Companion
+        shell: pwsh
+        run: |
+          python -m json.tool browser_extension/manifest.json | Out-Null
+          node --check browser_extension/background.js
+          node --check browser_extension/content.js
+          node --check browser_extension/options.js
+          $stage = Join-Path $env:RUNNER_TEMP "CYBREX-Browser-Companion"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          foreach ($f in @("manifest.json", "background.js", "content.js", "options.html", "options.js", "README.md")) { Copy-Item "browser_extension/$f" $stage }
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/CYBREX-Browser-Companion.zip" -Force
+      - name: Checksums
+        shell: pwsh
+        run: |
+          foreach ($file in @("dist/DiscordRichPresence.exe", "dist/CYBREX-Presence-Setup.exe", "dist/CYBREX-Browser-Companion.zip")) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            $name = Split-Path $file -Leaf
+            "$hash  $name" | Set-Content -Encoding ascii "$file.sha256"
+          }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rc6-windows
+          path: |
+            dist/DiscordRichPresence.exe
+            dist/DiscordRichPresence.exe.sha256
+            dist/CYBREX-Presence-Setup.exe
+            dist/CYBREX-Presence-Setup.exe.sha256
+            dist/CYBREX-Browser-Companion.zip
+            dist/CYBREX-Browser-Companion.zip.sha256
+          if-no-files-found: error
+
+  linux:
+    needs: [validate, social-sdk-toolchain]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: social-sdk-toolchain
+          path: ${{ runner.temp }}/social-sdk-toolchain
+      - name: Verify and extract Social SDK input
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/social-sdk-toolchain/$SOCIAL_SDK_ASSET"
+          echo "$SOCIAL_SDK_SHA256  $archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/discord-social-sdk-input"
+          unzip -q "$archive" -d "$RUNNER_TEMP/discord-social-sdk-input"
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Stamp version
+        run: python scripts/write-version.py "${{ inputs.tag }}"
+      - name: Build Social SDK helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/build_social_sdk_bridge.py \
+            --sdk-root "$RUNNER_TEMP/discord-social-sdk-input/discord_social_sdk" \
+            --output-dir "$RUNNER_TEMP/social-sdk-bundle" \
+            --build-dir "$RUNNER_TEMP/social-sdk-build" \
+            --sdk-version "$SOCIAL_SDK_VERSION" \
+            --platform linux
+          export CYBREX_SOCIAL_SDK_BUNDLE_DIR="$RUNNER_TEMP/social-sdk-bundle"
+          echo "CYBREX_SOCIAL_SDK_BUNDLE_DIR=$CYBREX_SOCIAL_SDK_BUNDLE_DIR" >> "$GITHUB_ENV"
+      - name: Build Linux executable
+        run: pyinstaller --clean --noconfirm discord-rich-presence.spec
+      - name: Verify embedded Social SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          listing="$(pyi-archive_viewer -l dist/DiscordRichPresence)"
+          for needle in cybrex-discord-social-sdk libdiscord_partner_sdk.so Discord-Social-SDK-Notices.txt SOCIAL_SDK_MANIFEST.json; do
+            grep -Fq "$needle" <<< "$listing"
+          done
+      - name: Smoke packaged executable
+        run: timeout 20s ./dist/DiscordRichPresence --dry-run --once
+      - name: Rename and package Linux bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mv dist/DiscordRichPresence dist/CYBREX-DiscordRichPresence-linux-x86_64
+          (cd dist && sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > CYBREX-DiscordRichPresence-linux-x86_64.sha256)
+          mkdir -p dist/CYBREX-Presence-linux-x86_64
+          cp dist/CYBREX-DiscordRichPresence-linux-x86_64 dist/CYBREX-Presence-linux-x86_64/
+          cp packaging/linux/install-user.sh dist/CYBREX-Presence-linux-x86_64/install-user.sh
+          chmod 755 dist/CYBREX-Presence-linux-x86_64/*
+          (cd dist/CYBREX-Presence-linux-x86_64 && sha256sum CYBREX-DiscordRichPresence-linux-x86_64 > SHA256SUMS)
+          tar -C dist -czf dist/CYBREX-Presence-linux-x86_64.tar.gz CYBREX-Presence-linux-x86_64
+          (cd dist && sha256sum CYBREX-Presence-linux-x86_64.tar.gz > CYBREX-Presence-linux-x86_64.tar.gz.sha256)
+      - name: Install smoke and uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/cybrex-rc6-home"
+          export XDG_DATA_HOME="$HOME/.local/share"
+          mkdir -p "$HOME"
+          bash dist/CYBREX-Presence-linux-x86_64/install-user.sh
+          target="$HOME/.local/lib/cybrex-presence/DiscordRichPresence"
+          test -x "$target"
+          timeout 20s "$target" --dry-run --once
+          bash dist/CYBREX-Presence-linux-x86_64/install-user.sh --uninstall
+          test ! -e "$target"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rc6-linux
+          path: |
+            dist/CYBREX-DiscordRichPresence-linux-x86_64
+            dist/CYBREX-DiscordRichPresence-linux-x86_64.sha256
+            dist/CYBREX-Presence-linux-x86_64.tar.gz
+            dist/CYBREX-Presence-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: rc6-windows
+          path: release-assets
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: rc6-linux
+          path: release-assets
+      - name: Verify package checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum -c DiscordRichPresence.exe.sha256
+          sha256sum -c CYBREX-Presence-Setup.exe.sha256
+          sha256sum -c CYBREX-Browser-Companion.zip.sha256
+          sha256sum -c CYBREX-DiscordRichPresence-linux-x86_64.sha256
+          sha256sum -c CYBREX-Presence-linux-x86_64.tar.gz.sha256
+      - name: Build provenance and combined checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-assets/BUILD-PROVENANCE.txt <<EOF
+          repository=${GITHUB_REPOSITORY}
+          tag=${{ inputs.tag }}
+          commit=${EXPECTED_COMMIT}
+          workflow_run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          social_sdk_version=${SOCIAL_SDK_VERSION}
+          social_sdk_asset_id=${SOCIAL_SDK_ASSET_ID}
+          social_sdk_sha256=${SOCIAL_SDK_SHA256}
+          windows_authenticode=false
+          EOF
+          (cd release-assets && cat *.sha256 > SHA256SUMS.txt)
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+          gh release create "$TAG" \
+            release-assets/CYBREX-Presence-Setup.exe \
+            release-assets/CYBREX-Presence-Setup.exe.sha256 \
+            release-assets/DiscordRichPresence.exe \
+            release-assets/DiscordRichPresence.exe.sha256 \
+            release-assets/CYBREX-Presence-linux-x86_64.tar.gz \
+            release-assets/CYBREX-Presence-linux-x86_64.tar.gz.sha256 \
+            release-assets/CYBREX-DiscordRichPresence-linux-x86_64 \
+            release-assets/CYBREX-DiscordRichPresence-linux-x86_64.sha256 \
+            release-assets/CYBREX-Browser-Companion.zip \
+            release-assets/CYBREX-Browser-Companion.zip.sha256 \
+            release-assets/SHA256SUMS.txt \
+            release-assets/BUILD-PROVENANCE.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --prerelease \
+            --generate-notes \
+            --title "CYBREX Presence $TAG"
