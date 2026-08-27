@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 
 RELEASE_WORKFLOW = Path('.github/workflows/release.yml')
 WINDOWS_SIGN_SCRIPT = Path('scripts/sign-windows.ps1')
@@ -7,6 +9,12 @@ WINDOWS_SIGN_SCRIPT = Path('scripts/sign-windows.ps1')
 
 def _workflow_text() -> str:
     return RELEASE_WORKFLOW.read_text(encoding='utf-8')
+
+
+def test_release_workflow_is_valid_yaml():
+    parsed = yaml.safe_load(_workflow_text())
+    assert isinstance(parsed, dict)
+    assert 'jobs' in parsed
 
 
 def test_prerelease_tags_are_published_as_github_prereleases():
