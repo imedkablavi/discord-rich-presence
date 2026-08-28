@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 import webbrowser
 from pathlib import Path
 import tkinter as tk
@@ -707,9 +708,28 @@ class ModernControlPanel(ctk.CTk):
     # --------------------------------------------------------------- probes
     @staticmethod
     def _probe_json(url: str, timeout: float = 1.25) -> tuple[bool, dict | None, str]:
+        try:
+            parsed = urlsplit(url)
+            port = parsed.port
+        except ValueError as exc:
+            return False, None, str(exc)
+        if (
+            parsed.scheme != 'http'
+            or parsed.hostname != '127.0.0.1'
+            or parsed.username is not None
+            or parsed.password is not None
+            or port is None
+            or not 1024 <= port <= 65535
+            or parsed.path not in {'/v1/health', '/v1/status'}
+            or parsed.query
+            or parsed.fragment
+        ):
+            return False, None, 'probe URL is outside the CYBREX loopback allowlist'
         request = urllib.request.Request(url, headers={'User-Agent': 'CYBREX-Rich-Presence-Control-Panel'})
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            # URL components are constrained above to fixed IPv4 loopback and
+            # the two read-only health paths.
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
                 if response.status != 200:
                     return False, None, f'HTTP {response.status}'
                 raw = response.read(64 * 1024)

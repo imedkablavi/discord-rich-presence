@@ -100,11 +100,20 @@ class GamingDetector(BaseGamingDetector):
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         app = self._normalized_process(window_info.get("app_name") if window_info else "")
 
+        # Keep listener lifecycle and config hot-reload active even when the
+        # detector is disabled; the base implementation performs this before
+        # deciding whether an activity may be returned.
+        self._sync_cs2_gsi()
+
+        # Every exact-process fast path must honor the detector toggle. The base
+        # detector checks it too, but War Thunder has an additional exact
+        # `aces`/`aces64` fallback below that must not bypass the user's choice.
+        if not window_info or not self.config.get("rules.enabled_detectors.gaming", False):
+            return None
+
         # MinecraftLauncher is a launcher, never evidence that Minecraft itself
         # is running. This exact boundary runs before legacy substring aliases.
         if app == "minecraftlauncher":
-            if not window_info or not self.config.get("rules.enabled_detectors.gaming", False):
-                return None
             return {
                 "type": "gaming",
                 "game_name": None,

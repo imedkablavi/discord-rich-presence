@@ -204,8 +204,10 @@ class DiscordRichPresenceService:
         if not self.connected and not self.connect_discord():
             return False
         try:
-            assert self.rpc is not None
-            self.rpc.update(**clean_payload)
+            rpc = self.rpc
+            if rpc is None:
+                raise RuntimeError('Discord transport missing after successful connection')
+            rpc.update(**clean_payload)
             self.last_payload = clean_payload
             self.presence_active = True
             # Never put page titles, commands, URLs, or buttons into persistent
@@ -251,8 +253,10 @@ class DiscordRichPresenceService:
         if not self.connected and not self.connect_discord():
             return False
         try:
-            assert self.rpc is not None
-            self.rpc.clear()
+            rpc = self.rpc
+            if rpc is None:
+                raise RuntimeError('Discord transport missing after successful connection')
+            rpc.clear()
             self.last_payload = None
             self.presence_active = False
             self.logger.debug('Cleared Discord presence')

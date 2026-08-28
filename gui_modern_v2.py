@@ -438,6 +438,8 @@ class ModernControlPanel(LegacyControlPanel):
         self.after(350, self.start_service)
 
     def _poll_service(self):
+        if getattr(self, "_closing", False):
+            return
         try:
             active = self.runtime.read_active()
             if not active:
@@ -509,7 +511,8 @@ class ModernControlPanel(LegacyControlPanel):
                 )
                 self.stop_button.configure(state="normal")
         finally:
-            self.after(1000, self._poll_service)
+            if not getattr(self, "_closing", False):
+                self.after(1000, self._poll_service)
 
 
 if __name__ == "__main__":

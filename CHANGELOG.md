@@ -48,6 +48,9 @@
 
 ### Reliability and memory
 
+- Fixed detector-disable handling so exact War Thunder process detection cannot bypass the gaming privacy toggle while CS2 GSI lifecycle changes still hot-reload safely.
+- Prevented GUI status/identity callbacks from rescheduling after window shutdown.
+- Added Linux `RssAnon`/`RssFile`, child-process and zombie-process measurements plus repeated packaged GUI/tray lifecycle cycles to resource QA.
 - Replaced thread-per-request loopback listeners with bounded fixed-worker servers where applicable.
 - Reused a bounded GUI integration-probe worker instead of creating unbounded background work.
 - Linux media detection now uses stateless `playerctl` probing and no longer keeps the former pydbus/GLib polling path.
@@ -58,6 +61,8 @@
 
 ### Packaging and updates
 
+- Replaced the one-off RC6 rescue workflow with a permanent, dispatchable immutable-tag release path that retrieves the pinned private Social SDK toolchain asset by ID and verifies its SHA-256 before either platform build.
+- Pinned third-party GitHub Actions to immutable commit SHAs and refreshed supported dependency floors.
 - Added Windows installer and portable builds plus Linux x86_64 user-level installer and portable builds.
 - Added checksum verification, combined release checksums and build provenance.
 - Added verified self-update with rollback behavior on Windows and Linux.

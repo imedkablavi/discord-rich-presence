@@ -4,12 +4,13 @@ from detectors.gaming import GamingDetector
 
 
 class _Config:
-    def __init__(self, privacy='balanced'):
+    def __init__(self, privacy='balanced', gaming_enabled=True):
         self.privacy = privacy
+        self.gaming_enabled = gaming_enabled
 
     def get(self, key, default=None):
         if key == 'rules.enabled_detectors.gaming':
-            return True
+            return self.gaming_enabled
         if key == 'privacy.mode':
             return self.privacy
         return default
@@ -27,9 +28,9 @@ class _NoPack:
         return None
 
 
-def _detector_without_services(*, privacy='balanced', warthunder_snapshot=None):
+def _detector_without_services(*, privacy='balanced', gaming_enabled=True, warthunder_snapshot=None):
     detector = object.__new__(GamingDetector)
-    detector.config = _Config(privacy)
+    detector.config = _Config(privacy, gaming_enabled)
     detector.cs2_gsi = None
     detector.steam_catalog = _NoCatalog()
     detector.epic_catalog = _NoCatalog()
@@ -128,6 +129,14 @@ def test_warthunder_strict_privacy_does_not_probe_telemetry():
 def test_process_name_containing_aces_is_not_warthunder():
     detector = _detector_without_services()
     assert detector.detect({'app_name': 'traces-ui', 'title': '', 'pid': None}) is None
+
+
+def test_disabled_game_detector_does_not_report_exact_warthunder_process():
+    detector = _detector_without_services(
+        gaming_enabled=False,
+        warthunder_snapshot={'warthunder_telemetry': True, 'branch': 'Ground'},
+    )
+    assert detector.detect({'app_name': 'aces64.exe', 'title': 'War Thunder', 'pid': 7}) is None
 
 
 def test_strict_privacy_disables_cs2_listener_signature():

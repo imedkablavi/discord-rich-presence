@@ -1,7 +1,7 @@
 # Runtime dependencies. This project targets Python 3.10+.
 pypresence==4.6.2
 PyYAML>=6.0.3,<7
-customtkinter>=5.2,<6
+customtkinter>=6.0.0,<7
 pystray>=0.19.5,<1
 # Pillow 12.3.0 includes fixes for the 2026 advisories affecting the older
 # 11.x line while retaining Python 3.10 support. Keep the next major release
@@ -11,8 +11,8 @@ psutil>=7.2.2,<8
 
 # Cross-platform Arabic shaping/BiDi for Tk-based UI text. Tk rendering on
 # several Linux desktop stacks does not shape or order Arabic consistently.
-arabic-reshaper>=3.0,<4
-python-bidi>=0.6,<1
+arabic-reshaper>=3.0.1,<4
+python-bidi>=0.6.11,<1
 
 # Linux native media discovery intentionally uses the external `playerctl`
 # command when available. We do not bundle pydbus/GLib proxies into the long-
@@ -21,5 +21,5 @@ python-bidi>=0.6,<1
 # fallback for browser media when playerctl is unavailable.
 
 # Windows integrations
-pywin32>=305; sys_platform == 'win32'
+pywin32>=312; sys_platform == 'win32'
 winsdk>=1.0.0b10; sys_platform == 'win32'

@@ -101,8 +101,12 @@ jobs:
         run: timeout 20s ./dist/DiscordRichPresence --dry-run --once
       - name: Soak packaged GUI process tree
         run: xvfb-run -a python scripts/qa_process_tree_soak.py ./dist/DiscordRichPresence gui
+      - name: Cycle packaged GUI lifecycle
+        run: xvfb-run -a python scripts/qa_process_tree_soak.py ./dist/DiscordRichPresence gui-cycle
       - name: Soak packaged tray + offline Discord reconnect path
         run: xvfb-run -a python scripts/qa_process_tree_soak.py ./dist/DiscordRichPresence tray
+      - name: Cycle packaged tray lifecycle
+        run: xvfb-run -a python scripts/qa_process_tree_soak.py ./dist/DiscordRichPresence tray-cycle
 
   full-regression-suite:
     runs-on: ubuntu-latest
