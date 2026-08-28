@@ -58,6 +58,12 @@ def test_release_requires_pinned_social_sdk_toolchain():
     assert 'SOCIAL_SDK_TOOLCHAIN_ASSET_ID: "532548383"' in text
     assert 'SOCIAL_SDK_TOOLCHAIN_ASSET: "CYBREX-DiscordSocialSdk-1.10.18687-toolchain.zip"' in text
     assert 'SOCIAL_SDK_TOOLCHAIN_SHA256: "252d26b273887fb235691a40118d786b765539e86c7656f24ad44680bf549232"' in text
+    download_step = text.split('name: Download pinned private Discord Social SDK toolchain', 1)[1].split(
+        'name: Verify pinned Discord Social SDK toolchain', 1
+    )[0]
+    assert 'GH_TOKEN: ${{ secrets.SOCIAL_SDK_ASSET_TOKEN }}' in download_step
+    assert 'GH_TOKEN: ${{ github.token }}' not in download_step
+    assert 'SOCIAL_SDK_ASSET_TOKEN is required' in download_step
     assert 'releases/assets/${SOCIAL_SDK_TOOLCHAIN_ASSET_ID}' in text
     assert 'Accept: application/octet-stream' in text
     assert 'CYBREX_SOCIAL_SDK_BUNDLE_DIR' in text

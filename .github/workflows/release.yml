@@ -95,10 +95,14 @@ jobs:
     steps:
       - name: Download pinned private Discord Social SDK toolchain
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SOCIAL_SDK_ASSET_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::SOCIAL_SDK_ASSET_TOKEN is required to read the private draft toolchain asset"
+            exit 1
+          fi
           mkdir -p social-sdk-toolchain
           gh api \
             "repos/${GITHUB_REPOSITORY}/releases/assets/${SOCIAL_SDK_TOOLCHAIN_ASSET_ID}" \
