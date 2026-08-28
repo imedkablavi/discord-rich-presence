@@ -52,7 +52,7 @@ class LeagueLiveClient:
         # Riot's local game client uses a self-signed certificate. Certificate
         # verification is disabled only for the fixed IPv4 loopback endpoint;
         # callers cannot redirect this client to a network host.
-        self._ssl_context = ssl._create_unverified_context()  # noqa: S323
+        self._ssl_context = ssl._create_unverified_context()  # nosec B323
         self._cached: Optional[dict[str, Any]] = None
         self._cached_at = 0.0
 
@@ -64,7 +64,9 @@ class LeagueLiveClient:
             headers={'User-Agent': 'CYBREX-Rich-Presence/League'},
         )
         try:
-            with urllib.request.urlopen(
+            # The base URL is a module constant fixed to Riot's IPv4 loopback
+            # endpoint and `endpoint` is restricted to a relative path above.
+            with urllib.request.urlopen(  # nosec B310
                 request,
                 timeout=_TIMEOUT,
                 context=self._ssl_context,

@@ -450,7 +450,8 @@ class ModernControlPanel(ResourceAwareControlPanel):
         except Exception:
             pass
         finally:
-            self.after(1200, self._poll_identity_surface)
+            if not getattr(self, "_closing", False):
+                self.after(1200, self._poll_identity_surface)
 
 
 if __name__ == "__main__":

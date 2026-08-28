@@ -13,6 +13,7 @@ import http.client
 import json
 import os
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -31,15 +32,30 @@ from warthunder_telemetry import WarThunderTelemetryReader
 MIB = 1024 * 1024
 
 
-def snapshot() -> tuple[int, int, int | None]:
+def _linux_rss_breakdown() -> tuple[int | None, int | None]:
+    if not sys.platform.startswith("linux"):
+        return None, None
+    values: dict[str, int] = {}
+    try:
+        for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition(":")
+            if separator and key in {"RssAnon", "RssFile"}:
+                values[key] = int(value.strip().split()[0]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None, None
+    return values.get("RssAnon"), values.get("RssFile")
+
+
+def snapshot() -> tuple[int, int | None, int | None, int, int | None]:
     process = psutil.Process(os.getpid())
     rss = int(process.memory_info().rss)
+    rss_anon, rss_file = _linux_rss_breakdown()
     threads = int(process.num_threads())
     try:
         fds = int(process.num_fds()) if hasattr(process, "num_fds") else None
     except (psutil.Error, OSError):
         fds = None
-    return rss, threads, fds
+    return rss, rss_anon, rss_file, threads, fds
 
 
 def free_port() -> int:
@@ -138,7 +154,7 @@ def main() -> int:
         churn_warthunder(500)
         gc.collect()
         _malloc_trim()
-        baseline_rss, baseline_threads, baseline_fds = snapshot()
+        baseline_rss, baseline_anon, baseline_file, baseline_threads, baseline_fds = snapshot()
 
         bridge = BrowserCompanionBridge(config)
         if not bridge.start():
@@ -161,7 +177,7 @@ def main() -> int:
             time.sleep(0.05)
         gc.collect()
         _malloc_trim()
-        final_rss, final_threads, final_fds = snapshot()
+        final_rss, final_anon, final_file, final_threads, final_fds = snapshot()
 
         growth = final_rss - baseline_rss
         print(
@@ -169,6 +185,8 @@ def main() -> int:
             f"baseline_rss={baseline_rss / MIB:.1f}MiB "
             f"final_rss={final_rss / MIB:.1f}MiB "
             f"growth={growth / MIB:.1f}MiB "
+            f"rss_anon={baseline_anon}->{final_anon} "
+            f"rss_file={baseline_file}->{final_file} "
             f"threads={baseline_threads}->{final_threads} "
             f"fds={baseline_fds}->{final_fds} "
             "warthunder_snapshots=20000"
