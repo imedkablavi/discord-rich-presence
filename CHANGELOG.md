@@ -61,7 +61,7 @@
 
 ### Packaging and updates
 
-- Replaced the one-off RC6 rescue workflow with a permanent, dispatchable immutable-tag release path that retrieves the pinned private Social SDK toolchain asset by ID and verifies its SHA-256 before either platform build.
+- Added a permanent, dispatchable immutable-tag release path that retrieves the pinned private Social SDK toolchain asset by ID and verifies its SHA-256 before either platform build.
 - Pinned third-party GitHub Actions to immutable commit SHAs and refreshed supported dependency floors.
 - Added Windows installer and portable builds plus Linux x86_64 user-level installer and portable builds.
 - Added checksum verification, combined release checksums and build provenance.

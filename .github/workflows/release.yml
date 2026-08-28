@@ -56,6 +56,8 @@ jobs:
         run: python -m pip check
       - name: Stamp release version
         run: python scripts/write-version.py "${RELEASE_TAG}"
+      - name: Verify stamped release version
+        run: python -c "import os, app_version; expected = os.environ['RELEASE_TAG'].removeprefix('v'); assert app_version.APP_VERSION == expected, (app_version.APP_VERSION, expected)"
       - name: Compile Python sources
         run: python -m compileall -q .
       - name: Run critical Ruff checks
@@ -161,6 +163,8 @@ jobs:
           "CYBREX_SOCIAL_SDK_BUNDLE_DIR=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Stamp release version
         run: python scripts/write-version.py "${RELEASE_TAG}"
+      - name: Verify stamped release version
+        run: python -c "import os, app_version; expected = os.environ['RELEASE_TAG'].removeprefix('v'); assert app_version.APP_VERSION == expected, (app_version.APP_VERSION, expected)"
       - name: Import desktop entry points
         run: python -c "import app_version, customtkinter, gui_modern, launcher, tray_icon, updater"
       - name: Build Windows executable with Social SDK
@@ -331,6 +335,8 @@ jobs:
           echo "CYBREX_SOCIAL_SDK_BUNDLE_DIR=$bundle" >> "$GITHUB_ENV"
       - name: Stamp release version
         run: python scripts/write-version.py "${RELEASE_TAG}"
+      - name: Verify stamped release version
+        run: python -c "import os, app_version; expected = os.environ['RELEASE_TAG'].removeprefix('v'); assert app_version.APP_VERSION == expected, (app_version.APP_VERSION, expected)"
       - name: Import desktop entry points
         run: python -c "import app_version, customtkinter, gui_modern, launcher, tray_icon, updater"
       - name: Build Linux executable with Social SDK
@@ -400,6 +406,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-windows-and-extension
@@ -463,6 +473,6 @@ jobs:
             release-assets/CYBREX-Browser-Companion.zip.sha256 \
             release-assets/SHA256SUMS.txt \
             release-assets/BUILD-PROVENANCE.txt \
-            --generate-notes \
+            --notes-file .github/RELEASE_NOTES.md \
             --title "CYBREX Presence ${RELEASE_TAG}" \
             "${release_flags[@]}"
