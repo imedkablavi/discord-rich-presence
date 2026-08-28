@@ -123,6 +123,12 @@ For GUI changes:
 
 ## Installer / release changes
 
+The private Discord Social SDK toolchain is read during tagged builds with the
+`SOCIAL_SDK_ASSET_TOKEN` Actions secret. It must be a fine-grained GitHub token
+limited to this repository with **Contents: read** only. Do not grant workflow,
+administration or write permissions, and never place the token in source,
+release notes, artifacts or logs. Rotate it if access scope or ownership changes.
+
 Installer changes should be treated as application code because they affect trust and update behavior.
 
 Verify:

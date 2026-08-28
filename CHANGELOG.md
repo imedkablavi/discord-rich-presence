@@ -61,6 +61,7 @@
 
 ### Packaging and updates
 
+- Added fail-closed authentication for the private Social SDK toolchain asset using a repository-scoped, read-only release credential.
 - Added a permanent, dispatchable immutable-tag release path that retrieves the pinned private Social SDK toolchain asset by ID and verifies its SHA-256 before either platform build.
 - Pinned third-party GitHub Actions to immutable commit SHAs and refreshed supported dependency floors.
 - Added Windows installer and portable builds plus Linux x86_64 user-level installer and portable builds.
