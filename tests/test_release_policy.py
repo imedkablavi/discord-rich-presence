@@ -39,6 +39,19 @@ def test_tagged_release_runs_regressions_before_packaging():
     assert 'needs: [validate, security-audit, social-sdk-toolchain]' in text
 
 
+def test_release_version_is_verified_in_validation_and_platform_builds():
+    text = _workflow_text()
+    assert text.count('name: Verify stamped release version') == 3
+    assert "app_version.APP_VERSION == expected" in text
+
+
+def test_release_uses_curated_public_notes_instead_of_internal_commit_titles():
+    text = _workflow_text()
+    assert '--notes-file .github/RELEASE_NOTES.md' in text
+    assert '--generate-notes' not in text
+    assert Path('.github/RELEASE_NOTES.md').is_file()
+
+
 def test_release_requires_pinned_social_sdk_toolchain():
     text = _workflow_text()
     assert 'SOCIAL_SDK_VERSION: "1.10.18687"' in text
