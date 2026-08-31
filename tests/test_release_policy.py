@@ -4,6 +4,7 @@ import yaml
 
 
 RELEASE_WORKFLOW = Path('.github/workflows/release.yml')
+GAMER_COMPANIONS_WORKFLOW = Path('.github/workflows/release-gamer-companions.yml')
 WINDOWS_SIGN_SCRIPT = Path('scripts/sign-windows.ps1')
 
 
@@ -108,6 +109,12 @@ def test_manual_release_rebuilds_an_existing_immutable_tag():
     assert 'RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}' in text
     assert 'ref: ${{ env.RELEASE_TAG }}' in text
     assert 'sha=$(git rev-parse HEAD)' in text
+
+
+def test_gamer_companion_release_commands_are_repository_scoped():
+    text = GAMER_COMPANIONS_WORKFLOW.read_text(encoding='utf-8')
+    assert 'gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"' in text
+    assert '--repo "$GITHUB_REPOSITORY" \\' in text
 
 
 def test_windows_signing_verifies_both_inner_exe_and_installer():
