@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import re
+import ssl
 import stat
 import subprocess
 import sys
@@ -17,6 +18,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
+import certifi
 
 from app_version import APP_VERSION
 
@@ -83,8 +86,21 @@ def _validate_github_url(url: str) -> None:
         raise UpdateError(f"Refusing non-GitHub update URL: {host or 'unknown'}")
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Return host trust plus the CA bundle embedded in packaged builds."""
+    try:
+        context = ssl.create_default_context()
+        context.load_verify_locations(cafile=certifi.where())
+    except (OSError, ssl.SSLError) as exc:
+        raise UpdateError("Could not initialize the HTTPS certificate store") from exc
+    return context
+
+
 def _opener() -> urllib.request.OpenerDirector:
-    return urllib.request.build_opener(_SafeRedirectHandler())
+    return urllib.request.build_opener(
+        _SafeRedirectHandler(),
+        urllib.request.HTTPSHandler(context=_ssl_context()),
+    )
 
 
 def _request(url: str) -> urllib.request.Request:
