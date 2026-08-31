@@ -166,7 +166,7 @@ jobs:
           }
           "CYBREX_SOCIAL_SDK_BUNDLE_DIR=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Stamp release version
-        run: python scripts/write-version.py "${RELEASE_TAG}"
+        run: python scripts/write-version.py "$env:RELEASE_TAG"
       - name: Verify stamped release version
         run: python -c "import os, app_version; expected = os.environ['RELEASE_TAG'].removeprefix('v'); assert app_version.APP_VERSION == expected, (app_version.APP_VERSION, expected)"
       - name: Import desktop entry points
