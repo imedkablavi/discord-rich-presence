@@ -53,6 +53,30 @@ def test_update_urls_are_https_and_github_only():
         updater._validate_github_url('https://github.com:444/example')
 
 
+def test_https_opener_merges_embedded_certifi_bundle(monkeypatch, tmp_path: Path):
+    bundle = tmp_path / 'cacert.pem'
+    bundle.write_text('test bundle', encoding='utf-8')
+    loaded = []
+
+    class FakeContext:
+        def load_verify_locations(self, *, cafile):
+            loaded.append(cafile)
+
+    context = FakeContext()
+    monkeypatch.setattr(updater.ssl, 'create_default_context', lambda: context)
+    monkeypatch.setattr(updater.certifi, 'where', lambda: str(bundle))
+
+    opener = updater._opener()
+
+    assert loaded == [str(bundle)]
+    assert any(isinstance(handler, updater.urllib.request.HTTPSHandler) for handler in opener.handlers)
+
+
+def test_pyinstaller_bundle_includes_certifi_data():
+    spec = Path('discord-rich-presence.spec').read_text(encoding='utf-8')
+    assert "collect_data_files('certifi')" in spec
+
+
 def test_check_for_update_requires_expected_platform_assets(monkeypatch):
     monkeypatch.setattr(updater, '_read_limited', lambda *_: _release('1.2.3'))
     monkeypatch.setattr(updater, '_platform_asset_names', lambda: ('binary.bin', 'binary.bin.sha256'))

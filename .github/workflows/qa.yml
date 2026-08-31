@@ -29,7 +29,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install QA dependencies
-        run: python -m pip install "pypresence==4.6.2" "PyYAML>=6.0.3,<7" "psutil>=7.2.2,<8" "pytest>=9.1.1,<10" "ruff>=0.9,<1"
+        run: python -m pip install "pypresence==4.6.2" "PyYAML>=6.0.3,<7" "psutil>=7.2.2,<8" "certifi==2026.7.22" "pytest>=9.1.1,<10" "ruff>=0.9,<1"
       - name: Verify dependency environment
         run: python -m pip check
       - name: Compile Python sources
