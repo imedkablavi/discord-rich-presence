@@ -45,6 +45,13 @@ def test_release_version_is_verified_in_validation_and_platform_builds():
     assert "app_version.APP_VERSION == expected" in text
 
 
+def test_windows_release_stamp_uses_powershell_environment_syntax():
+    text = _workflow_text()
+    windows_job = text.split('  windows:', 1)[1].split('  linux:', 1)[0]
+    assert 'python scripts/write-version.py "$env:RELEASE_TAG"' in windows_job
+    assert 'python scripts/write-version.py "${RELEASE_TAG}"' not in windows_job
+
+
 def test_release_uses_curated_public_notes_instead_of_internal_commit_titles():
     text = _workflow_text()
     assert '--notes-file .github/RELEASE_NOTES.md' in text
