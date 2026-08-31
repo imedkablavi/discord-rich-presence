@@ -8,6 +8,10 @@ pystray>=0.19.5,<1
 # out until its Python/runtime compatibility is part of the supported matrix.
 Pillow>=12.3,<13
 psutil>=7.2.2,<8
+# Pin a portable Mozilla CA bundle for PyInstaller builds. The updater also
+# keeps the host trust store, but Fedora/Bazzite and Ubuntu-built Python use
+# different default certificate paths.
+certifi==2026.7.22
 
 # Cross-platform Arabic shaping/BiDi for Tk-based UI text. Tk rendering on
 # several Linux desktop stacks does not shape or order Arabic consistently.
