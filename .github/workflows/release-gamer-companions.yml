@@ -89,7 +89,7 @@ jobs:
           set -euo pipefail
           found=false
           for _ in $(seq 1 60); do
-            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               found=true
               break
             fi
@@ -104,4 +104,5 @@ jobs:
             release-assets/CYBREX-Minecraft-Companion-26.2.jar.sha256 \
             release-assets/CYBREX-FiveM-Companion.zip \
             release-assets/CYBREX-FiveM-Companion.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
             --clobber
