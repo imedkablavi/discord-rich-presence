@@ -160,7 +160,7 @@ jobs:
           if ($uninstall.ExitCode -ne 0) {
             throw "Uninstaller exited with code $($uninstall.ExitCode)"
           }
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: CYBREX-Presence-Windows-Installer
           path: dist/CYBREX-Presence-Setup.exe
@@ -239,7 +239,7 @@ jobs:
             sha256sum CYBREX-Presence-linux-x86_64.tar.gz > CYBREX-Presence-linux-x86_64.tar.gz.sha256
           )
           grep -Eq '^[0-9a-f]{64}  CYBREX-Presence-linux-x86_64\.tar\.gz$' dist/CYBREX-Presence-linux-x86_64.tar.gz.sha256
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: CYBREX-Presence-Linux-User-Installer
           path: |
