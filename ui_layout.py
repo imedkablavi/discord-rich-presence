@@ -87,3 +87,12 @@ def dashboard_hero_stacked(content_width: int) -> bool:
     except (TypeError, ValueError, OverflowError):
         width = 0
     return width < 640
+
+
+def dashboard_runtime_grid(
+    compact: bool,
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Return (left, right) row/column cells for the Overview runtime cards."""
+    if compact:
+        return (0, 0), (1, 0)
+    return (0, 0), (0, 1)

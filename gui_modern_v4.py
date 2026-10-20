@@ -15,6 +15,7 @@ from ui_layout import (
     control_panel_geometry,
     dashboard_hero_stacked,
     dashboard_metric_columns,
+    dashboard_runtime_grid,
     sidebar_width_for_screen,
 )
 
@@ -253,23 +254,31 @@ class ModernControlPanel(ResourceAwareControlPanel):
         )
         self.pages[name] = page
 
+        compact_layout = self._sidebar_width < 220
         header = ctk.CTkFrame(page, fg_color="transparent")
-        header.pack(fill="x", padx=36, pady=(28, 16))
+        header.pack(
+            fill="x",
+            padx=14 if compact_layout else 36,
+            pady=(20, 12) if compact_layout else (28, 16),
+        )
         copy = ctk.CTkFrame(header, fg_color="transparent")
         copy.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(
             copy,
             text=title,
             text_color=self.TEXT,
-            font=self._font(31, "bold"),
+            font=self._font(24 if compact_layout else 31, "bold"),
         ).pack(anchor="w")
         ctk.CTkLabel(
             copy,
             text=subtitle,
             text_color=self.MUTED,
-            font=self._font(13),
+            font=self._font(12 if compact_layout else 13),
             justify="left",
-            wraplength=self._content_wraplength,
+            wraplength=max(
+                180,
+                self._content_wraplength - (36 if compact_layout else 0),
+            ),
         ).pack(anchor="w", pady=(5, 0))
 
         pill = ctk.CTkFrame(
@@ -462,12 +471,22 @@ class ModernControlPanel(ResourceAwareControlPanel):
 
         runtime = self._section(page, "Runtime details")
         runtime_grid = ctk.CTkFrame(runtime, fg_color="transparent")
-        runtime_grid.pack(fill="x", padx=15, pady=(7, 17))
+        runtime_grid.pack(
+            fill="x",
+            padx=10 if compact_dashboard else 15,
+            pady=(7, 17),
+        )
         runtime_grid.grid_columnconfigure(0, weight=1)
-        runtime_grid.grid_columnconfigure(1, weight=1)
+        runtime_grid.grid_columnconfigure(1, weight=0 if compact_dashboard else 1)
 
         left_runtime = ctk.CTkFrame(runtime_grid, fg_color="transparent")
-        left_runtime.grid(row=0, column=0, sticky="nsew", padx=(5, 18))
+        left_runtime_cell, right_runtime_cell = dashboard_runtime_grid(compact_dashboard)
+        left_runtime.grid(
+            row=left_runtime_cell[0],
+            column=left_runtime_cell[1],
+            sticky="nsew",
+            padx=(5, 5) if compact_dashboard else (5, 18),
+        )
         self.heartbeat_label = ctk.CTkLabel(
             left_runtime, text="Heartbeat: —", text_color=self.TEXT, font=self._font(13)
         )
@@ -491,7 +510,13 @@ class ModernControlPanel(ResourceAwareControlPanel):
             corner_radius=12,
             fg_color=self.SURFACE_ALT,
         )
-        right_runtime.grid(row=0, column=1, sticky="nsew", padx=(18, 5))
+        right_runtime.grid(
+            row=right_runtime_cell[0],
+            column=right_runtime_cell[1],
+            sticky="nsew",
+            padx=(5, 5) if compact_dashboard else (18, 5),
+            pady=(8, 0) if compact_dashboard else 0,
+        )
         ctk.CTkLabel(
             right_runtime,
             text="Discord activity identity",
@@ -504,6 +529,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text_color=self.TEXT,
             font=self._font(13, "bold"),
             justify="left",
+            wraplength=self._card_wraplength,
         )
         self.transport_label.pack(anchor="w", padx=14, pady=(0, 3))
         self.transport_explainer = ctk.CTkLabel(
