@@ -50,5 +50,13 @@ def test_choose_font_family_falls_back_to_tk_list_when_fontconfig_is_unavailable
     ) == "Liberation Sans"
 
 
+def test_choose_font_family_does_not_accept_a_known_non_scalable_family():
+    assert choose_font_family(
+        ["Noto Sans", "TkDefaultFont"],
+        ("Noto Sans",),
+        set(),
+    ) is None
+
+
 def test_choose_font_family_returns_none_instead_of_fabricating_a_family():
     assert choose_font_family([], ("DejaVu Sans",), {"dejavu sans"}) is None
