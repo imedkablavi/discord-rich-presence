@@ -54,14 +54,19 @@ class ModernControlPanel(ResourceAwareControlPanel):
         )
         compact_sidebar = sidebar_width < 220
         self._sidebar_width = sidebar_width
-        sidebar = ctk.CTkFrame(
+        # Compact screens cannot fit navigation and footer controls at once.
+        # A scrollable sidebar keeps Appearance and Save changes reachable rather
+        # than letting them disappear below the window edge.
+        sidebar = ctk.CTkScrollableFrame(
             self,
             width=sidebar_width,
+            height=layout.height,
             corner_radius=0,
             fg_color=self.SIDEBAR,
+            scrollbar_button_color=("#C9D5E3", "#334155"),
+            scrollbar_button_hover_color=("#AAB9CB", "#475569"),
         )
         sidebar.grid(row=0, column=0, sticky="nsew")
-        sidebar.grid_propagate(False)
         sidebar.grid_rowconfigure(9, weight=1)
 
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -510,7 +515,10 @@ class ModernControlPanel(ResourceAwareControlPanel):
         for page_name, button in self.nav.items():
             selected = page_name == name
             button.configure(
-                font=self._font(14, "bold" if selected else "normal"),
+                font=self._font(
+                    13 if self._sidebar_width < 220 else 14,
+                    "bold" if selected else "normal",
+                ),
                 border_width=1 if selected else 0,
                 border_color=self.PRIMARY if selected else self.SIDEBAR,
             )
