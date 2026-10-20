@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from functools import lru_cache
 from tkinter import font as tkfont
 from typing import Iterable
 
@@ -49,6 +50,7 @@ def parse_scalable_font_families(output: str) -> set[str]:
     return families
 
 
+@lru_cache(maxsize=1)
 def linux_scalable_font_families() -> set[str] | None:
     """Return installed scalable Fontconfig families, or None if unavailable."""
     if not sys.platform.startswith("linux"):
