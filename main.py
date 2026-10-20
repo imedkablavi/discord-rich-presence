@@ -368,17 +368,28 @@ class DiscordRichPresenceService:
         # Lock-screen privacy is a hard gate and must not be bypassed by Override
         # Presence. With no reported window, clean expired shell-command cache data.
         window_info = self.window_detector.get_active_window()
-        if not window_info:
-            self.terminal_detector.cleanup_command_cache()
-        elif (
-            self.config.get('rules.clear_on_lock_screen', True)
+        override_enabled = bool(self.config.get('override.enabled', False))
+        terminal_enabled = bool(self.config.get('rules.enabled_detectors.terminal', True))
+        if (
+            window_info
+            and self.config.get('rules.clear_on_lock_screen', True)
             and self._is_lock_screen_window(window_info)
         ):
             self.terminal_detector.clear_command_cache()
             self.logger.debug('Lock screen detected; clearing terminal cache and suppressing presence')
             return None
 
-        if self.config.get('override.enabled', False):
+        if not window_info:
+            if terminal_enabled:
+                self.terminal_detector.cleanup_command_cache()
+            else:
+                self.terminal_detector.clear_command_cache()
+        elif override_enabled and not terminal_enabled:
+            # Override Presence skips detector execution below, so honor the
+            # terminal-disabled setting here to prevent shell hooks retaining data.
+            self.terminal_detector.clear_command_cache()
+
+        if override_enabled:
             override = self.config.get('override', {}) or {}
             payload: Dict[str, Any] = {
                 'details': str(override.get('details', ''))[:128],
