@@ -11,7 +11,12 @@ from config import Config
 from gui_modern_v3 import ModernControlPanel as ResourceAwareControlPanel
 from social_sdk_transport import social_sdk_available
 from ui_icons import icon
-from ui_layout import control_panel_geometry
+from ui_layout import (
+    control_panel_geometry,
+    dashboard_hero_stacked,
+    dashboard_metric_columns,
+    sidebar_width_for_screen,
+)
 
 
 class ModernControlPanel(ResourceAwareControlPanel):
@@ -43,33 +48,56 @@ class ModernControlPanel(ResourceAwareControlPanel):
 
     # ---------------------------------------------------------------- layout
     def _build_sidebar(self):
-        sidebar = ctk.CTkFrame(
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        sidebar_width = sidebar_width_for_screen(screen_width)
+        layout = control_panel_geometry(screen_width, screen_height)
+        self._content_wraplength = max(220, layout.width - sidebar_width - 72)
+        self._card_wraplength = max(
+            128,
+            min(230, (self._content_wraplength - 60) // 2),
+        )
+        compact_sidebar = sidebar_width < 220
+        self._sidebar_width = sidebar_width
+        # Compact screens cannot fit navigation and footer controls at once.
+        # A scrollable sidebar keeps Appearance and Save changes reachable rather
+        # than letting them disappear below the window edge.
+        sidebar = ctk.CTkScrollableFrame(
             self,
-            width=self.SIDEBAR_WIDTH,
+            width=sidebar_width,
+            height=layout.height,
             corner_radius=0,
             fg_color=self.SIDEBAR,
+            scrollbar_button_color=("#C9D5E3", "#334155"),
+            scrollbar_button_hover_color=("#AAB9CB", "#475569"),
         )
         sidebar.grid(row=0, column=0, sticky="nsew")
-        sidebar.grid_propagate(False)
+        sidebar.grid_columnconfigure(0, weight=1)
         sidebar.grid_rowconfigure(9, weight=1)
 
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
-        brand.grid(row=0, column=0, sticky="ew", padx=20, pady=(26, 22))
+        brand.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=12 if compact_sidebar else 20,
+            pady=(20, 16) if compact_sidebar else (26, 22),
+        )
 
         mark = ctk.CTkFrame(
             brand,
-            width=44,
-            height=44,
+            width=36 if compact_sidebar else 44,
+            height=36 if compact_sidebar else 44,
             corner_radius=13,
             fg_color=self.PRIMARY,
         )
-        mark.pack(side="left", padx=(0, 12))
+        mark.pack(side="left", padx=(0, 8 if compact_sidebar else 12))
         mark.pack_propagate(False)
         ctk.CTkLabel(
             mark,
             text="C",
             text_color="#FFFFFF",
-            font=self._font(20, "bold"),
+            font=self._font(17 if compact_sidebar else 20, "bold"),
         ).place(relx=0.5, rely=0.5, anchor="center")
 
         brand_text = ctk.CTkFrame(brand, fg_color="transparent")
@@ -78,14 +106,15 @@ class ModernControlPanel(ResourceAwareControlPanel):
             brand_text,
             text="CYBREX",
             text_color=self.TEXT,
-            font=self._font(23, "bold"),
+            font=self._font(17 if compact_sidebar else 23, "bold"),
         ).pack(anchor="w")
-        ctk.CTkLabel(
-            brand_text,
-            text="Presence",
-            text_color=self.MUTED,
-            font=self._font(12),
-        ).pack(anchor="w", pady=(0, 1))
+        if not compact_sidebar:
+            ctk.CTkLabel(
+                brand_text,
+                text="Presence",
+                text_color=self.MUTED,
+                font=self._font(12),
+            ).pack(anchor="w", pady=(0, 1))
 
         self.nav = {}
         pages = (
@@ -104,20 +133,35 @@ class ModernControlPanel(ResourceAwareControlPanel):
                 image=icon(icon_name, 18),
                 compound="left",
                 text_color=self.TEXT,
-                font=self._font(14, "bold" if name == "dashboard" else "normal"),
-                height=44,
+                font=self._font(
+                    13 if compact_sidebar else 14,
+                    "bold" if name == "dashboard" else "normal",
+                ),
+                height=40 if compact_sidebar else 44,
                 anchor="w",
                 corner_radius=11,
-                border_spacing=10,
+                border_spacing=8 if compact_sidebar else 10,
                 fg_color="transparent",
                 hover_color=("#DFE9F7", "#1A2940"),
                 command=lambda n=name: self.select_page(n),
             )
-            button.grid(row=row, column=0, sticky="ew", padx=13, pady=3)
+            button.grid(
+                row=row,
+                column=0,
+                sticky="ew",
+                padx=8 if compact_sidebar else 13,
+                pady=2 if compact_sidebar else 3,
+            )
             self.nav[name] = button
 
         footer = ctk.CTkFrame(sidebar, fg_color="transparent")
-        footer.grid(row=10, column=0, sticky="sew", padx=14, pady=15)
+        footer.grid(
+            row=10,
+            column=0,
+            sticky="sew",
+            padx=10 if compact_sidebar else 14,
+            pady=10 if compact_sidebar else 15,
+        )
 
         build = ctk.CTkFrame(
             footer,
@@ -135,9 +179,19 @@ class ModernControlPanel(ResourceAwareControlPanel):
         ).pack(anchor="w", padx=12, pady=(9, 1))
         self.transport_hint = ctk.CTkLabel(
             build,
-            text="Dynamic activity names ready" if social_sdk_available() else "Legacy Discord naming",
+            text=(
+                ("SDK ready" if social_sdk_available() else "Legacy RPC")
+                if compact_sidebar
+                else (
+                    "Dynamic activity names ready"
+                    if social_sdk_available()
+                    else "Legacy Discord naming"
+                )
+            ),
             text_color=self.SUCCESS if social_sdk_available() else self.MUTED,
-            font=self._font(11),
+            font=self._font(10 if compact_sidebar else 11),
+            wraplength=sidebar_width - 32,
+            justify="left",
         )
         self.transport_hint.pack(anchor="w", padx=12, pady=(0, 9))
 
@@ -154,7 +208,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             variable=self.appearance_var,
             values=["System", "Light", "Dark"],
             command=self._on_appearance_changed,
-            width=210,
+            width=max(100, sidebar_width - 44),
             height=36,
             corner_radius=9,
             fg_color=self.SURFACE_ALT,
@@ -169,9 +223,10 @@ class ModernControlPanel(ResourceAwareControlPanel):
             footer,
             text="",
             text_color=self.MUTED,
-            font=self._font(10),
+            font=self._font(9 if compact_sidebar else 10),
             anchor="w",
-            height=14,
+            wraplength=max(100, sidebar_width - 44),
+            height=24 if compact_sidebar else 14,
         )
         self.appearance_status.pack(fill="x", padx=2, pady=(0, 7))
         ctk.CTkButton(
@@ -179,7 +234,8 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text="Save changes",
             image=icon("settings", 16),
             compound="left",
-            font=self._font(13, "bold"),
+            width=max(110, sidebar_width - 38),
+            font=self._font(13 if compact_sidebar else 13, "bold"),
             height=40,
             corner_radius=10,
             fg_color=self.PRIMARY,
@@ -213,7 +269,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text_color=self.MUTED,
             font=self._font(13),
             justify="left",
-            wraplength=820,
+            wraplength=self._content_wraplength,
         ).pack(anchor="w", pady=(5, 0))
 
         pill = ctk.CTkFrame(
@@ -262,13 +318,14 @@ class ModernControlPanel(ResourceAwareControlPanel):
             font=self._font(16, "bold"),
             justify="left",
             anchor="w",
-            wraplength=230,
+            wraplength=self._card_wraplength,
         )
         label.pack(fill="x", padx=16, pady=(0, 15))
         return card, label
 
     # --------------------------------------------------------------- dashboard
     def _build_dashboard(self):
+        compact_dashboard = dashboard_hero_stacked(self._content_wraplength)
         page = self._page(
             "dashboard",
             "Overview",
@@ -282,10 +339,17 @@ class ModernControlPanel(ResourceAwareControlPanel):
             border_width=1,
             border_color=self.BORDER,
         )
-        hero.pack(fill="x", padx=36, pady=(8, 10))
+        hero.pack(
+            fill="x",
+            padx=12 if compact_dashboard else 36,
+            pady=(8, 10),
+        )
 
         left = ctk.CTkFrame(hero, fg_color="transparent")
-        left.pack(side="left", fill="both", expand=True, padx=24, pady=22)
+        if compact_dashboard:
+            left.pack(side="top", fill="x", padx=16, pady=(16, 10))
+        else:
+            left.pack(side="left", fill="both", expand=True, padx=24, pady=22)
         ctk.CTkLabel(
             left,
             text="SERVICE",
@@ -306,12 +370,19 @@ class ModernControlPanel(ResourceAwareControlPanel):
             font=self._font(14),
             justify="left",
             anchor="w",
-            wraplength=680,
+            wraplength=(
+                max(160, self._content_wraplength - 64)
+                if compact_dashboard
+                else self._card_wraplength
+            ),
         )
         self.activity_label.pack(anchor="w", pady=(9, 0), fill="x")
 
         controls = ctk.CTkFrame(hero, fg_color="transparent")
-        controls.pack(side="right", padx=20, pady=18)
+        if compact_dashboard:
+            controls.pack(side="bottom", fill="x", padx=16, pady=(0, 14))
+        else:
+            controls.pack(side="right", padx=20, pady=18)
         self.start_button = ctk.CTkButton(
             controls,
             text="Start service",
@@ -325,7 +396,10 @@ class ModernControlPanel(ResourceAwareControlPanel):
             hover_color=self.PRIMARY_HOVER,
             command=self.start_service,
         )
-        self.start_button.pack(pady=4)
+        if compact_dashboard:
+            self.start_button.pack(fill="x", pady=4)
+        else:
+            self.start_button.pack(pady=4)
         self.stop_button = ctk.CTkButton(
             controls,
             text="Stop service",
@@ -340,21 +414,51 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text_color=self.DANGER,
             command=self.stop_service,
         )
-        self.stop_button.pack(pady=4)
+        if compact_dashboard:
+            self.stop_button.pack(fill="x", pady=4)
+        else:
+            self.stop_button.pack(pady=4)
 
         metrics = ctk.CTkFrame(page, fg_color="transparent")
-        metrics.pack(fill="x", padx=36, pady=4)
-        for column in range(4):
+        metrics.pack(
+            fill="x",
+            padx=12 if compact_dashboard else 36,
+            pady=4,
+        )
+        metric_columns = dashboard_metric_columns(self._content_wraplength)
+        for column in range(metric_columns):
             metrics.grid_columnconfigure(column, weight=1, uniform="metric")
 
-        rpc_card, self.rpc_value = self._status_card(metrics, "Discord RPC", "Disconnected")
-        rpc_card.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        browser_card, self.browser_value = self._status_card(metrics, "Browser Companion", "Checking…")
-        browser_card.grid(row=0, column=1, sticky="nsew", padx=5)
-        cs2_card, self.cs2_value = self._status_card(metrics, "Counter-Strike 2", "Checking…")
-        cs2_card.grid(row=0, column=2, sticky="nsew", padx=5)
-        app_card, self.identity_value = self._status_card(metrics, "Current app", "Waiting…")
-        app_card.grid(row=0, column=3, sticky="nsew", padx=(5, 0))
+        metric_specs = (
+            ("Discord RPC", "Disconnected", "rpc_value"),
+            ("Browser Companion", "Checking…", "browser_value"),
+            ("Counter-Strike 2", "Checking…", "cs2_value"),
+            ("Current app", "Waiting…", "identity_value"),
+        )
+        for index, (title, initial_value, attribute) in enumerate(metric_specs):
+            card, label = self._status_card(metrics, title, initial_value)
+            setattr(self, attribute, label)
+            row = index // metric_columns
+            column = index % metric_columns
+            if metric_columns == 2:
+                horizontal_pad = (0, 5) if column == 0 else (5, 0)
+            elif column == 0:
+                horizontal_pad = (0, 5)
+            elif column == metric_columns - 1:
+                horizontal_pad = (5, 0)
+            else:
+                horizontal_pad = 5
+            card.grid(
+                row=row,
+                column=column,
+                sticky="nsew",
+                padx=horizontal_pad,
+                pady=(
+                    (0, 6)
+                    if metric_columns == 2 and row == 0
+                    else (6, 0) if metric_columns == 2 else 0
+                ),
+            )
 
         runtime = self._section(page, "Runtime details")
         runtime_grid = ctk.CTkFrame(runtime, fg_color="transparent")
@@ -378,7 +482,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text_color=self.MUTED,
             font=self._font(13),
             justify="left",
-            wraplength=520,
+            wraplength=self._card_wraplength,
         )
         self.error_label.pack(anchor="w", pady=3)
 
@@ -408,18 +512,22 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text_color=self.MUTED,
             font=self._font(11),
             justify="left",
-            wraplength=420,
+            wraplength=self._card_wraplength,
         )
         self.transport_explainer.pack(anchor="w", padx=14, pady=(0, 11))
 
         quick = ctk.CTkFrame(page, fg_color="transparent")
-        quick.pack(fill="x", padx=36, pady=(7, 22))
+        quick.pack(
+            fill="x",
+            padx=12 if compact_dashboard else 36,
+            pady=(7, 22),
+        )
         for label, icon_name, command in (
             ("Test Discord", "discord", self.test_rpc),
             ("Run diagnostics", "diagnostics", self.run_diagnostics),
             ("Open logs", "activity", self.open_logs),
         ):
-            ctk.CTkButton(
+            quick_button = ctk.CTkButton(
                 quick,
                 text=label,
                 image=icon(icon_name, 16),
@@ -433,7 +541,11 @@ class ModernControlPanel(ResourceAwareControlPanel):
                 border_width=1,
                 border_color=self.BORDER,
                 text_color=self.TEXT,
-            ).pack(side="left", padx=(0, 9))
+            )
+            if compact_dashboard:
+                quick_button.pack(fill="x", pady=(0, 8))
+            else:
+                quick_button.pack(side="left", padx=(0, 9))
 
     def _on_appearance_changed(self, value: str) -> None:
         """Apply and persist the appearance preference immediately."""
@@ -467,7 +579,10 @@ class ModernControlPanel(ResourceAwareControlPanel):
         for page_name, button in self.nav.items():
             selected = page_name == name
             button.configure(
-                font=self._font(14, "bold" if selected else "normal"),
+                font=self._font(
+                    13 if self._sidebar_width < 220 else 14,
+                    "bold" if selected else "normal",
+                ),
                 border_width=1 if selected else 0,
                 border_color=self.PRIMARY if selected else self.SIDEBAR,
             )
