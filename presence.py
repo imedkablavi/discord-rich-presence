@@ -363,9 +363,16 @@ class PresenceBuilder:
             ct_score = int(activity.get('ct_score', 0) or 0)
             t_score = int(activity.get('t_score', 0) or 0)
             mode_key = str(activity.get('mode_key', '') or '').lower()
+            phase_name = str(activity.get('phase_name', '') or '').strip()
+            is_cs2 = game_name.strip().casefold() in {
+                'counter-strike 2', 'counter strike 2', 'cs2'
+            }
 
             details = ' · '.join(part for part in (game_name, mode) if part)
-            state_parts = [part for part in (map_name, team_name) if part]
+            # Put current round/map phase in the visible state so an active
+            # match is more informative than just the game title. GSI does not
+            # expose whether the matchmaking queue is currently searching.
+            state_parts = [part for part in (phase_name, map_name, team_name) if part]
             score_is_meaningful = (
                 mode_key in {
                     'competitive', 'casual', 'scrimcomp2v2', 'scrimpcomp2v2',
@@ -376,12 +383,25 @@ class PresenceBuilder:
             )
             if score_is_meaningful:
                 state_parts.append(f'{ct_score}–{t_score}')
-            state = ' · '.join(state_parts) or launcher
+            state = ' · '.join(state_parts) or (
+                'Matchmaking state unavailable' if is_cs2 else launcher
+            )
         elif self._is_squad_activity(activity, game_name):
             details, state = self._squad_presence_text(activity, game_name, launcher)
         else:
             details = game_name
-            state = source or launcher
+            normalized_game = game_name.strip().casefold()
+            if normalized_game in {"counter-strike 2", "counter strike 2", "cs2"}:
+                # Do not label CS2 as merely "Steam" when GSI has not supplied
+                # match context. Queue status cannot be inferred from absence
+                # of a map; report the missing signal instead of guessing.
+                state = "Matchmaking state unavailable"
+            elif normalized_game == "brawlhalla":
+                # Brawlhalla's public API exposes account/statistics data, not
+                # the current local match. Do not fabricate a map or mode.
+                state = "Live match details unavailable"
+            else:
+                state = source or launcher
 
         payload: Dict[str, Any] = {
             'activity_type': ActivityType.PLAYING,

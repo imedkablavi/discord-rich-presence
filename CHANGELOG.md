@@ -6,6 +6,7 @@
 
 - Added the modern control panel with clearer Overview, Integrations, Activity, Privacy, Settings, Diagnostics and About pages.
 - Added application and navigation artwork without requiring remote icon-font dependencies.
+- Improved Linux UI font selection, small-label sizing and secondary-text contrast for easier reading.
 - Improved Arabic text rendering with deterministic shaping, BiDi handling and broader font fallbacks.
 - Added single-instance control for the GUI and service lifecycle.
 - Added Stable and Preview update-channel controls to the application UI.
@@ -26,6 +27,8 @@
 - Added bounded, read-only War Thunder enrichment from fixed local `127.0.0.1:8111` telemetry. Presence may include branch, a conservative vehicle label and mission/battle state. Tactical map objects, chat and HUD/damage streams are not used.
 - Added bounded Squad local-log enrichment with strict evidence and staleness rules.
 - Kept enhanced integrations for Counter-Strike 2 GSI, League local Live Client data, FiveM companion state and Minecraft Fabric companion state.
+- Improved CS2 GSI diagnostics for rejected authentication tokens and configured every discovered Steam library; presence now shows reported match phases and does not invent matchmaking state.
+- Made unsupported live-match details explicit for Brawlhalla rather than presenting the Steam launcher as game state or guessing a map/mode.
 - Fixed `MinecraftLauncher` so the launcher is not mistaken for the running Minecraft game.
 - Added application-specific artwork aliases for common games, launchers, browsers, editors, terminals and media applications.
 
@@ -45,6 +48,7 @@
 - Unsafe optional URLs fail soft without preventing the service from starting.
 - Persistent logs avoid complete Rich Presence payloads and sensitive fields.
 - Added dependency auditing, high-severity Bandit checks and privacy/security regression tests to CI.
+- Upgraded Pillow to the security-fixed 13.x line and aligned the supported Python baseline to 3.11+.
 
 ### Reliability and memory
 

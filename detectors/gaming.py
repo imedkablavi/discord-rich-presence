@@ -120,6 +120,16 @@ class GamingDetector:
         'gungametrbomb', 'demolition',
     }
 
+    # GSI exposes a match/map phase, not whether matchmaking queue search is
+    # running. These are the well-established map.phase values; do not invent
+    # a "menu" or "searching" phase from an absent map object.
+    CS2_PHASE_NAMES = {
+        'warmup': 'Warmup',
+        'live': 'In match',
+        'intermission': 'Round break',
+        'gameover': 'Match over',
+    }
+
     CS2_MAP_NAMES = {
         'de_mirage': 'Mirage',
         'de_dust2': 'Dust II',
@@ -233,14 +243,42 @@ class GamingDetector:
     def _auto_configure_cs2_gsi(self) -> None:
         try:
             locations = discover_cs2_cfg_dirs()
-            if not locations:
-                return
-            install_gsi_config(self.config, locations[0])
-            self.logger.info('Counter-Strike 2 GSI integration is configured')
-        except (OSError, ValueError):
+        except OSError as exc:
+            self.logger.warning('Could not discover CS2 config directories: %s', exc)
+            return
+        if not locations:
+            self.logger.info(
+                'CS2 GSI config directory not found; use scripts/install-cs2-gsi.py '
+                'with --list to inspect Steam libraries'
+            )
+            return
+
+        # A machine can have more than one Steam library (or installation).
+        # Install the same authenticated endpoint config in every discovered
+        # CS2 cfg directory so the game cannot keep using a stale token from
+        # a different library.
+        installed = 0
+        for location in locations:
+            try:
+                install_gsi_config(self.config, location)
+                installed += 1
+            except (OSError, ValueError) as exc:
+                self.logger.warning(
+                    'Could not configure CS2 GSI in %s: %s',
+                    location,
+                    exc,
+                )
+
+        if installed:
+            self.logger.info(
+                'Counter-Strike 2 GSI configured in %d install location(s). '
+                'Restart CS2 if it was already running.',
+                installed,
+            )
+        else:
             self.logger.warning(
-                'Counter-Strike 2 GSI auto-setup could not write the game config; '
-                'use scripts/install-cs2-gsi.py for manual setup'
+                'CS2 GSI auto-setup could not write any game config; '
+                'use scripts/install-cs2-gsi.py --list to inspect detected locations'
             )
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -503,6 +541,8 @@ class GamingDetector:
 
         map_key = str(snapshot.get('map', '') or '').lower()
         mode_key = str(snapshot.get('mode', '') or '').lower()
+        phase_key = str(snapshot.get('map_phase', '') or '').strip().lower()
+        phase_name = self.CS2_PHASE_NAMES.get(phase_key, '')
         team = str(snapshot.get('team', '') or '').upper()
         map_name = self._friendly_map(map_key)
         mode_name = self.CS2_MODE_NAMES.get(mode_key, self._friendly_label(mode_key))
@@ -514,6 +554,11 @@ class GamingDetector:
         score_is_meaningful = mode_key in self.CS2_ROUND_SCORE_MODES or ct_score > 0 or t_score > 0
         if map_name and score_is_meaningful:
             state_parts.append(f'CT {ct_score}–{t_score} T')
+        # When the game reports a phase but has no map/team yet, avoid the
+        # unhelpful "Steam" fallback. This is intentionally not called
+        # "Searching for match": official GSI does not disclose queue state.
+        if not state_parts and phase_name:
+            state_parts.append(phase_name)
 
         activity.update({
             'gsi': True,
@@ -534,6 +579,7 @@ class GamingDetector:
                 or ''
             ),
             'player_activity': str(snapshot.get('player_activity', '') or ''),
+            'phase_name': phase_name,
         })
 
     @classmethod
