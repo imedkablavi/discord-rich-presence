@@ -102,6 +102,6 @@ Runtime state is used by the control panel and instance guard. It may include a 
 
 Terminal command tracking is optional. Bash, Zsh and PowerShell hooks write commands to local per-shell cache files. The detector attempts to match the focused terminal process tree before using a command entry.
 
-Raw command cache entries expire according to `rules.terminal_command_ttl_secs`; the hardened default is 900 seconds. Expired PID-scoped entries are deleted and the cache remains bounded.
+Raw command cache entries expire according to `rules.terminal_command_ttl_secs`; the hardened default is 900 seconds. Expired PID-scoped entries are deleted and the cache remains bounded. Set the TTL to `0` to disable command publication and remove retained command-cache entries. Cleanup continues while another app is focused or the terminal detector is disabled, so expired commands are not left indefinitely just because a terminal is not foreground.
 
 Do not enable terminal tracking on a machine where publishing command text to Discord is unacceptable, even with redaction enabled.
