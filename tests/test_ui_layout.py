@@ -59,3 +59,28 @@ def test_sidebar_width_has_safe_fallback_for_invalid_width():
     from ui_layout import sidebar_width_for_screen
 
     assert sidebar_width_for_screen("bad") == 252
+
+
+
+@pytest.mark.parametrize(
+    ("content_width", "expected"),
+    [
+        (0, 2),
+        (320, 2),
+        (578, 2),
+        (639, 2),
+        (640, 4),
+        (702, 4),
+        (1100, 4),
+    ],
+)
+def test_dashboard_metrics_choose_columns_from_available_content(content_width, expected):
+    from ui_layout import dashboard_metric_columns
+
+    assert dashboard_metric_columns(content_width) == expected
+
+
+def test_dashboard_metric_columns_defaults_to_compact_for_invalid_width():
+    from ui_layout import dashboard_metric_columns
+
+    assert dashboard_metric_columns("unavailable") == 2
