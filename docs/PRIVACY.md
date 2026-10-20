@@ -32,7 +32,7 @@ If a page title itself requires redaction, the associated URL is removed.
 
 Recognized social and messaging services use a stricter contract regardless of ordinary browser URL mode. Conversation names, contact names, profile/post identifiers, deep social links and social-page media metadata are removed before Presence building.
 
-Private or incognito foreground windows are handled conservatively and do not reuse a normal-tab Companion snapshot.
+For private/incognito tabs, the extension sends only browser identity, private state and focus/visibility flags; page URL, title, service and media metadata are not transmitted. The bridge separately strips those fields from any record marked private, including older or malformed extension snapshots.
 
 ## What reaches Discord
 
