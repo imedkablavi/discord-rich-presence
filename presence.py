@@ -381,7 +381,13 @@ class PresenceBuilder:
             details, state = self._squad_presence_text(activity, game_name, launcher)
         else:
             details = game_name
-            state = source or launcher
+            # Brawlhalla currently has foreground-process detection but no
+            # supported live-match adapter in this project. Avoid implying that
+            # the storefront itself is the activity state for this title.
+            if game_name.strip().casefold() == "brawlhalla":
+                state = "In game"
+            else:
+                state = source or launcher
 
         payload: Dict[str, Any] = {
             'activity_type': ActivityType.PLAYING,

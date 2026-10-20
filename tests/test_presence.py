@@ -234,3 +234,15 @@ def test_squad_strict_privacy_keeps_generic_game_contract(tmp_path: Path, monkey
     # Strict mode strips the game identity before game-specific enrichment, so
     # CYBREX does not even read the local Squad log in this privacy mode.
     assert calls['count'] == 0
+
+def test_generic_steam_game_uses_useful_state_instead_of_repeating_storefront(tmp_path: Path):
+    payload = _builder(tmp_path).build({
+        'type': 'gaming',
+        'game_name': 'Brawlhalla',
+        'launcher': 'Steam',
+        'game_source': 'Steam',
+        'is_game': True,
+    })
+
+    assert payload['details'] == 'Brawlhalla'
+    assert payload['state'] == 'In game'
