@@ -8,8 +8,8 @@ pystray>=0.19.5,<1
 # out until its Python/runtime compatibility is part of the supported matrix.
 Pillow>=12.3,<13
 psutil>=7.2.2,<8
-# Embedded CA bundle for frozen updater HTTPS across Linux distributions.
-certifi==2026.10.18
+# Pin a current CA bundle for frozen updater HTTPS across Linux distributions.
+certifi==2026.10.19
 
 # Cross-platform Arabic shaping/BiDi for Tk-based UI text. Tk rendering on
 # several Linux desktop stacks does not shape or order Arabic consistently.
