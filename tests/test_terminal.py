@@ -118,3 +118,16 @@ def test_stale_command_cache_is_cleaned_when_no_foreground_window_exists(tmp_pat
 
     assert detector.detect({}) is None
     assert not command_file.exists()
+
+
+
+def test_clear_command_cache_removes_pid_scoped_and_legacy_files(tmp_path):
+    detector = _detector(tmp_path)
+    pid_file = detector.command_dir / f'{os.getpid()}.txt'
+    pid_file.write_text('private-command\n', encoding='utf-8')
+    detector.cmd_file.write_text('legacy-private-command\n', encoding='utf-8')
+
+    detector.clear_command_cache()
+
+    assert not pid_file.exists()
+    assert not detector.cmd_file.exists()
