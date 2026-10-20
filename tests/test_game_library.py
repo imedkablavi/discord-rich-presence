@@ -135,16 +135,16 @@ def test_library_counts():
 def test_legacy_nested_gamer_mode_config_migrates_without_losing_preferences(tmp_path):
     path = tmp_path / 'legacy-gamer-mode.yaml'
     path.write_text(
-        'gamer_mode:\\n'
-        '  enabled: false\\n'
-        '  previous_detectors: {}\\n'
-        'gaming:\\n'
-        '  gamer_mode:\\n'
-        '    enabled: true\\n'
-        '    previous_detectors:\\n'
-        '      media: false\\n'
-        '      browser: true\\n'
-        '      gaming: true\\n',
+        'gamer_mode:\n'
+        '  enabled: false\n'
+        '  previous_detectors: {}\n'
+        'gaming:\n'
+        '  gamer_mode:\n'
+        '    enabled: true\n'
+        '    previous_detectors:\n'
+        '      media: false\n'
+        '      browser: true\n'
+        '      gaming: true\n',
         encoding='utf-8',
     )
 
@@ -167,10 +167,10 @@ def test_legacy_nested_gamer_mode_config_migrates_without_losing_preferences(tmp
 def test_gamer_mode_rejects_invalid_saved_detector_snapshot(tmp_path):
     path = tmp_path / 'invalid-gamer-mode.yaml'
     path.write_text(
-        'gamer_mode:\\n'
-        '  previous_detectors:\\n'
-        '    browser: yes\\n'
-        '    arbitrary-detector: true\\n',
+        'gamer_mode:\n'
+        '  previous_detectors:\n'
+        '    browser: yes\n'
+        '    arbitrary-detector: true\n',
         encoding='utf-8',
     )
     import pytest
