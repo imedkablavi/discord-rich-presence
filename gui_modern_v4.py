@@ -11,7 +11,11 @@ from config import Config
 from gui_modern_v3 import ModernControlPanel as ResourceAwareControlPanel
 from social_sdk_transport import social_sdk_available
 from ui_icons import icon
-from ui_layout import control_panel_geometry, sidebar_width_for_screen
+from ui_layout import (
+    control_panel_geometry,
+    dashboard_metric_columns,
+    sidebar_width_for_screen,
+)
 
 
 class ModernControlPanel(ResourceAwareControlPanel):
@@ -392,17 +396,36 @@ class ModernControlPanel(ResourceAwareControlPanel):
 
         metrics = ctk.CTkFrame(page, fg_color="transparent")
         metrics.pack(fill="x", padx=36, pady=4)
-        for column in range(4):
+        metric_columns = dashboard_metric_columns(self._content_wraplength)
+        for column in range(metric_columns):
             metrics.grid_columnconfigure(column, weight=1, uniform="metric")
 
-        rpc_card, self.rpc_value = self._status_card(metrics, "Discord RPC", "Disconnected")
-        rpc_card.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        browser_card, self.browser_value = self._status_card(metrics, "Browser Companion", "Checking…")
-        browser_card.grid(row=0, column=1, sticky="nsew", padx=5)
-        cs2_card, self.cs2_value = self._status_card(metrics, "Counter-Strike 2", "Checking…")
-        cs2_card.grid(row=0, column=2, sticky="nsew", padx=5)
-        app_card, self.identity_value = self._status_card(metrics, "Current app", "Waiting…")
-        app_card.grid(row=0, column=3, sticky="nsew", padx=(5, 0))
+        metric_specs = (
+            ("Discord RPC", "Disconnected", "rpc_value"),
+            ("Browser Companion", "Checking…", "browser_value"),
+            ("Counter-Strike 2", "Checking…", "cs2_value"),
+            ("Current app", "Waiting…", "identity_value"),
+        )
+        for index, (title, initial_value, attribute) in enumerate(metric_specs):
+            card, label = self._status_card(metrics, title, initial_value)
+            setattr(self, attribute, label)
+            row = index // metric_columns
+            column = index % metric_columns
+            if metric_columns == 2:
+                horizontal_pad = (0, 5) if column == 0 else (5, 0)
+            elif column == 0:
+                horizontal_pad = (0, 5)
+            elif column == metric_columns - 1:
+                horizontal_pad = (5, 0)
+            else:
+                horizontal_pad = 5
+            card.grid(
+                row=row,
+                column=column,
+                sticky="nsew",
+                padx=horizontal_pad,
+                pady=(0, 6) if row == 0 and metric_columns == 2 else (6, 0),
+            )
 
         runtime = self._section(page, "Runtime details")
         runtime_grid = ctk.CTkFrame(runtime, fg_color="transparent")
