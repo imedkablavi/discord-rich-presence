@@ -364,6 +364,20 @@ class DiscordRichPresenceService:
     def detect_activity(self) -> Optional[Dict[str, Any]]:
         self._reload_config_if_changed()
 
+        # Resolve the foreground surface before building even a manual override.
+        # Lock-screen privacy is a hard gate and must not be bypassed by Override
+        # Presence. With no reported window, clean expired shell-command cache data.
+        window_info = self.window_detector.get_active_window()
+        if not window_info:
+            self.terminal_detector.cleanup_command_cache()
+        elif (
+            self.config.get('rules.clear_on_lock_screen', True)
+            and self._is_lock_screen_window(window_info)
+        ):
+            self.terminal_detector.clear_command_cache()
+            self.logger.debug('Lock screen detected; clearing terminal cache and suppressing presence')
+            return None
+
         if self.config.get('override.enabled', False):
             override = self.config.get('override', {}) or {}
             payload: Dict[str, Any] = {
@@ -410,11 +424,7 @@ class DiscordRichPresenceService:
                     payload.pop(key, None)
             return payload
 
-        window_info = self.window_detector.get_active_window()
         if not window_info:
-            return None
-        if self.config.get('rules.clear_on_lock_screen', True) and self._is_lock_screen_window(window_info):
-            self.logger.debug('Lock screen detected; suppressing presence')
             return None
 
         app_name = str(window_info.get('app_name', '')).lower()
