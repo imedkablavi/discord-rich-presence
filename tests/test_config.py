@@ -225,3 +225,11 @@ def test_ui_appearance_preference_is_persisted_and_validated(tmp_path: Path):
 
     with pytest.raises(ValueError, match='ui.appearance'):
         Config(invalid)
+
+
+
+def test_example_config_keeps_terminal_tracking_opt_in():
+    example_path = Path(__file__).resolve().parents[1] / 'config.example.yaml'
+    config = Config(example_path)
+
+    assert config.get('rules.enabled_detectors.terminal') is False
