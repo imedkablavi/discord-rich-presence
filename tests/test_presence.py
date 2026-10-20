@@ -235,7 +235,7 @@ def test_squad_strict_privacy_keeps_generic_game_contract(tmp_path: Path, monkey
     # CYBREX does not even read the local Squad log in this privacy mode.
     assert calls['count'] == 0
 
-def test_generic_steam_game_uses_useful_state_instead_of_repeating_storefront(tmp_path: Path):
+def test_brawlhalla_does_not_invent_live_match_details(tmp_path: Path):
     payload = _builder(tmp_path).build({
         'type': 'gaming',
         'game_name': 'Brawlhalla',
@@ -245,4 +245,18 @@ def test_generic_steam_game_uses_useful_state_instead_of_repeating_storefront(tm
     })
 
     assert payload['details'] == 'Brawlhalla'
-    assert payload['state'] == 'In game'
+    assert payload['state'] == 'Live match details unavailable'
+
+
+def test_cs2_without_gsi_does_not_fall_back_to_steam_state(tmp_path: Path):
+    payload = _builder(tmp_path).build({
+        'type': 'gaming',
+        'game_name': 'Counter-Strike 2',
+        'launcher': 'Steam',
+        'game_source': 'Steam',
+        'steam_appid': 730,
+        'is_game': True,
+    })
+
+    assert payload['details'] == 'Counter-Strike 2'
+    assert payload['state'] == 'Matchmaking state unavailable'
