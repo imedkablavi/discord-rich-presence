@@ -106,3 +106,27 @@ def test_compact_window_leaves_space_for_desktop_chrome(
     assert result.y >= 0
     assert result.x + result.width <= screen_width
     assert result.y + result.height <= screen_height
+
+
+
+@pytest.mark.parametrize(
+    ("content_width", "expected"),
+    [
+        (0, True),
+        (320, True),
+        (546, True),
+        (639, True),
+        (640, False),
+        (702, False),
+    ],
+)
+def test_dashboard_hero_stacks_when_content_is_compact(content_width, expected):
+    from ui_layout import dashboard_hero_stacked
+
+    assert dashboard_hero_stacked(content_width) is expected
+
+
+def test_dashboard_hero_uses_compact_layout_for_invalid_width():
+    from ui_layout import dashboard_hero_stacked
+
+    assert dashboard_hero_stacked(None) is True
