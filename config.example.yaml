@@ -27,6 +27,12 @@ system:
   start_minimized: false
   auto_start: false
 
+# Game-only mode temporarily suppresses non-gaming detectors.
+# Prior detector preferences are saved internally and restored when disabled.
+gamer_mode:
+  enabled: false
+  startup_profile: default
+
 browser_companion:
   # Optional Chromium/Firefox extension bridge. It listens on loopback only.
   enabled: true
