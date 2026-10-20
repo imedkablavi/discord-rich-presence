@@ -157,7 +157,7 @@ def test_cs2_gaming_detector_formats_mode_map_team_and_score(tmp_path):
 
     payload = PresenceBuilder(config).build(activity)
     assert payload['details'] == 'Counter-Strike 2 · Competitive'
-    assert payload['state'] == 'Mirage · Counter-Terrorists · 8–6'
+    assert payload['state'] == 'In match · Mirage · Counter-Terrorists · 8–6'
     assert payload['large_text'] == 'Counter-Strike 2'
     assert payload['large_image'].endswith('/steam/apps/730/header.jpg')
     assert payload['small_text'] == 'Steam'
@@ -187,7 +187,7 @@ def test_cs2_steam_app_alias_and_deathmatch_omit_fake_round_score(tmp_path):
 
     payload = PresenceBuilder(config).build(activity)
     assert payload['details'] == 'Counter-Strike 2 · Deathmatch'
-    assert payload['state'] == 'Dust II · Terrorists'
+    assert payload['state'] == 'In match · Dust II · Terrorists'
 
 
 def test_cs2_gsi_settings_hot_reload_without_service_restart(tmp_path, monkeypatch):
@@ -241,13 +241,13 @@ def test_cs2_gsi_status_reports_auth_error_and_clears_after_valid_payload(tmp_pa
     assert status['auth_error'] is False
 
 
-def test_cs2_gsi_menu_phase_is_shown_without_claiming_matchmaking(tmp_path):
+def test_cs2_gsi_does_not_invent_menu_or_matchmaking_phase(tmp_path):
     config = _config(tmp_path)
     detector = GamingDetector(config)
     detector.cs2_gsi = SimpleNamespace(latest=lambda: {
         'map': '',
         'mode': '',
-        'map_phase': 'menu',
+        'map_phase': '',
         'round': 0,
         'team': '',
         'player_activity': '',
@@ -257,11 +257,11 @@ def test_cs2_gsi_menu_phase_is_shown_without_claiming_matchmaking(tmp_path):
 
     activity = detector.detect({'app_name': 'cs2', 'title': 'Counter-Strike 2'})
     assert activity is not None
-    assert activity['phase_name'] == 'In menu'
+    assert activity['phase_name'] == ''
 
     payload = PresenceBuilder(config).build(activity)
     assert payload['details'] == 'Counter-Strike 2'
-    assert payload['state'] == 'In menu'
+    assert payload['state'] == 'Matchmaking state unavailable'
 
 
 def test_cs2_auto_configures_every_detected_steam_library(tmp_path, monkeypatch):
