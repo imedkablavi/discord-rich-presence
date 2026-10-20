@@ -43,7 +43,15 @@ class ModernControlPanel(ResourceAwareControlPanel):
 
     # ---------------------------------------------------------------- layout
     def _build_sidebar(self):
-        sidebar_width = sidebar_width_for_screen(self.winfo_screenwidth())
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        sidebar_width = sidebar_width_for_screen(screen_width)
+        layout = control_panel_geometry(screen_width, screen_height)
+        self._content_wraplength = max(220, layout.width - sidebar_width - 72)
+        self._card_wraplength = max(
+            128,
+            min(230, (self._content_wraplength - 60) // 2),
+        )
         compact_sidebar = sidebar_width < 220
         self._sidebar_width = sidebar_width
         sidebar = ctk.CTkFrame(
@@ -248,7 +256,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text_color=self.MUTED,
             font=self._font(13),
             justify="left",
-            wraplength=820,
+            wraplength=self._content_wraplength,
         ).pack(anchor="w", pady=(5, 0))
 
         pill = ctk.CTkFrame(
@@ -297,7 +305,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             font=self._font(16, "bold"),
             justify="left",
             anchor="w",
-            wraplength=230,
+            wraplength=self._card_wraplength,
         )
         label.pack(fill="x", padx=16, pady=(0, 15))
         return card, label
@@ -341,7 +349,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             font=self._font(14),
             justify="left",
             anchor="w",
-            wraplength=680,
+            wraplength=self._card_wraplength,
         )
         self.activity_label.pack(anchor="w", pady=(9, 0), fill="x")
 
@@ -413,7 +421,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text_color=self.MUTED,
             font=self._font(13),
             justify="left",
-            wraplength=520,
+            wraplength=self._card_wraplength,
         )
         self.error_label.pack(anchor="w", pady=3)
 
@@ -443,7 +451,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text_color=self.MUTED,
             font=self._font(11),
             justify="left",
-            wraplength=420,
+            wraplength=self._card_wraplength,
         )
         self.transport_explainer.pack(anchor="w", padx=14, pady=(0, 11))
 
