@@ -77,3 +77,13 @@ def dashboard_metric_columns(content_width: int) -> int:
     except (TypeError, ValueError, OverflowError):
         width = 0
     return 2 if width < 640 else 4
+
+
+
+def dashboard_hero_stacked(content_width: int) -> bool:
+    """Stack service status and action buttons when horizontal space is tight."""
+    try:
+        width = max(0, int(content_width))
+    except (TypeError, ValueError, OverflowError):
+        width = 0
+    return width < 640
