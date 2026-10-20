@@ -14,6 +14,7 @@ from game_library import (
     gamer_mode_enabled,
     is_game_enabled,
     library_counts,
+    library_empty_message,
     set_game_enabled,
     set_gamer_mode,
     scan_library_safely,
@@ -33,6 +34,7 @@ class GameLibraryWindow(ctk.CTk):
         self.config = resolved_config
         self.entries: list[GameLibraryEntry] = []
         self._loading = False
+        self._scan_error: Optional[str] = None
         self._closed = False
         # Worker threads publish plain Python results only. All Tk operations
         # stay on the main/UI thread to avoid calls into a destroyed interpreter.
@@ -152,6 +154,7 @@ class GameLibraryWindow(ctk.CTk):
             return
         self._loading = False
         self.refresh_button.configure(state='normal', text='Refresh')
+        self._scan_error = error
         if error:
             self.entries = []
             self.status.configure(text=f'Game library scan failed: {error}')
@@ -176,7 +179,11 @@ class GameLibraryWindow(ctk.CTk):
 
         entries = self._filtered_entries()
         if not entries:
-            message = 'No matching games.' if self.entries else 'No supported local game installs were found.'
+            message = library_empty_message(
+                len(self.entries),
+                self.search_var.get(),
+                self._scan_error,
+            )
             ctk.CTkLabel(self.list_frame, text=message).grid(
                 row=0, column=0, padx=24, pady=32, sticky='w'
             )
