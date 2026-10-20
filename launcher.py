@@ -71,6 +71,27 @@ def _handle_cs2_setup_command() -> Optional[int]:
     return 0
 
 
+def _stop_active_service_for_update(runtime_state_factory=None) -> bool:
+    """Stop the currently running service before replacing its executable.
+
+    A failed/indeterminate stop must block self-update: continuing could leave
+    an old service process running after the executable on disk has changed.
+    The injectable factory keeps this lifecycle boundary testable without
+    touching a real user session.
+    """
+    try:
+        if runtime_state_factory is None:
+            from runtime_state import RuntimeState
+
+            runtime_state_factory = RuntimeState
+        runtime = runtime_state_factory()
+        if not runtime.read_active():
+            return True
+        return runtime.terminate_active(timeout=5) is True
+    except Exception:
+        return False
+
+
 def _handle_update_command() -> Optional[int]:
     check_only = '--check-update' in sys.argv
     install = '--update' in sys.argv
@@ -93,13 +114,11 @@ def _handle_update_command() -> Optional[int]:
         if not getattr(sys, 'frozen', False):
             raise UpdateError('Automatic installation is only available in packaged builds.')
 
-        try:
-            from runtime_state import RuntimeState
-            runtime = RuntimeState()
-            if runtime.read_active():
-                runtime.terminate_active(timeout=5)
-        except Exception:
-            pass
+        if not _stop_active_service_for_update():
+            raise UpdateError(
+                'Could not safely stop the running CYBREX service. '
+                'Close the current CYBREX session and try the update again.'
+            )
 
         result = install_update(info, restart_args=['--gui'])
         if result == 'scheduled':
