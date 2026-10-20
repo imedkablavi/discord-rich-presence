@@ -66,3 +66,13 @@ def sidebar_width_for_screen(screen_width: int) -> int:
     if width < 1100:
         return 210
     return 252
+
+
+
+def dashboard_metric_columns(content_width: int) -> int:
+    """Choose a readable dashboard metric grid for the available content width."""
+    try:
+        width = max(0, int(content_width))
+    except (TypeError, ValueError, OverflowError):
+        width = 0
+    return 2 if width < 640 else 4
