@@ -16,6 +16,7 @@ from game_library import (
     library_counts,
     set_game_enabled,
     set_gamer_mode,
+    scan_library_safely,
 )
 
 
@@ -108,14 +109,6 @@ class GameLibraryWindow(ctk.CTk):
         self._closed = True
         self.destroy()
 
-    @staticmethod
-    def _scan_library() -> tuple[list[GameLibraryEntry], Optional[str]]:
-        """Scan local manifests without touching Tk from the worker thread."""
-        try:
-            return discover_games(), None
-        except Exception as exc:  # UI boundary: return one contained error.
-            return [], str(exc)
-
     def _poll_refresh_results(self) -> None:
         """Apply completed scans on the Tk main thread."""
         if self._closed:
@@ -149,7 +142,7 @@ class GameLibraryWindow(ctk.CTk):
         self.status.configure(text='Scanning Steam, Epic and Heroic metadata locally…')
 
         def worker() -> None:
-            result = self._scan_library()
+            result = scan_library_safely()
             self._refresh_results.put(result)
 
         import threading
