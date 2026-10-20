@@ -227,6 +227,7 @@ def test_cs2_gsi_settings_hot_reload_without_service_restart(tmp_path, monkeypat
     assert stop_calls
     assert remove_calls
 
+
 def test_cs2_gsi_status_reports_auth_error_and_clears_after_valid_payload(tmp_path):
     bridge = CS2GSIBridge(_config(tmp_path))
 
