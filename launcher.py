@@ -85,9 +85,43 @@ def _stop_active_service_for_update(runtime_state_factory=None) -> bool:
 
             runtime_state_factory = RuntimeState
         runtime = runtime_state_factory()
-        if not runtime.read_active():
+        if runtime.read_active():
+            return runtime.terminate_active(timeout=5) is True
+
+        # read_active() intentionally returns None for both an absent lock and
+        # an invalid/stale runtime record. Do not mistake an unreadable lock for
+        # proof that no service is running: it could hide a live older process.
+        lock_path = getattr(runtime, "lock_path", None)
+        if lock_path is None:
+            # Lightweight injected test doubles may only model the public
+            # read_active/terminate_active contract.
             return True
-        return runtime.terminate_active(timeout=5) is True
+        try:
+            lock_path = Path(lock_path)
+            try:
+                lock_path.stat()
+            except FileNotFoundError:
+                return True
+            except OSError:
+                return False
+
+            lock_record = runtime._read_json(lock_path)
+            if not isinstance(lock_record, dict):
+                return False
+            try:
+                pid = int(lock_record["pid"])
+                create_time = float(lock_record["create_time"])
+            except (KeyError, TypeError, ValueError):
+                return False
+            if pid <= 0 or create_time <= 0:
+                return False
+
+            # A parseable record that no longer matches a live process is a
+            # stale PID lock, not an active service. A live/indeterminate match
+            # means we must refuse update because read_active() was inconclusive.
+            return runtime._same_process(lock_record) is False
+        except Exception:
+            return False
     except Exception:
         return False
 
