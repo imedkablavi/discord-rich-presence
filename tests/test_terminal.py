@@ -78,3 +78,30 @@ def test_command_cache_read_is_bounded_for_oversized_files(tmp_path):
 
     assert command == 'x' * detector._MAX_COMMAND_CHARS
     assert len(command) <= detector._MAX_COMMAND_CHARS
+
+
+
+def test_zero_ttl_disables_command_publication_and_deletes_cache(tmp_path):
+    detector = _detector(tmp_path)
+    detector.config.set('rules.terminal_command_ttl_secs', 0)
+    command_file = detector.command_dir / f'{os.getpid()}.txt'
+    command_file.write_text('deploy --token secret-value\n', encoding='utf-8')
+    detector.cmd_file.write_text('legacy-secret-value\n', encoding='utf-8')
+
+    assert detector._ttl() == 0
+    assert detector._get_last_command(os.getpid()) == ''
+    assert not command_file.exists()
+    assert not detector.cmd_file.exists()
+
+
+def test_expired_command_cache_is_cleaned_while_terminal_detector_is_disabled(tmp_path):
+    detector = _detector(tmp_path)
+    detector.config.set('rules.enabled_detectors.terminal', False)
+    detector.config.set('rules.terminal_command_ttl_secs', 2)
+    command_file = detector.command_dir / '424242.txt'
+    command_file.write_text('private-command\n', encoding='utf-8')
+    old = time.time() - 10
+    os.utime(command_file, (old, old))
+
+    assert detector.detect({'app_name': 'Firefox', 'title': 'news'}) is None
+    assert not command_file.exists()
