@@ -4,14 +4,14 @@ cd /d "%~dp0"
 
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python 3.10+ is required and was not found in PATH.
+    echo [ERROR] Python 3.11+ is required and was not found in PATH.
     pause
     exit /b 1
 )
 
-python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
+python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python 3.10 or newer is required.
+    echo [ERROR] Python 3.11 or newer is required.
     pause
     exit /b 1
 )
@@ -19,7 +19,7 @@ if errorlevel 1 (
 if not exist ".venv\Scripts\python.exe" goto :create_venv
 
 REM Existing clones may contain a venv created with an older Python.
-.venv\Scripts\python.exe -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
+.venv\Scripts\python.exe -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Existing virtual environment uses an unsupported Python. Recreating it...
     rmdir /s /q .venv
