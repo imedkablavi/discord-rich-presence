@@ -25,7 +25,10 @@ _ENHANCED_GAMES = {
     'counter-strike 2',
     'counter-strike: global offensive',
     'league of legends',
+    'war thunder',
+    'squad',
 }
+_ENHANCED_STEAM_APP_IDS = {'730', '236390', '393380'}
 
 
 @dataclass(frozen=True)
@@ -85,7 +88,7 @@ def discover_games() -> list[GameLibraryEntry]:
             name=name[:160],
             source='Steam',
             app_id=appid,
-            enhanced=_is_enhanced(name) or appid == '730',
+            enhanced=_is_enhanced(name) or appid in _ENHANCED_STEAM_APP_IDS,
             curated=popular.contains(name),
         ))
 
