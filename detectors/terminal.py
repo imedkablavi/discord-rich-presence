@@ -163,6 +163,22 @@ class TerminalDetector:
         except OSError:
             return []
 
+    def cleanup_command_cache(self) -> None:
+        """Remove expired command data even when detection cannot continue."""
+        self._cleanup_command_cache()
+
+    def clear_command_cache(self) -> None:
+        """Delete all raw command-cache files for lock-screen privacy handling."""
+        try:
+            paths = [self.cmd_file, *self.command_dir.glob('*.txt')]
+        except OSError:
+            paths = [self.cmd_file]
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                self.logger.debug('Could not remove terminal command cache %s: %s', path.name, exc)
+
     def _cleanup_command_cache(self):
         """Bound stale command files and delete expired legacy command data."""
         try:
