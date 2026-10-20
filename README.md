@@ -207,7 +207,7 @@ See [config.example.yaml](config.example.yaml) for the full schema.
 
 Requirements:
 
-- Python 3.10+
+- Python 3.11+
 - Discord Desktop for live Rich Presence testing
 
 Windows:
