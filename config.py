@@ -47,6 +47,9 @@ DEFAULT_CONFIG = {
         'start_minimized': False,
         'auto_start': False
     },
+    'ui': {
+        'appearance': 'System'
+    },
     'browser_companion': {
         # Loopback-only bridge for the optional Chromium/Firefox extension.
         'enabled': True,
@@ -442,6 +445,13 @@ class Config:
         for key in ('start_minimized', 'auto_start'):
             if not isinstance(system.get(key, False), bool):
                 raise ValueError(f'system.{key} must be true or false')
+
+        ui = data.get('ui', {})
+        if not isinstance(ui, dict):
+            raise ValueError('ui must be an object')
+        appearance = ui.get('appearance', 'System')
+        if appearance not in {'System', 'Light', 'Dark'}:
+            raise ValueError('ui.appearance must be one of: System, Light, Dark')
 
         companion = data.get('browser_companion', {})
         if not isinstance(companion, dict):
