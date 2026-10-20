@@ -141,3 +141,17 @@ def test_compact_layout_threshold_is_reused_for_runtime_panels():
     assert dashboard_hero_stacked(372) is True
     assert dashboard_hero_stacked(639) is True
     assert dashboard_hero_stacked(702) is False
+
+
+
+@pytest.mark.parametrize(
+    ("compact", "expected"),
+    [
+        (True, ((0, 0), (1, 0))),
+        (False, ((0, 0), (0, 1))),
+    ],
+)
+def test_dashboard_runtime_panels_stack_only_when_compact(compact, expected):
+    from ui_layout import dashboard_runtime_grid
+
+    assert dashboard_runtime_grid(compact) == expected
