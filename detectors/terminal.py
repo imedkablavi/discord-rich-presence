@@ -59,7 +59,14 @@ class TerminalDetector:
                 pass
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        if not window_info or not self.config.get('rules.enabled_detectors.terminal', True):
+        if not window_info:
+            return None
+
+        # Sweep expired raw command data even while another app is focused or
+        # terminal tracking is disabled. Otherwise hook-written secrets can
+        # remain on disk indefinitely simply because no terminal is foreground.
+        if not self.config.get('rules.enabled_detectors.terminal', True):
+            self._cleanup_command_cache()
             return None
 
         app_name = str(window_info.get('app_name', '')).lower()
@@ -70,6 +77,7 @@ class TerminalDetector:
                 terminal_name = name
                 break
         if not terminal_name:
+            self._cleanup_command_cache()
             return None
 
         command = self._get_last_command(window_info.get('pid'))
@@ -82,14 +90,23 @@ class TerminalDetector:
 
     def _ttl(self) -> int:
         try:
-            return max(0, int(self.config.get('rules.terminal_command_ttl_secs', 900) or 900))
-        except (TypeError, ValueError):
+            value = self.config.get('rules.terminal_command_ttl_secs', 900)
+            if isinstance(value, bool):
+                return 900
+            return max(0, int(value))
+        except (TypeError, ValueError, OverflowError):
             return 900
 
     def _is_fresh(self, path: Path) -> bool:
         ttl = self._ttl()
+        # Zero means no command retention: do not publish or keep raw commands.
+        # This is deliberately different from a missing/invalid value, which
+        # falls back to the privacy-conscious 900-second default.
+        if ttl <= 0:
+            return False
         try:
-            return ttl <= 0 or time.time() - path.stat().st_mtime <= ttl
+            age = time.time() - path.stat().st_mtime
+            return 0 <= age <= ttl
         except OSError:
             return False
 
