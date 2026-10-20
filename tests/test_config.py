@@ -243,6 +243,7 @@ def test_example_config_keeps_terminal_tracking_opt_in():
         ("browser_companion:\n  ttl_secs: .nan\n", "browser_companion.ttl_secs"),
         ("cs2_gsi:\n  ttl_secs: .inf\n", "cs2_gsi.ttl_secs"),
         ("fivem:\n  ttl_secs: -.inf\n", "fivem.ttl_secs"),
+        ("minecraft:\n  ttl_secs: .nan\n", "minecraft.ttl_secs"),
         ("rules:\n  terminal_command_ttl_secs: .nan\n", "terminal_command_ttl_secs"),
     ],
 )
