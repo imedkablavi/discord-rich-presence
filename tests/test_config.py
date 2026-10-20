@@ -233,3 +233,23 @@ def test_example_config_keeps_terminal_tracking_opt_in():
     config = Config(example_path)
 
     assert config.get('rules.enabled_detectors.terminal') is False
+
+
+
+@pytest.mark.parametrize(
+    ("yaml_content", "error_match"),
+    [
+        ("update_interval_secs: .nan\n", "update_interval_secs"),
+        ("browser_companion:\n  ttl_secs: .nan\n", "browser_companion.ttl_secs"),
+        ("cs2_gsi:\n  ttl_secs: .inf\n", "cs2_gsi.ttl_secs"),
+        ("fivem:\n  ttl_secs: -.inf\n", "fivem.ttl_secs"),
+        ("minecraft:\n  ttl_secs: .nan\n", "minecraft.ttl_secs"),
+        ("rules:\n  terminal_command_ttl_secs: .nan\n", "terminal_command_ttl_secs"),
+    ],
+)
+def test_non_finite_timer_values_are_rejected(tmp_path: Path, yaml_content, error_match):
+    path = tmp_path / "non-finite-timer.yaml"
+    path.write_text(yaml_content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=error_match):
+        Config(path)
