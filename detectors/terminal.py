@@ -60,6 +60,7 @@ class TerminalDetector:
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not window_info:
+            self._cleanup_command_cache()
             return None
 
         # Sweep expired raw command data even while another app is focused or
