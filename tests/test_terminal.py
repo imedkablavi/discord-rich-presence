@@ -94,19 +94,16 @@ def test_zero_ttl_disables_command_publication_and_deletes_cache(tmp_path):
     assert not detector.cmd_file.exists()
 
 
-def test_expired_command_cache_is_cleaned_while_terminal_detector_is_disabled(tmp_path):
+def test_disabled_terminal_detector_clears_fresh_command_cache(tmp_path):
     detector = _detector(tmp_path)
     detector.config.set('rules.enabled_detectors.terminal', False)
-    detector.config.set('rules.terminal_command_ttl_secs', 2)
     command_file = detector.command_dir / '424242.txt'
-    command_file.write_text('private-command\n', encoding='utf-8')
-    old = time.time() - 10
-    os.utime(command_file, (old, old))
+    command_file.write_text('example-command\n', encoding='utf-8')
+    detector.cmd_file.write_text('legacy-command\n', encoding='utf-8')
 
     assert detector.detect({'app_name': 'Firefox', 'title': 'news'}) is None
     assert not command_file.exists()
-
-
+    assert not detector.cmd_file.exists()
 
 def test_stale_command_cache_is_cleaned_when_no_foreground_window_exists(tmp_path):
     detector = _detector(tmp_path)
