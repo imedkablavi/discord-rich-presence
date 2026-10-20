@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import threading
+import queue
 from typing import Optional
 
 import customtkinter as ctk
@@ -23,10 +23,20 @@ class GameLibraryWindow(ctk.CTk):
     """Searchable local game library with privacy-first per-game controls."""
 
     def __init__(self, config: Optional[Config] = None):
+        resolved_config = config or Config()
+        appearance = str(resolved_config.get('ui.appearance', 'System'))
+        if appearance not in {'System', 'Light', 'Dark'}:
+            appearance = 'System'
+        ctk.set_appearance_mode(appearance)
         super().__init__()
-        self.config = config or Config()
+        self.config = resolved_config
         self.entries: list[GameLibraryEntry] = []
         self._loading = False
+        self._closed = False
+        # Worker threads publish plain Python results only. All Tk operations
+        # stay on the main/UI thread to avoid calls into a destroyed interpreter.
+        self._refresh_results = queue.SimpleQueue()
+        self.protocol('WM_DELETE_WINDOW', self._on_close)
 
         self.title('CYBREX Game Library')
         self.geometry('940x680')
@@ -92,6 +102,32 @@ class GameLibraryWindow(ctk.CTk):
         self.status.grid(row=0, column=0, padx=24, pady=12, sticky='ew')
 
         self.after(80, self.refresh_library)
+        self.after(100, self._poll_refresh_results)
+
+    def _on_close(self) -> None:
+        self._closed = True
+        self.destroy()
+
+    @staticmethod
+    def _scan_library() -> tuple[list[GameLibraryEntry], Optional[str]]:
+        """Scan local manifests without touching Tk from the worker thread."""
+        try:
+            return discover_games(), None
+        except Exception as exc:  # UI boundary: return one contained error.
+            return [], str(exc)
+
+    def _poll_refresh_results(self) -> None:
+        """Apply completed scans on the Tk main thread."""
+        if self._closed:
+            return
+        try:
+            entries, error = self._refresh_results.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            self._finish_refresh(entries, error)
+        if not self._closed:
+            self.after(100, self._poll_refresh_results)
 
     def _toggle_gamer_mode(self) -> None:
         desired = bool(self.gamer_mode_var.get())
@@ -113,17 +149,15 @@ class GameLibraryWindow(ctk.CTk):
         self.status.configure(text='Scanning Steam, Epic and Heroic metadata locally…')
 
         def worker() -> None:
-            try:
-                entries = discover_games()
-                error = None
-            except Exception as exc:  # UI boundary: show one contained error.
-                entries = []
-                error = str(exc)
-            self.after(0, lambda: self._finish_refresh(entries, error))
+            result = self._scan_library()
+            self._refresh_results.put(result)
 
-        threading.Thread(target=worker, daemon=True).start()
+        import threading
+        threading.Thread(target=worker, daemon=True, name='cybrex-game-library-scan').start()
 
     def _finish_refresh(self, entries: list[GameLibraryEntry], error: Optional[str]) -> None:
+        if self._closed:
+            return
         self._loading = False
         self.refresh_button.configure(state='normal', text='Refresh')
         if error:
