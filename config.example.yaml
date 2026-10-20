@@ -27,6 +27,10 @@ system:
   start_minimized: false
   auto_start: false
 
+# Desktop control-panel appearance: System, Light, or Dark.
+ui:
+  appearance: System
+
 browser_companion:
   # Optional Chromium/Firefox extension bridge. It listens on loopback only.
   enabled: true
