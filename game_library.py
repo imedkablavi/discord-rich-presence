@@ -128,6 +128,18 @@ def discover_games() -> list[GameLibraryEntry]:
     return sorted(unique.values(), key=lambda item: (item.name.casefold(), item.source.casefold()))
 
 
+def scan_library_safely() -> tuple[list[GameLibraryEntry], str | None]:
+    """Scan the local game library and contain expected discovery failures.
+
+    Kept outside the GUI module so the worker boundary can be tested without
+    importing Tk/CustomTkinter on headless CI runners.
+    """
+    try:
+        return discover_games(), None
+    except Exception as exc:
+        return [], str(exc)
+
+
 def _blacklisted_games(config: Config) -> list[str]:
     value = config.get('rules.blacklist.games', []) or []
     if not isinstance(value, list):
