@@ -66,3 +66,15 @@ def test_hook_internal_commands_are_filtered(tmp_path):
 def test_default_terminal_command_ttl_is_short_lived(tmp_path):
     detector = _detector(tmp_path)
     assert detector._ttl() == 900
+
+
+
+def test_command_cache_read_is_bounded_for_oversized_files(tmp_path):
+    detector = _detector(tmp_path)
+    oversized = tmp_path / 'oversized-command.txt'
+    oversized.write_text('x' * (2 * 1024 * 1024), encoding='utf-8')
+
+    command = detector._read_command(oversized)
+
+    assert command == 'x' * detector._MAX_COMMAND_CHARS
+    assert len(command) <= detector._MAX_COMMAND_CHARS
