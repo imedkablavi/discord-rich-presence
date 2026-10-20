@@ -266,5 +266,8 @@ def test_windows_replacement_helper_contains_startup_rollback_guard(monkeypatch)
         assert 'Move-Item -LiteralPath $Backup -Destination $Target -Force' in launch_guard
         assert 'if ($RollbackOk) { exit 22 } else { exit 23 }' in launch_guard
         assert "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue" in script
+        assert "if (Test-Path -LiteralPath $Backup) {" in script
+        assert "exit 24" in script
+        assert "Preserve it and refuse another replacement" in script
     finally:
         script_path.unlink(missing_ok=True)
