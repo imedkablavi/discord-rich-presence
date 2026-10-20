@@ -102,6 +102,7 @@ jobs:
           node --check browser_extension/background.js
           node --check browser_extension/content.js
           node --check browser_extension/options.js
+          node scripts/qa_browser_extension_privacy.js
           bash -n scripts/prepare-browser-companion.sh
       - name: Verify clean unpacked helper
         run: |
