@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import yaml
 
@@ -28,7 +29,7 @@ def test_prerelease_tags_are_published_as_github_prereleases():
 def test_stable_windows_release_is_blocked_without_signing():
     text = _workflow_text()
     assert 'Block unsigned stable Windows releases' in text
-    assert "!contains(env.RELEASE_TAG, '-')" in text
+    assert " !contains(env.RELEASE_TAG, '-')".strip() in text
     assert "steps.signing.outputs.enabled != 'true'" in text
     assert 'Stable Windows releases must be code-signed' in text
 
@@ -92,15 +93,24 @@ def test_release_publishes_checksums_and_provenance():
 
 
 def test_release_critical_actions_are_commit_pinned():
+    """Pinning policy must validate immutable commit SHAs, not hard-code one release of an action."""
     text = _workflow_text()
-    assert 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' in text
-    assert 'actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97' in text
-    assert 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' in text
-    assert 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' in text
-    assert 'actions/checkout@v' not in text
-    assert 'actions/setup-python@v' not in text
-    assert 'actions/upload-artifact@v' not in text
-    assert 'actions/download-artifact@v' not in text
+    critical_actions = (
+        'actions/checkout',
+        'actions/setup-python',
+        'actions/upload-artifact',
+        'actions/download-artifact',
+    )
+
+    for action in critical_actions:
+        references = re.findall(
+            rf'(?m)^\s*-\s*uses:\s*{re.escape(action)}@([^\s#]+)',
+            text,
+        )
+        assert references, f'No {action} reference found in release workflow'
+        assert all(re.fullmatch(r'[0-9a-f]{40}', ref) for ref in references), (
+            f'{action} must be pinned to a full 40-character commit SHA; found {references}'
+        )
 
 
 def test_manual_release_rebuilds_an_existing_immutable_tag():
