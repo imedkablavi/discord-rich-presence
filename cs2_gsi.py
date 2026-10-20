@@ -80,6 +80,9 @@ class CS2GSIBridge:
         self.token = _load_or_create_token(self.token_path)
         self._snapshot: Optional[Dict[str, Any]] = None
         self._seen_at = 0.0
+        # A bad token usually means CS2 loaded an older GSI config before
+        # CYBREX rewrote it. Expose only a boolean diagnostic; never the token.
+        self._auth_error = False
         self._lock = threading.RLock()
         self._server: Optional[_CS2HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -158,6 +161,7 @@ class CS2GSIBridge:
                 try:
                     bridge.update(payload)
                 except PermissionError:
+                    bridge.mark_auth_error()
                     self._send(403, {'ok': False, 'error': 'invalid_auth'})
                     return
                 except ValueError as exc:
@@ -242,6 +246,12 @@ class CS2GSIBridge:
         with self._lock:
             self._snapshot = snapshot
             self._seen_at = time.monotonic()
+            self._auth_error = False
+
+    def mark_auth_error(self) -> None:
+        """Record that CS2 posted a payload with an invalid auth token."""
+        with self._lock:
+            self._auth_error = True
 
     def latest(self) -> Optional[Dict[str, Any]]:
         now = time.monotonic()
@@ -263,6 +273,7 @@ class CS2GSIBridge:
             return {
                 'ok': True,
                 'connected': active,
+                'auth_error': self._auth_error,
                 'age_ms': max(0, int((now - self._seen_at) * 1000)) if active else None,
                 'has_match_context': bool(
                     snapshot
