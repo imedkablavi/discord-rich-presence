@@ -226,3 +226,60 @@ def test_cs2_gsi_settings_hot_reload_without_service_restart(tmp_path, monkeypat
     assert detector.cs2_gsi is None
     assert stop_calls
     assert remove_calls
+
+
+def test_cs2_gsi_status_reports_auth_error_and_clears_after_valid_payload(tmp_path):
+    bridge = CS2GSIBridge(_config(tmp_path))
+
+    assert bridge.status()['auth_error'] is False
+    bridge.mark_auth_error()
+    assert bridge.status()['auth_error'] is True
+
+    bridge.update(_payload(bridge.token))
+    status = bridge.status()
+    assert status['connected'] is True
+    assert status['auth_error'] is False
+
+
+def test_cs2_gsi_menu_phase_is_shown_without_claiming_matchmaking(tmp_path):
+    config = _config(tmp_path)
+    detector = GamingDetector(config)
+    detector.cs2_gsi = SimpleNamespace(latest=lambda: {
+        'map': '',
+        'mode': '',
+        'map_phase': 'menu',
+        'round': 0,
+        'team': '',
+        'player_activity': '',
+        'ct_score': 0,
+        't_score': 0,
+    })
+
+    activity = detector.detect({'app_name': 'cs2', 'title': 'Counter-Strike 2'})
+    assert activity is not None
+    assert activity['phase_name'] == 'In menu'
+
+    payload = PresenceBuilder(config).build(activity)
+    assert payload['details'] == 'Counter-Strike 2'
+    assert payload['state'] == 'In menu'
+
+
+def test_cs2_auto_configures_every_detected_steam_library(tmp_path, monkeypatch):
+    import detectors.gaming as gaming_module
+
+    config = _config(tmp_path)
+    detector = GamingDetector(config)
+    locations = [tmp_path / 'library-one' / 'cfg', tmp_path / 'library-two' / 'cfg']
+    for location in locations:
+        location.mkdir(parents=True)
+
+    installed = []
+    monkeypatch.setattr(gaming_module, 'discover_cs2_cfg_dirs', lambda: locations)
+    monkeypatch.setattr(
+        gaming_module,
+        'install_gsi_config',
+        lambda _config, location: installed.append(location),
+    )
+
+    detector._auto_configure_cs2_gsi()
+    assert installed == locations
