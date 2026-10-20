@@ -82,17 +82,33 @@
   }
 
   function buildSnapshot() {
+    const browser = detectBrowser();
+    const isPrivate = Boolean(api?.extension?.inIncognitoContext);
+    if (isPrivate) {
+      // Minimize private-page data at the source. The desktop bridge must not
+      // receive the URL, document title, service name, or media metadata and
+      // rely only on a downstream privacy filter to hide it later.
+      mediaWasPlaying = false;
+      return {
+        version: 1,
+        browser,
+        private: true,
+        focused: document.hasFocus(),
+        visible: document.visibilityState === 'visible',
+      };
+    }
+
     const service = detectService();
     const element = bestMediaElement();
     const media = mediaMetadata(service, element);
     mediaWasPlaying = media.playing;
     return {
       version: 1,
-      browser: detectBrowser(),
+      browser,
       url: location.href,
       title: document.title || '',
       service,
-      private: Boolean(api?.extension?.inIncognitoContext),
+      private: false,
       focused: document.hasFocus(),
       visible: document.visibilityState === 'visible',
       media,
@@ -109,7 +125,7 @@
     lastBuildAt = now;
 
     const snapshot = buildSnapshot();
-    if (!snapshot.visible && !snapshot.media.playing) return;
+    if (!snapshot.visible && !snapshot.media?.playing) return;
     const serialized = JSON.stringify(snapshot);
     if (!force && serialized === lastSent && now - lastSentAt < 5000) return;
     if (!force && now - lastSentAt < 2000) return;

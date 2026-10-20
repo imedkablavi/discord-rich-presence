@@ -230,3 +230,30 @@ def test_balanced_full_mode_redacts_sensitive_query_and_drops_fragment(tmp_path:
     assert 'access_token=%5BREDACTED%5D' in result['url']
     assert '#' not in result['url']
     assert 'very-secret' not in result['url']
+
+
+
+def test_bridge_drops_page_data_from_private_snapshots(tmp_path: Path):
+    bridge = BrowserCompanionBridge(Config(tmp_path / 'config.yaml'))
+    bridge.update(_snapshot(private=True))
+
+    snapshot = bridge.latest('Brave')
+    assert snapshot is not None
+    assert snapshot['private'] is True
+    assert snapshot['url'] is None
+    assert snapshot['title'] == ''
+    assert snapshot['service'] == ''
+    assert snapshot['media'] == {
+        'playing': False,
+        'position': 0,
+        'duration': 0,
+        'title': '',
+        'artist': '',
+    }
+
+    # Check the actual bridge cache as well as the public accessor: sensitive
+    # data should not remain resident in memory after private ingestion.
+    cached_records = repr(bridge._records)
+    assert 'abc123' not in cached_records
+    assert 'Example video' not in cached_records
+    assert 'Example channel' not in cached_records

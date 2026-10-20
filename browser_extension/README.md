@@ -36,7 +36,7 @@ Bridge records are bounded and memory-only. Closed tabs are removed when reporte
 
 Balanced privacy publishes only the permitted browser URL scope. Recognized social and messaging pages use a stricter contract: page titles, contact or conversation names, profile/post identifiers, deep social links and social-page media metadata are removed before Discord Presence is built.
 
-Private or incognito browsing is handled conservatively by the desktop application.
+In private/incognito context, the extension sends only browser identity, the private flag, and focus/visibility state. It does not send the private page URL, title, service name, or media metadata. The desktop bridge also drops those fields if an older or malformed extension includes them.
 
 See [Privacy](../docs/PRIVACY.md) and [Social Web Presence](../docs/SOCIAL_PRESENCE.md).
 

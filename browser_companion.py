@@ -272,24 +272,32 @@ class BrowserCompanionBridge:
                 self._records.pop((browser.lower(), tab_id), None)
             return
 
-        url = self._clean_url(payload.get('url'))
-        media = payload.get('media') if isinstance(payload.get('media'), dict) else {}
+        # Defense in depth: even an older or malformed extension may send a
+        # private flag together with page data. Drop those fields at ingestion,
+        # so private URLs/titles/media are never retained by the local bridge.
+        is_private = bool(payload.get('private', False))
+        url = None if is_private else self._clean_url(payload.get('url'))
+        media = (
+            {}
+            if is_private
+            else payload.get('media') if isinstance(payload.get('media'), dict) else {}
+        )
         record = {
             'version': _SUPPORTED_VERSION,
             'browser': browser,
             'tab_id': tab_id,
             'url': url,
-            'title': self._clean_text(payload.get('title'), 300),
-            'service': self._clean_text(payload.get('service'), 80),
-            'private': bool(payload.get('private', False)),
+            'title': '' if is_private else self._clean_text(payload.get('title'), 300),
+            'service': '' if is_private else self._clean_text(payload.get('service'), 80),
+            'private': is_private,
             'focused': bool(payload.get('focused', False)),
             'visible': bool(payload.get('visible', False)),
             'media': {
-                'playing': bool(media.get('playing', False)),
-                'position': self._clean_number(media.get('position')),
-                'duration': self._clean_number(media.get('duration')),
-                'title': self._clean_text(media.get('title'), 300),
-                'artist': self._clean_text(media.get('artist'), 200),
+                'playing': False if is_private else bool(media.get('playing', False)),
+                'position': 0 if is_private else self._clean_number(media.get('position')),
+                'duration': 0 if is_private else self._clean_number(media.get('duration')),
+                'title': '' if is_private else self._clean_text(media.get('title'), 300),
+                'artist': '' if is_private else self._clean_text(media.get('artist'), 200),
             },
         }
         now = time.monotonic()
