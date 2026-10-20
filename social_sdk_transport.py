@@ -177,7 +177,10 @@ class SocialSDKPresence:
                     responses.put(line, timeout=0.5)
                 except queue.Full:
                     break
-        except (OSError, UnicodeError):
+        except (OSError, UnicodeError, ValueError):
+            # Closing a text pipe from the shutdown path can make a blocked
+            # iterator raise ValueError ("I/O operation on closed file").
+            # This is a normal teardown race, not a transport crash.
             pass
         finally:
             try:
