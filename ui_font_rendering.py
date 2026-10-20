@@ -65,10 +65,10 @@ def linux_scalable_font_families() -> set[str] | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    families = parse_scalable_font_families(result.stdout)
-    # A malformed/unsupported fc-list format should fall back to Tk's family
-    # list rather than make every family appear unusable.
-    return families or None
+    # Keep an empty set distinct from None: an empty set means Fontconfig
+    # ran successfully but did not report a scalable family. None means the
+    # query was unavailable and Tk's family list is the only safe fallback.
+    return parse_scalable_font_families(result.stdout)
 
 
 def choose_font_family(
