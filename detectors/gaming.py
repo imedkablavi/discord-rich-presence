@@ -120,15 +120,13 @@ class GamingDetector:
         'gungametrbomb', 'demolition',
     }
 
-    # GSI exposes the map phase, but does not expose whether matchmaking queue
-    # search is actively running. Show only the phase the game actually reports.
+    # GSI exposes a match/map phase, not whether matchmaking queue search is
+    # running. These are the well-established map.phase values; do not invent
+    # a "menu" or "searching" phase from an absent map object.
     CS2_PHASE_NAMES = {
-        'menu': 'In menu',
         'warmup': 'Warmup',
         'live': 'In match',
         'intermission': 'Round break',
-        'halftime': 'Halftime',
-        'timeout': 'Timeout',
         'gameover': 'Match over',
     }
 
