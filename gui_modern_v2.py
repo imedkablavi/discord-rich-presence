@@ -14,6 +14,7 @@ import tkinter.font as tkfont
 import customtkinter as ctk
 
 from config import Config
+from ui_font_rendering import choose_font_family, linux_scalable_font_families
 from gui_modern import ModernControlPanel as LegacyControlPanel
 
 try:
@@ -109,27 +110,33 @@ class ModernControlPanel(LegacyControlPanel):
         if self.ui_font_family:
             return self.ui_font_family
         try:
-            families = {name.casefold(): name for name in tkfont.families(self)}
+            families = tkfont.families(self)
         except Exception:
-            families = {}
-        # Prefer general-purpose UI sans fonts for Latin labels. Some Linux
-        # setups substitute a less legible fallback when Noto Sans Arabic is
-        # selected as the primary family for the entire English UI.
-        for candidate in (
-            "Inter",
-            "Noto Sans",
-            "Cantarell",
-            "DejaVu Sans",
-            "Liberation Sans",
-            "Segoe UI",
-            "Arial",
-            "Noto Sans Arabic",
-        ):
-            match = families.get(candidate.casefold())
-            if match:
-                self.ui_font_family = match
-                return match
-        self.ui_font_family = "TkDefaultFont"
+            families = ()
+        # The base UI configures Tk named fonts before constructing controls;
+        # use the same scalable family for every explicit CustomTkinter font.
+        selected = choose_font_family(
+            families,
+            (
+                "DejaVu Sans",
+                "Liberation Sans",
+                "Cantarell",
+                "Inter",
+                "Noto Sans",
+                "Ubuntu",
+                "Segoe UI",
+                "Arial",
+                "Noto Sans Arabic",
+            ),
+            linux_scalable_font_families(),
+        )
+        if selected:
+            self.ui_font_family = selected
+        else:
+            try:
+                self.ui_font_family = str(tkfont.nametofont("TkDefaultFont", root=self).cget("family"))
+            except Exception:
+                self.ui_font_family = "TkDefaultFont"
         return self.ui_font_family
 
     def _font(self, size: int = 14, weight: str = "normal") -> ctk.CTkFont:

@@ -23,6 +23,7 @@ import customtkinter as ctk
 from config import Config, DEFAULT_CONFIG, resolve_discord_application_id
 from runtime_state import RuntimeState
 from ui_dispatch import UIThreadDispatcher
+from ui_font_rendering import configure_tk_named_fonts
 
 try:
     import winreg
@@ -43,6 +44,10 @@ class ModernControlPanel(ctk.CTk):
 
     def __init__(self, config: Config):
         super().__init__()
+        # Force Tk's named font aliases onto scalable outline fonts before any
+        # widgets are created. Otherwise some Linux images fall back to bitmap
+        # faces and the whole control panel looks pixelated at desktop scale.
+        self.ui_font_family, self.ui_mono_font_family = configure_tk_named_fonts(self)
         self.config = config
         self.runtime = RuntimeState()
         self.service_process: subprocess.Popen | None = None
