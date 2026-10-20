@@ -19,6 +19,13 @@ class ModernControlPanel(ResourceAwareControlPanel):
     SIDEBAR_WIDTH = 252
 
     def __init__(self, config: Config):
+        # Apply the saved appearance before widgets are built so the first frame
+        # does not flash in System mode and then switch themes.
+        appearance = str(config.get("ui.appearance", "System"))
+        if appearance not in {"System", "Light", "Dark"}:
+            appearance = "System"
+        ctk.set_appearance_mode(appearance)
+        self._initial_appearance = appearance
         super().__init__(config)
         self.geometry("1320x840")
         self.minsize(1080, 720)
@@ -131,10 +138,12 @@ class ModernControlPanel(ResourceAwareControlPanel):
             font=self._font(11),
             anchor="w",
         ).pack(fill="x", padx=4, pady=(0, 5))
+        self.appearance_var = ctk.StringVar(value=self._initial_appearance)
         self.theme_menu = ctk.CTkOptionMenu(
             footer,
+            variable=self.appearance_var,
             values=["System", "Light", "Dark"],
-            command=ctk.set_appearance_mode,
+            command=self._on_appearance_changed,
             width=210,
             height=36,
             corner_radius=9,
@@ -406,6 +415,25 @@ class ModernControlPanel(ResourceAwareControlPanel):
                 border_color=self.BORDER,
                 text_color=self.TEXT,
             ).pack(side="left", padx=(0, 9))
+
+    def _on_appearance_changed(self, value: str) -> None:
+        """Apply a preview immediately; persist it with the normal Save action."""
+        appearance = str(value or "System")
+        if appearance not in {"System", "Light", "Dark"}:
+            appearance = "System"
+        self.appearance_var.set(appearance)
+        ctk.set_appearance_mode(appearance)
+
+    def select_page(self, name: str) -> None:
+        """Keep the sidebar selection obvious and consistent with the active page."""
+        super().select_page(name)
+        for page_name, button in self.nav.items():
+            selected = page_name == name
+            button.configure(
+                font=self._font(14, "bold" if selected else "normal"),
+                border_width=1 if selected else 0,
+                border_color=self.PRIMARY if selected else self.SIDEBAR,
+            )
 
     def _poll_identity_surface(self):
         if getattr(self, "_closing", False):
