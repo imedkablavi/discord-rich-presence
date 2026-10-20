@@ -1,5 +1,5 @@
-from game_library import GameLibraryEntry
-import game_library_gui
+from game_library import GameLibraryEntry, scan_library_safely
+import game_library
 
 
 def test_scan_library_returns_local_entries_without_error(monkeypatch):
@@ -12,9 +12,9 @@ def test_scan_library_returns_local_entries_without_error(monkeypatch):
             enhanced=True,
         )
     ]
-    monkeypatch.setattr(game_library_gui, "discover_games", lambda: expected)
+    monkeypatch.setattr(game_library, "discover_games", lambda: expected)
 
-    entries, error = game_library_gui.GameLibraryWindow._scan_library()
+    entries, error = scan_library_safely()
 
     assert entries == expected
     assert error is None
@@ -24,9 +24,9 @@ def test_scan_library_contains_discovery_errors(monkeypatch):
     def fail_scan():
         raise OSError("library metadata unavailable")
 
-    monkeypatch.setattr(game_library_gui, "discover_games", fail_scan)
+    monkeypatch.setattr(game_library, "discover_games", fail_scan)
 
-    entries, error = game_library_gui.GameLibraryWindow._scan_library()
+    entries, error = scan_library_safely()
 
     assert entries == []
     assert error == "library metadata unavailable"
