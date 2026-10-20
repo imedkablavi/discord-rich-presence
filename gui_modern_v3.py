@@ -64,14 +64,25 @@ class ModernControlPanel(PolishedControlPanel):
                 text_color=self.SUCCESS if browser_ok else self.MUTED,
             )
             if cs2_ok:
-                connected = bool((cs2_data or {}).get("connected", False))
-                label = "Match data active" if connected else "Listener ready"
-                color = self.SUCCESS if connected else self.PRIMARY
+                cs2_status = cs2_data or {}
+                if bool(cs2_status.get("auth_error", False)):
+                    label = "Restart CS2"
+                    status_text = "Status: GSI token rejected — restart CS2 to reload its config."
+                    color = self.WARNING
+                elif bool(cs2_status.get("connected", False)):
+                    label = "Match data active"
+                    status_text = "Status: live game data connected"
+                    color = self.SUCCESS
+                else:
+                    label = "Listener ready"
+                    status_text = "Status: waiting for CS2 game data"
+                    color = self.PRIMARY
             else:
                 label = "Not connected"
+                status_text = "Status: listener unavailable"
                 color = self.MUTED
             self.cs2_value.configure(text=label, text_color=color)
-            self.cs2_status_label.configure(text=f"Status: {label.lower()}", text_color=color)
+            self.cs2_status_label.configure(text=status_text, text_color=color)
 
         if self._probe_future is None:
             browser_port = self._safe_port(
