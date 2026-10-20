@@ -140,6 +140,20 @@ def scan_library_safely() -> tuple[list[GameLibraryEntry], str | None]:
         return [], str(exc)
 
 
+def library_empty_message(
+    total_entries: int,
+    search_query: object = '',
+    scan_error: object = None,
+) -> str:
+    """Return a truthful empty-state message for the Game Library UI."""
+    if scan_error:
+        return 'Game libraries could not be read. Check the status message and try Refresh.'
+    if total_entries <= 0:
+        return 'No supported local game installs were found.'
+    if str(search_query or '').strip():
+        return 'No matching games. Try a different search term.'
+    return 'No games to display.'
+    
 def _blacklisted_games(config: Config) -> list[str]:
     value = config.get('rules.blacklist.games', []) or []
     if not isinstance(value, list):
