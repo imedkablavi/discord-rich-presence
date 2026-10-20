@@ -120,6 +120,18 @@ class GamingDetector:
         'gungametrbomb', 'demolition',
     }
 
+    # GSI exposes the map phase, but does not expose whether matchmaking queue
+    # search is actively running. Show only the phase the game actually reports.
+    CS2_PHASE_NAMES = {
+        'menu': 'In menu',
+        'warmup': 'Warmup',
+        'live': 'In match',
+        'intermission': 'Round break',
+        'halftime': 'Halftime',
+        'timeout': 'Timeout',
+        'gameover': 'Match over',
+    }
+
     CS2_MAP_NAMES = {
         'de_mirage': 'Mirage',
         'de_dust2': 'Dust II',
@@ -531,6 +543,8 @@ class GamingDetector:
 
         map_key = str(snapshot.get('map', '') or '').lower()
         mode_key = str(snapshot.get('mode', '') or '').lower()
+        phase_key = str(snapshot.get('map_phase', '') or '').strip().lower()
+        phase_name = self.CS2_PHASE_NAMES.get(phase_key, '')
         team = str(snapshot.get('team', '') or '').upper()
         map_name = self._friendly_map(map_key)
         mode_name = self.CS2_MODE_NAMES.get(mode_key, self._friendly_label(mode_key))
@@ -542,6 +556,11 @@ class GamingDetector:
         score_is_meaningful = mode_key in self.CS2_ROUND_SCORE_MODES or ct_score > 0 or t_score > 0
         if map_name and score_is_meaningful:
             state_parts.append(f'CT {ct_score}–{t_score} T')
+        # When the game reports a phase but has no map/team yet, avoid the
+        # unhelpful "Steam" fallback. This is intentionally not called
+        # "Searching for match": official GSI does not disclose queue state.
+        if not state_parts and phase_name:
+            state_parts.append(phase_name)
 
         activity.update({
             'gsi': True,
@@ -562,6 +581,7 @@ class GamingDetector:
                 or ''
             ),
             'player_activity': str(snapshot.get('player_activity', '') or ''),
+            'phase_name': phase_name,
         })
 
     @classmethod
