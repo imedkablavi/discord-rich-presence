@@ -7,6 +7,7 @@
 - Added the modern control panel with clearer Overview, Integrations, Activity, Privacy, Settings, Diagnostics and About pages.
 - Added application and navigation artwork without requiring remote icon-font dependencies.
 - Improved Linux UI font selection, small-label sizing and secondary-text contrast for easier reading.
+- Fixed Linux Tk font rendering by selecting installed scalable outline families and configuring Tk's named font aliases before building the control panel, avoiding bitmap-font fallbacks that make text look pixelated.
 - Improved Arabic text rendering with deterministic shaping, BiDi handling and broader font fallbacks.
 - Added single-instance control for the GUI and service lifecycle.
 - Added Stable and Preview update-channel controls to the application UI.
