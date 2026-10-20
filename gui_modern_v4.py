@@ -11,6 +11,7 @@ from config import Config
 from gui_modern_v3 import ModernControlPanel as ResourceAwareControlPanel
 from social_sdk_transport import social_sdk_available
 from ui_icons import icon
+from ui_layout import control_panel_geometry
 
 
 class ModernControlPanel(ResourceAwareControlPanel):
@@ -27,8 +28,17 @@ class ModernControlPanel(ResourceAwareControlPanel):
         ctk.set_appearance_mode(appearance)
         self._initial_appearance = appearance
         super().__init__(config)
-        self.geometry("1320x840")
-        self.minsize(1080, 720)
+        # Respect smaller laptop displays instead of forcing a fixed 1320x840
+        # window that can put controls behind the taskbar or beyond the screen.
+        self.update_idletasks()
+        layout = control_panel_geometry(
+            self.winfo_screenwidth(),
+            self.winfo_screenheight(),
+        )
+        self.minsize(layout.min_width, layout.min_height)
+        self.geometry(
+            f"{layout.width}x{layout.height}+{layout.x}+{layout.y}"
+        )
         self.after(700, self._poll_identity_surface)
 
     # ---------------------------------------------------------------- layout
