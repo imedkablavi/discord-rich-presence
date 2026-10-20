@@ -60,7 +60,7 @@ For terminal commands, values following common sensitive flags such as token, pa
 
 Uses generic activity descriptions, removes identifying browser URLs/buttons and suppresses deep game telemetry collection.
 
-The service also clears Rich Presence when a supported lock-screen state is detected.
+The service clears Rich Presence and removes raw terminal-command cache files when a supported lock-screen state is detected. Lock-screen suppression takes priority over manual Override Presence.
 
 ## Local files
 
