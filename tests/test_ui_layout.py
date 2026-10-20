@@ -130,3 +130,14 @@ def test_dashboard_hero_uses_compact_layout_for_invalid_width():
     from ui_layout import dashboard_hero_stacked
 
     assert dashboard_hero_stacked(None) is True
+
+
+
+def test_compact_layout_threshold_is_reused_for_runtime_panels():
+    from ui_layout import dashboard_hero_stacked
+
+    # The Overview runtime cards share the same tested compact-layout decision
+    # as the hero controls, preventing an untested second breakpoint.
+    assert dashboard_hero_stacked(372) is True
+    assert dashboard_hero_stacked(639) is True
+    assert dashboard_hero_stacked(702) is False
