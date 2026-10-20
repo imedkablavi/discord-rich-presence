@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import threading
 from typing import Optional
 
 import customtkinter as ctk
@@ -10,7 +11,6 @@ import customtkinter as ctk
 from config import Config
 from game_library import (
     GameLibraryEntry,
-    discover_games,
     gamer_mode_enabled,
     is_game_enabled,
     library_counts,
@@ -145,7 +145,6 @@ class GameLibraryWindow(ctk.CTk):
             result = scan_library_safely()
             self._refresh_results.put(result)
 
-        import threading
         threading.Thread(target=worker, daemon=True, name='cybrex-game-library-scan').start()
 
     def _finish_refresh(self, entries: list[GameLibraryEntry], error: Optional[str]) -> None:
