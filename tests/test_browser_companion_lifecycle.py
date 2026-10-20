@@ -1,4 +1,5 @@
 import json
+import urllib.error
 import urllib.request
 
 from browser_companion import BrowserCompanionBridge
@@ -69,3 +70,102 @@ def test_companion_rejects_non_finite_media_numbers(tmp_path):
     assert record is not None
     assert record['media']['position'] == 0
     assert record['media']['duration'] == 0
+
+
+def _post_companion_activity(bridge, payload, *, origin, companion_header=True):
+    headers = {
+        "Origin": origin,
+        "Content-Type": "application/json",
+    }
+    if companion_header:
+        headers["X-CYBREX-Companion"] = "1"
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{bridge.port}/v1/activity",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            return response.status, response.headers, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.headers, error.read()
+
+
+
+def test_companion_rejects_web_origin_for_activity_post(tmp_path):
+    bridge = BrowserCompanionBridge(Config(tmp_path / "config.yaml"))
+    bridge.port = 0
+    assert bridge.start() is True
+    try:
+        status, headers, body = _post_companion_activity(
+            bridge,
+            _snapshot("web-origin"),
+            origin="https://attacker.example",
+        )
+
+        assert status == 403
+        assert json.loads(body)["error"] == "origin_not_allowed"
+        assert headers.get("Access-Control-Allow-Origin") is None
+        assert bridge.status()["records"] == 0
+    finally:
+        bridge.stop()
+
+
+def test_companion_requires_its_protocol_header_even_for_extension_origins(tmp_path):
+    bridge = BrowserCompanionBridge(Config(tmp_path / "config.yaml"))
+    bridge.port = 0
+    assert bridge.start() is True
+    try:
+        status, _headers, body = _post_companion_activity(
+            bridge,
+            _snapshot("missing-marker"),
+            origin="chrome-extension://cybrex-test",
+            companion_header=False,
+        )
+
+        assert status == 403
+        assert json.loads(body)["error"] == "missing_companion_header"
+        assert bridge.status()["records"] == 0
+    finally:
+        bridge.stop()
+
+
+def test_companion_accepts_extension_origin_with_protocol_header(tmp_path):
+    bridge = BrowserCompanionBridge(Config(tmp_path / "config.yaml"))
+    bridge.port = 0
+    assert bridge.start() is True
+    origin = "chrome-extension://cybrex-test"
+    try:
+        status, headers, body = _post_companion_activity(
+            bridge,
+            _snapshot("valid-extension"),
+            origin=origin,
+        )
+
+        assert status == 200
+        assert json.loads(body)["ok"] is True
+        assert headers.get("Access-Control-Allow-Origin") == origin
+        assert bridge.status()["records"] == 1
+    finally:
+        bridge.stop()
+
+
+def test_companion_rejects_oversized_activity_payload_before_parsing(tmp_path):
+    bridge = BrowserCompanionBridge(Config(tmp_path / "config.yaml"))
+    bridge.port = 0
+    assert bridge.start() is True
+    try:
+        payload = _snapshot("oversized")
+        payload["title"] = "x" * 40_000
+        status, _headers, body = _post_companion_activity(
+            bridge,
+            payload,
+            origin="moz-extension://cybrex-test",
+        )
+
+        assert status == 413
+        assert json.loads(body)["error"] == "invalid_size"
+        assert bridge.status()["records"] == 0
+    finally:
+        bridge.stop()
