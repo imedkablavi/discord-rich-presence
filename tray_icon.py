@@ -223,7 +223,7 @@ def run_with_tray(service_run_func: Callable, config, stop_func: Optional[Callab
         on_check_updates=on_check_updates,
         on_install_update=on_install_update,
         get_privacy_mode=lambda: config.get('privacy.mode', 'balanced'),
-        get_gamer_mode=lambda: config.get('gaming.gamer_mode.enabled', False) is True,
+        get_gamer_mode=lambda: config.get('gamer_mode.enabled', False) is True,
     )
     tray.create_icon()
     service_thread = threading.Thread(target=service_run_func, daemon=False)
