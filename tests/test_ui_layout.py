@@ -36,3 +36,26 @@ def test_control_panel_geometry_uses_safe_fallback_for_invalid_dimensions():
     assert result.height > 0
     assert result.width <= 1366
     assert result.height <= 768
+
+
+
+@pytest.mark.parametrize(
+    ("screen_width", "expected"),
+    [
+        (640, 156),
+        (800, 184),
+        (1024, 210),
+        (1366, 252),
+        (1920, 252),
+    ],
+)
+def test_sidebar_width_scales_for_narrow_displays(screen_width, expected):
+    from ui_layout import sidebar_width_for_screen
+
+    assert sidebar_width_for_screen(screen_width) == expected
+
+
+def test_sidebar_width_has_safe_fallback_for_invalid_width():
+    from ui_layout import sidebar_width_for_screen
+
+    assert sidebar_width_for_screen("bad") == 252
