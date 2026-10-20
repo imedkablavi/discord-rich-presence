@@ -11,7 +11,7 @@ from config import Config
 from gui_modern_v3 import ModernControlPanel as ResourceAwareControlPanel
 from social_sdk_transport import social_sdk_available
 from ui_icons import icon
-from ui_layout import control_panel_geometry
+from ui_layout import control_panel_geometry, sidebar_width_for_screen
 
 
 class ModernControlPanel(ResourceAwareControlPanel):
@@ -43,9 +43,12 @@ class ModernControlPanel(ResourceAwareControlPanel):
 
     # ---------------------------------------------------------------- layout
     def _build_sidebar(self):
+        sidebar_width = sidebar_width_for_screen(self.winfo_screenwidth())
+        compact_sidebar = sidebar_width < 220
+        self._sidebar_width = sidebar_width
         sidebar = ctk.CTkFrame(
             self,
-            width=self.SIDEBAR_WIDTH,
+            width=sidebar_width,
             corner_radius=0,
             fg_color=self.SIDEBAR,
         )
@@ -54,22 +57,28 @@ class ModernControlPanel(ResourceAwareControlPanel):
         sidebar.grid_rowconfigure(9, weight=1)
 
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
-        brand.grid(row=0, column=0, sticky="ew", padx=20, pady=(26, 22))
+        brand.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=12 if compact_sidebar else 20,
+            pady=(20, 16) if compact_sidebar else (26, 22),
+        )
 
         mark = ctk.CTkFrame(
             brand,
-            width=44,
-            height=44,
+            width=36 if compact_sidebar else 44,
+            height=36 if compact_sidebar else 44,
             corner_radius=13,
             fg_color=self.PRIMARY,
         )
-        mark.pack(side="left", padx=(0, 12))
+        mark.pack(side="left", padx=(0, 8 if compact_sidebar else 12))
         mark.pack_propagate(False)
         ctk.CTkLabel(
             mark,
             text="C",
             text_color="#FFFFFF",
-            font=self._font(20, "bold"),
+            font=self._font(17 if compact_sidebar else 20, "bold"),
         ).place(relx=0.5, rely=0.5, anchor="center")
 
         brand_text = ctk.CTkFrame(brand, fg_color="transparent")
@@ -78,14 +87,15 @@ class ModernControlPanel(ResourceAwareControlPanel):
             brand_text,
             text="CYBREX",
             text_color=self.TEXT,
-            font=self._font(23, "bold"),
+            font=self._font(17 if compact_sidebar else 23, "bold"),
         ).pack(anchor="w")
-        ctk.CTkLabel(
-            brand_text,
-            text="Presence",
-            text_color=self.MUTED,
-            font=self._font(12),
-        ).pack(anchor="w", pady=(0, 1))
+        if not compact_sidebar:
+            ctk.CTkLabel(
+                brand_text,
+                text="Presence",
+                text_color=self.MUTED,
+                font=self._font(12),
+            ).pack(anchor="w", pady=(0, 1))
 
         self.nav = {}
         pages = (
@@ -104,20 +114,35 @@ class ModernControlPanel(ResourceAwareControlPanel):
                 image=icon(icon_name, 18),
                 compound="left",
                 text_color=self.TEXT,
-                font=self._font(14, "bold" if name == "dashboard" else "normal"),
-                height=44,
+                font=self._font(
+                    13 if compact_sidebar else 14,
+                    "bold" if name == "dashboard" else "normal",
+                ),
+                height=40 if compact_sidebar else 44,
                 anchor="w",
                 corner_radius=11,
-                border_spacing=10,
+                border_spacing=8 if compact_sidebar else 10,
                 fg_color="transparent",
                 hover_color=("#DFE9F7", "#1A2940"),
                 command=lambda n=name: self.select_page(n),
             )
-            button.grid(row=row, column=0, sticky="ew", padx=13, pady=3)
+            button.grid(
+                row=row,
+                column=0,
+                sticky="ew",
+                padx=8 if compact_sidebar else 13,
+                pady=2 if compact_sidebar else 3,
+            )
             self.nav[name] = button
 
         footer = ctk.CTkFrame(sidebar, fg_color="transparent")
-        footer.grid(row=10, column=0, sticky="sew", padx=14, pady=15)
+        footer.grid(
+            row=10,
+            column=0,
+            sticky="sew",
+            padx=10 if compact_sidebar else 14,
+            pady=10 if compact_sidebar else 15,
+        )
 
         build = ctk.CTkFrame(
             footer,
@@ -135,9 +160,19 @@ class ModernControlPanel(ResourceAwareControlPanel):
         ).pack(anchor="w", padx=12, pady=(9, 1))
         self.transport_hint = ctk.CTkLabel(
             build,
-            text="Dynamic activity names ready" if social_sdk_available() else "Legacy Discord naming",
+            text=(
+                ("SDK ready" if social_sdk_available() else "Legacy RPC")
+                if compact_sidebar
+                else (
+                    "Dynamic activity names ready"
+                    if social_sdk_available()
+                    else "Legacy Discord naming"
+                )
+            ),
             text_color=self.SUCCESS if social_sdk_available() else self.MUTED,
-            font=self._font(11),
+            font=self._font(10 if compact_sidebar else 11),
+            wraplength=sidebar_width - 32,
+            justify="left",
         )
         self.transport_hint.pack(anchor="w", padx=12, pady=(0, 9))
 
@@ -154,7 +189,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             variable=self.appearance_var,
             values=["System", "Light", "Dark"],
             command=self._on_appearance_changed,
-            width=210,
+            width=max(120, sidebar_width - 36),
             height=36,
             corner_radius=9,
             fg_color=self.SURFACE_ALT,
