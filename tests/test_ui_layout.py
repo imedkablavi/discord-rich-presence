@@ -84,3 +84,25 @@ def test_dashboard_metric_columns_defaults_to_compact_for_invalid_width():
     from ui_layout import dashboard_metric_columns
 
     assert dashboard_metric_columns("unavailable") == 2
+
+
+
+@pytest.mark.parametrize(
+    ("screen_width", "screen_height", "expected_width", "expected_height"),
+    [
+        (640, 480, 600, 400),
+        (800, 600, 760, 520),
+        (1024, 600, 984, 520),
+    ],
+)
+def test_compact_window_leaves_space_for_desktop_chrome(
+    screen_width, screen_height, expected_width, expected_height
+):
+    result = control_panel_geometry(screen_width, screen_height)
+
+    assert result.width == expected_width
+    assert result.height == expected_height
+    assert result.x >= 0
+    assert result.y >= 0
+    assert result.x + result.width <= screen_width
+    assert result.y + result.height <= screen_height
