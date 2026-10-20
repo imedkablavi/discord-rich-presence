@@ -388,6 +388,10 @@ class DiscordRichPresenceService:
             # Override Presence skips detector execution below, so honor the
             # terminal-disabled setting here to prevent shell hooks retaining data.
             self.terminal_detector.clear_command_cache()
+        elif override_enabled:
+            # Override Presence also skips normal detector polling; keep TTL
+            # cleanup active, especially when a zero TTL disables command caching.
+            self.terminal_detector.cleanup_command_cache()
 
         if override_enabled:
             override = self.config.get('override', {}) or {}
