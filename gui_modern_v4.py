@@ -13,6 +13,7 @@ from social_sdk_transport import social_sdk_available
 from ui_icons import icon
 from ui_layout import (
     control_panel_geometry,
+    dashboard_hero_stacked,
     dashboard_metric_columns,
     sidebar_width_for_screen,
 )
@@ -324,6 +325,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
 
     # --------------------------------------------------------------- dashboard
     def _build_dashboard(self):
+        compact_dashboard = dashboard_hero_stacked(self._content_wraplength)
         page = self._page(
             "dashboard",
             "Overview",
@@ -337,10 +339,17 @@ class ModernControlPanel(ResourceAwareControlPanel):
             border_width=1,
             border_color=self.BORDER,
         )
-        hero.pack(fill="x", padx=36, pady=(8, 10))
+        hero.pack(
+            fill="x",
+            padx=12 if compact_dashboard else 36,
+            pady=(8, 10),
+        )
 
         left = ctk.CTkFrame(hero, fg_color="transparent")
-        left.pack(side="left", fill="both", expand=True, padx=24, pady=22)
+        if compact_dashboard:
+            left.pack(side="top", fill="x", padx=16, pady=(16, 10))
+        else:
+            left.pack(side="left", fill="both", expand=True, padx=24, pady=22)
         ctk.CTkLabel(
             left,
             text="SERVICE",
@@ -361,12 +370,19 @@ class ModernControlPanel(ResourceAwareControlPanel):
             font=self._font(14),
             justify="left",
             anchor="w",
-            wraplength=self._card_wraplength,
+            wraplength=(
+                max(160, self._content_wraplength - 64)
+                if compact_dashboard
+                else self._card_wraplength
+            ),
         )
         self.activity_label.pack(anchor="w", pady=(9, 0), fill="x")
 
         controls = ctk.CTkFrame(hero, fg_color="transparent")
-        controls.pack(side="right", padx=20, pady=18)
+        if compact_dashboard:
+            controls.pack(side="bottom", fill="x", padx=16, pady=(0, 14))
+        else:
+            controls.pack(side="right", padx=20, pady=18)
         self.start_button = ctk.CTkButton(
             controls,
             text="Start service",
@@ -380,7 +396,10 @@ class ModernControlPanel(ResourceAwareControlPanel):
             hover_color=self.PRIMARY_HOVER,
             command=self.start_service,
         )
-        self.start_button.pack(pady=4)
+        if compact_dashboard:
+            self.start_button.pack(fill="x", pady=4)
+        else:
+            self.start_button.pack(pady=4)
         self.stop_button = ctk.CTkButton(
             controls,
             text="Stop service",
@@ -395,10 +414,17 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text_color=self.DANGER,
             command=self.stop_service,
         )
-        self.stop_button.pack(pady=4)
+        if compact_dashboard:
+            self.stop_button.pack(fill="x", pady=4)
+        else:
+            self.stop_button.pack(pady=4)
 
         metrics = ctk.CTkFrame(page, fg_color="transparent")
-        metrics.pack(fill="x", padx=36, pady=4)
+        metrics.pack(
+            fill="x",
+            padx=12 if compact_dashboard else 36,
+            pady=4,
+        )
         metric_columns = dashboard_metric_columns(self._content_wraplength)
         for column in range(metric_columns):
             metrics.grid_columnconfigure(column, weight=1, uniform="metric")
@@ -491,13 +517,17 @@ class ModernControlPanel(ResourceAwareControlPanel):
         self.transport_explainer.pack(anchor="w", padx=14, pady=(0, 11))
 
         quick = ctk.CTkFrame(page, fg_color="transparent")
-        quick.pack(fill="x", padx=36, pady=(7, 22))
+        quick.pack(
+            fill="x",
+            padx=12 if compact_dashboard else 36,
+            pady=(7, 22),
+        )
         for label, icon_name, command in (
             ("Test Discord", "discord", self.test_rpc),
             ("Run diagnostics", "diagnostics", self.run_diagnostics),
             ("Open logs", "activity", self.open_logs),
         ):
-            ctk.CTkButton(
+            quick_button = ctk.CTkButton(
                 quick,
                 text=label,
                 image=icon(icon_name, 16),
@@ -511,7 +541,11 @@ class ModernControlPanel(ResourceAwareControlPanel):
                 border_width=1,
                 border_color=self.BORDER,
                 text_color=self.TEXT,
-            ).pack(side="left", padx=(0, 9))
+            )
+            if compact_dashboard:
+                quick_button.pack(fill="x", pady=(0, 8))
+            else:
+                quick_button.pack(side="left", padx=(0, 9))
 
     def _on_appearance_changed(self, value: str) -> None:
         """Apply and persist the appearance preference immediately."""
