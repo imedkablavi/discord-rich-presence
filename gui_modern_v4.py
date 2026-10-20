@@ -15,6 +15,7 @@ from ui_layout import (
     control_panel_geometry,
     dashboard_hero_stacked,
     dashboard_metric_columns,
+    dashboard_runtime_grid,
     sidebar_width_for_screen,
 )
 
@@ -479,9 +480,10 @@ class ModernControlPanel(ResourceAwareControlPanel):
         runtime_grid.grid_columnconfigure(1, weight=0 if compact_dashboard else 1)
 
         left_runtime = ctk.CTkFrame(runtime_grid, fg_color="transparent")
+        left_runtime_cell, right_runtime_cell = dashboard_runtime_grid(compact_dashboard)
         left_runtime.grid(
-            row=0,
-            column=0,
+            row=left_runtime_cell[0],
+            column=left_runtime_cell[1],
             sticky="nsew",
             padx=(5, 5) if compact_dashboard else (5, 18),
         )
@@ -509,8 +511,8 @@ class ModernControlPanel(ResourceAwareControlPanel):
             fg_color=self.SURFACE_ALT,
         )
         right_runtime.grid(
-            row=1 if compact_dashboard else 0,
-            column=0 if compact_dashboard else 1,
+            row=right_runtime_cell[0],
+            column=right_runtime_cell[1],
             sticky="nsew",
             padx=(5, 5) if compact_dashboard else (18, 5),
             pady=(8, 0) if compact_dashboard else 0,
