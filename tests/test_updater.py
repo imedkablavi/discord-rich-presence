@@ -53,22 +53,26 @@ def test_update_urls_are_https_and_github_only():
         updater._validate_github_url('https://github.com:444/example')
 
 
-def test_https_opener_merges_embedded_certifi_bundle(monkeypatch, tmp_path: Path):
+def test_https_opener_uses_pinned_certifi_bundle_as_trust_source(monkeypatch, tmp_path: Path):
     bundle = tmp_path / 'cacert.pem'
     bundle.write_text('test bundle', encoding='utf-8')
-    loaded = []
+    requested = []
 
     class FakeContext:
-        def load_verify_locations(self, *, cafile):
-            loaded.append(cafile)
+        pass
 
     context = FakeContext()
-    monkeypatch.setattr(updater.ssl, 'create_default_context', lambda: context)
+
+    def fake_default_context(*, cafile=None):
+        requested.append(cafile)
+        return context
+
+    monkeypatch.setattr(updater.ssl, 'create_default_context', fake_default_context)
     monkeypatch.setattr(updater.certifi, 'where', lambda: str(bundle))
 
     opener = updater._opener()
 
-    assert loaded == [str(bundle)]
+    assert requested == [str(bundle)]
     https_handlers = [
         handler for handler in opener.handlers
         if isinstance(handler, updater.urllib.request.HTTPSHandler)
