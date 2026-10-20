@@ -193,7 +193,7 @@ def set_game_enabled(config: Config, game_name: object, enabled: bool, *, save: 
 
 
 def gamer_mode_enabled(config: Config) -> bool:
-    return config.get('gaming.gamer_mode.enabled', False) is True
+    return config.get('gamer_mode.enabled', False) is True
 
 
 def _current_detectors(config: Config) -> dict[str, bool]:
@@ -220,18 +220,18 @@ def set_gamer_mode(config: Config, enabled: bool, *, save: bool = True) -> None:
 
     if enabled:
         previous = _current_detectors(config)
-        config.set('gaming.gamer_mode.previous_detectors', previous)
-        config.set('gaming.gamer_mode.enabled', True)
+        config.set('gamer_mode.previous_detectors', previous)
+        config.set('gamer_mode.enabled', True)
         for name in _DETECTOR_NAMES:
             config.set(f'rules.enabled_detectors.{name}', name == 'gaming')
     else:
-        previous = config.get('gaming.gamer_mode.previous_detectors', {}) or {}
+        previous = config.get('gamer_mode.previous_detectors', {}) or {}
         defaults = DEFAULT_CONFIG['rules']['enabled_detectors']
         for name in _DETECTOR_NAMES:
             value = previous.get(name, defaults[name]) if isinstance(previous, dict) else defaults[name]
             config.set(f'rules.enabled_detectors.{name}', value if isinstance(value, bool) else defaults[name])
-        config.set('gaming.gamer_mode.enabled', False)
-        config.set('gaming.gamer_mode.previous_detectors', {})
+        config.set('gamer_mode.enabled', False)
+        config.set('gamer_mode.previous_detectors', {})
 
     if save:
         config.save()
