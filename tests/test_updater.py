@@ -170,3 +170,47 @@ def test_linux_immediate_crash_restores_previous_binary(monkeypatch, tmp_path: P
 
     assert target.read_bytes() == b'old'
     assert len(launches) == 2
+
+
+
+def test_windows_replacement_helper_contains_startup_rollback_guard(monkeypatch):
+    """Keep the Windows updater's crash-detection and rollback path covered.
+
+    This is a contract test for the generated PowerShell helper, not a substitute
+    for executing the helper in a real Windows update/rollback integration test.
+    """
+    launched = []
+
+    def fake_popen(command, **kwargs):
+        launched.append((command, kwargs))
+        return object()
+
+    monkeypatch.setattr(updater.subprocess, 'Popen', fake_popen)
+    updater._schedule_windows_replace(
+        Path('DiscordRichPresence.exe'),
+        Path('.DiscordRichPresence.exe.2.0.0.new'),
+        ['--gui'],
+    )
+
+    assert len(launched) == 1
+    command, kwargs = launched[0]
+    assert command[:6] == [
+        'powershell.exe',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+    ]
+    assert kwargs['close_fds'] is True
+
+    script_path = Path(command[6])
+    try:
+        script = script_path.read_text(encoding='utf-8')
+        assert "$Backup = $Target + '.old'" in script
+        assert 'if ($Child.HasExited)' in script
+        assert 'Move-Item -LiteralPath $Backup -Destination $Target -Force' in script
+        assert 'Start-Process -FilePath $Target -ArgumentList $ArgsList | Out-Null' in script
+        assert 'exit 22' in script
+    finally:
+        script_path.unlink(missing_ok=True)
