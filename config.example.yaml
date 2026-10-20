@@ -129,7 +129,8 @@ rules:
     - "InPrivate"
   enabled_detectors:
     media: true
-    terminal: true
+    # Terminal command presence is opt-in because commands may contain secrets.
+    terminal: false
     coding: true
     browser: true
     gaming: true
