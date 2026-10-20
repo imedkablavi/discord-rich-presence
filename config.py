@@ -101,6 +101,7 @@ DEFAULT_CONFIG = {
     'gamer_mode': {
         'enabled': False,
         'startup_profile': 'default',
+        'previous_detectors': {},
     },
     'social': {
         'buttons': True,
@@ -222,6 +223,31 @@ class Config:
                 user_config = {}
             if not isinstance(user_config, dict):
                 raise ValueError('Top-level configuration must be a mapping/object')
+
+            # Migrate the legacy Gamer Mode state. Older builds persisted the
+            # live toggle and detector snapshot under gaming.gamer_mode while
+            # the documented/default settings lived under gamer_mode. The old
+            # nested values must win when present so users keep their state.
+            user_config = copy.deepcopy(user_config)
+            legacy_gaming = user_config.get('gaming')
+            legacy_mode = (
+                legacy_gaming.get('gamer_mode')
+                if isinstance(legacy_gaming, dict)
+                else None
+            )
+            if isinstance(legacy_mode, dict):
+                canonical_mode = user_config.get('gamer_mode')
+                if not isinstance(canonical_mode, dict):
+                    canonical_mode = {}
+                if isinstance(legacy_mode.get('enabled'), bool):
+                    canonical_mode['enabled'] = legacy_mode['enabled']
+                previous = legacy_mode.get('previous_detectors')
+                if isinstance(previous, dict):
+                    canonical_mode['previous_detectors'] = previous
+                user_config['gamer_mode'] = canonical_mode
+                legacy_gaming.pop('gamer_mode', None)
+                if not legacy_gaming:
+                    user_config.pop('gaming', None)
 
             new_data = copy.deepcopy(DEFAULT_CONFIG)
             self._deep_update(new_data, user_config)
@@ -535,6 +561,18 @@ class Config:
             for key in keys:
                 if not isinstance(values.get(key, False), bool):
                     raise ValueError(f'{section}.{key} must be true or false')
+
+        gamer_snapshot = data.get('gamer_mode', {}).get('previous_detectors', {})
+        valid_detectors = DEFAULT_CONFIG['rules']['enabled_detectors']
+        if not isinstance(gamer_snapshot, dict):
+            raise ValueError('gamer_mode.previous_detectors must be an object')
+        if any(
+            key not in valid_detectors or not isinstance(value, bool)
+            for key, value in gamer_snapshot.items()
+        ):
+            raise ValueError(
+                'gamer_mode.previous_detectors must contain known detector names and boolean values'
+            )
 
         game_library = data.get('game_library', {})
         if not isinstance(game_library, dict):
