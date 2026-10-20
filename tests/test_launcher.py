@@ -63,3 +63,53 @@ def test_update_service_stop_fails_closed_when_runtime_state_is_unavailable():
         raise OSError("runtime directory is not accessible")
 
     assert launcher._stop_active_service_for_update(broken_runtime) is False
+
+
+
+def test_update_refuses_to_proceed_with_corrupt_runtime_lock(tmp_path):
+    class RuntimeWithCorruptLock:
+        def __init__(self):
+            self.lock_path = tmp_path / "instance.lock"
+            self.lock_path.write_text("{not-json", encoding="utf-8")
+
+        def read_active(self):
+            return None
+
+        @staticmethod
+        def _read_json(_path):
+            return None
+
+        @staticmethod
+        def _same_process(_record):
+            raise AssertionError("corrupt records must be rejected before process checks")
+
+    assert launcher._stop_active_service_for_update(RuntimeWithCorruptLock) is False
+
+
+def test_update_allows_a_parseable_but_stale_runtime_lock(tmp_path):
+    import json
+
+    class RuntimeWithStaleLock:
+        def __init__(self):
+            self.lock_path = tmp_path / "instance.lock"
+            self.lock_path.write_text(
+                json.dumps({"pid": 2_000_000_000, "create_time": 1.0}),
+                encoding="utf-8",
+            )
+
+        def read_active(self):
+            return None
+
+        @staticmethod
+        def _read_json(path):
+            try:
+                import json as _json
+                return _json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return None
+
+        @staticmethod
+        def _same_process(_record):
+            return False
+
+    assert launcher._stop_active_service_for_update(RuntimeWithStaleLock) is True
