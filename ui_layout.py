@@ -50,3 +50,19 @@ def control_panel_geometry(screen_width: int, screen_height: int) -> ControlPane
         min_width=min_width,
         min_height=min_height,
     )
+
+
+
+def sidebar_width_for_screen(screen_width: int) -> int:
+    """Return a readable sidebar width for the display's available space."""
+    try:
+        width = max(320, int(screen_width))
+    except (TypeError, ValueError, OverflowError):
+        width = 1366
+    if width < 720:
+        return 156
+    if width < 900:
+        return 184
+    if width < 1100:
+        return 210
+    return 252
