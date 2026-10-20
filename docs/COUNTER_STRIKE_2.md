@@ -10,6 +10,7 @@ When CS2 is the detected game and a fresh GSI snapshot is available, Rich Presen
 - the current game mode, such as Competitive, Casual, Deathmatch, or Wingman;
 - the current map, such as Mirage, Dust II, Inferno, Nuke, Ancient, or Anubis;
 - the local/currently observed side: Counter-Terrorists or Terrorists;
+- the reported map phase (Warmup, In match, Round break, or Match over);
 - the current CT/T round score when that score is meaningful for the reported mode.
 
 Example:
@@ -19,9 +20,9 @@ Playing · Counter-Strike 2
 Competitive · Mirage · Counter-Terrorists · CT 8–6 T
 ```
 
-`map.mode` is displayed as reported by GSI. Some matchmaking variants can share the same internal mode name, so the integration does not guess a more specific queue label when Valve does not expose one.
+`map.mode` is displayed as reported by GSI. Some matchmaking variants can share the same internal mode name, so the integration does not guess a more specific queue label when Valve does not expose one. GSI does not report whether the player is actively searching for a matchmaking game. When no map phase or match context is present, CYBREX shows that matchmaking state is unavailable instead of guessing "Searching" or "In menu".
 
-If GSI is not configured or the latest snapshot has expired, ordinary foreground-game detection still reports Counter-Strike 2 without the live match fields.
+If GSI is not configured or the latest snapshot has expired, ordinary foreground-game detection still reports Counter-Strike 2 and marks live match context as unavailable. If Integrations reports an authentication rejection, restart CS2 so the game reloads the token-bearing GSI file.
 
 ## Anti-cheat boundary
 
@@ -99,7 +100,7 @@ curl -s http://127.0.0.1:32192/v1/health
 curl -s http://127.0.0.1:32192/v1/status
 ```
 
-`/v1/status` intentionally exposes only `connected`, `age_ms`, and `has_match_context` metadata. It does not reveal map, mode, side, authentication token, Steam ID, player name, weapons, money, health, positions, or other players. It is bound to IPv4 loopback rather than an external interface.
+`/v1/status` exposes only metadata: `connected`, `age_ms`, `has_match_context`, and the boolean `auth_error` flag. The flag indicates that a GSI POST used an invalid token; it never exposes the token itself. The endpoint does not reveal map, mode, side, Steam ID, player name, weapons, money, health, positions, or other players. It is bound to IPv4 loopback rather than an external interface.
 
 ## Data minimization
 
