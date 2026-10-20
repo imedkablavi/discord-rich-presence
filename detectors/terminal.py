@@ -67,7 +67,9 @@ class TerminalDetector:
         # terminal tracking is disabled. Otherwise hook-written secrets can
         # remain on disk indefinitely simply because no terminal is foreground.
         if not self.config.get('rules.enabled_detectors.terminal', True):
-            self._cleanup_command_cache()
+            # Disabling the detector means no raw shell commands should remain
+            # in the cache, even if optional shell hooks are still installed.
+            self.clear_command_cache()
             return None
 
         app_name = str(window_info.get('app_name', '')).lower()
