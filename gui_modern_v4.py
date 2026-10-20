@@ -424,7 +424,11 @@ class ModernControlPanel(ResourceAwareControlPanel):
                 column=column,
                 sticky="nsew",
                 padx=horizontal_pad,
-                pady=(0, 6) if row == 0 and metric_columns == 2 else (6, 0),
+                pady=(
+                    (0, 6)
+                    if metric_columns == 2 and row == 0
+                    else (6, 0) if metric_columns == 2 else 0
+                ),
             )
 
         runtime = self._section(page, "Runtime details")
