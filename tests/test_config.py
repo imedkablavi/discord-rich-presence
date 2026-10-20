@@ -207,3 +207,11 @@ def test_saved_config_is_private_even_with_open_umask(tmp_path: Path):
     finally:
         os.umask(previous_umask)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+
+def test_example_config_keeps_terminal_tracking_opt_in():
+    example_path = Path(__file__).resolve().parents[1] / 'config.example.yaml'
+    config = Config(example_path)
+
+    assert config.get('rules.enabled_detectors.terminal') is False
