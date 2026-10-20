@@ -89,7 +89,8 @@ class ModernControlPanel(LegacyControlPanel):
     SURFACE_ALT = ("#F8FAFC", "#192536")
     BORDER = ("#D9E2EC", "#2B3A4F")
     TEXT = ("#172033", "#F1F5F9")
-    MUTED = ("#5F6B7A", "#A8B3C2")
+    # Muted copy still needs AA-level contrast on both light and dark surfaces.
+    MUTED = ("#46566B", "#BBC7D6")
     PRIMARY = ("#2563EB", "#3B82F6")
     PRIMARY_HOVER = ("#1D4ED8", "#2563EB")
     SUCCESS = ("#15803D", "#22C55E")
@@ -111,12 +112,18 @@ class ModernControlPanel(LegacyControlPanel):
             families = {name.casefold(): name for name in tkfont.families(self)}
         except Exception:
             families = {}
+        # Prefer general-purpose UI sans fonts for Latin labels. Some Linux
+        # setups substitute a less legible fallback when Noto Sans Arabic is
+        # selected as the primary family for the entire English UI.
         for candidate in (
-            "Noto Sans Arabic",
+            "Inter",
             "Noto Sans",
-            "Segoe UI",
+            "Cantarell",
             "DejaVu Sans",
+            "Liberation Sans",
+            "Segoe UI",
             "Arial",
+            "Noto Sans Arabic",
         ):
             match = families.get(candidate.casefold())
             if match:
@@ -126,7 +133,17 @@ class ModernControlPanel(LegacyControlPanel):
         return self.ui_font_family
 
     def _font(self, size: int = 14, weight: str = "normal") -> ctk.CTkFont:
-        return ctk.CTkFont(family=self._pick_font_family(), size=size, weight=weight)
+        # Small helper/status labels were hard to read on scaled Linux displays.
+        # Enlarge small text without inflating already prominent page headings.
+        if size <= 12:
+            size += 2
+        elif size <= 16:
+            size += 1
+        return ctk.CTkFont(
+            family=self._pick_font_family(),
+            size=size,
+            weight=weight,
+        )
 
     # ---------------------------------------------------------------- layout
     def _build_sidebar(self):
