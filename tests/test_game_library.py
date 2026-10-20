@@ -177,3 +177,43 @@ def test_gamer_mode_rejects_invalid_saved_detector_snapshot(tmp_path):
 
     with pytest.raises(ValueError, match='gamer_mode.previous_detectors'):
         Config(path)
+
+
+
+def test_library_marks_supported_local_telemetry_games_as_enhanced(monkeypatch):
+    class FakeSteam:
+        def __init__(self):
+            self._games = [
+                SimpleNamespace(name='War Thunder', appid=236390),
+                SimpleNamespace(name='Squad', appid=393380),
+                SimpleNamespace(name='Counter-Strike 2', appid=730),
+                # Unknown titles must remain standard; never infer enrichment
+                # from a broad substring or a nearby Steam AppID.
+                SimpleNamespace(name='Squad Tactics Fan Game', appid=999001),
+            ]
+
+        def refresh(self, force=False):
+            return None
+
+    class EmptyCatalog:
+        def __init__(self):
+            self._games = []
+
+        def refresh(self, force=False):
+            return None
+
+    class NoCuratedGames:
+        def contains(self, _name):
+            return False
+
+    monkeypatch.setattr(game_library, 'SteamGameCatalog', FakeSteam)
+    monkeypatch.setattr(game_library, 'EpicGameCatalog', EmptyCatalog)
+    monkeypatch.setattr(game_library, 'HeroicGameCatalog', EmptyCatalog)
+    monkeypatch.setattr(game_library, 'PopularGameCatalog', NoCuratedGames)
+
+    entries = {entry.name: entry for entry in game_library.discover_games()}
+
+    assert entries['War Thunder'].enhanced is True
+    assert entries['Squad'].enhanced is True
+    assert entries['Counter-Strike 2'].enhanced is True
+    assert entries['Squad Tactics Fan Game'].enhanced is False
