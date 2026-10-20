@@ -257,5 +257,14 @@ def test_windows_replacement_helper_contains_startup_rollback_guard(monkeypatch)
         assert 'Move-Item -LiteralPath $Backup -Destination $Target -Force' in script
         assert 'Start-Process -FilePath $Target -ArgumentList $ArgsList | Out-Null' in script
         assert 'exit 22' in script
+        # Both an immediate child exit and a Start-Process failure must enter
+        # the same rollback path; rollback failure retains a recoverable backup.
+        launch_guard = script.split("if ($null -ne $ArgsList", 1)[1]
+        assert '$LaunchError = $false' in launch_guard
+        assert '$Child = Start-Process -FilePath $Target' in launch_guard
+        assert '} catch {' in launch_guard
+        assert 'Move-Item -LiteralPath $Backup -Destination $Target -Force' in launch_guard
+        assert 'if ($RollbackOk) { exit 22 } else { exit 23 }' in launch_guard
+        assert "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue" in script
     finally:
         script_path.unlink(missing_ok=True)
