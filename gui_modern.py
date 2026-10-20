@@ -604,6 +604,10 @@ class ModernControlPanel(ctk.CTk):
                 if label or url:
                     buttons.append({'label': label, 'url': url})
             self.config.set('discord.buttons', buttons)
+            # The refined UI keeps appearance consistent after restarting.
+            # Older UI layers do not expose this control, so they remain compatible.
+            if hasattr(self, 'appearance_var'):
+                self.config.set('ui.appearance', str(self.appearance_var.get()))
             self.config.save()
             if _WINREG_AVAILABLE:
                 self._set_registry_autostart(self.autostart.get())
