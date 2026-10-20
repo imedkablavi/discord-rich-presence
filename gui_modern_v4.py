@@ -164,7 +164,16 @@ class ModernControlPanel(ResourceAwareControlPanel):
             dropdown_fg_color=self.SURFACE,
             dropdown_text_color=self.TEXT,
         )
-        self.theme_menu.pack(fill="x", pady=(0, 9))
+        self.theme_menu.pack(fill="x", pady=(0, 4))
+        self.appearance_status = ctk.CTkLabel(
+            footer,
+            text="",
+            text_color=self.MUTED,
+            font=self._font(10),
+            anchor="w",
+            height=14,
+        )
+        self.appearance_status.pack(fill="x", padx=2, pady=(0, 7))
         ctk.CTkButton(
             footer,
             text="Save changes",
@@ -427,12 +436,30 @@ class ModernControlPanel(ResourceAwareControlPanel):
             ).pack(side="left", padx=(0, 9))
 
     def _on_appearance_changed(self, value: str) -> None:
-        """Apply a preview immediately; persist it with the normal Save action."""
+        """Apply and persist the appearance preference immediately."""
+        previous = str(self.config.get("ui.appearance", "System"))
+        if previous not in {"System", "Light", "Dark"}:
+            previous = "System"
         appearance = str(value or "System")
         if appearance not in {"System", "Light", "Dark"}:
             appearance = "System"
         self.appearance_var.set(appearance)
         ctk.set_appearance_mode(appearance)
+        try:
+            self.config.set("ui.appearance", appearance)
+            self.config.save()
+            self.appearance_status.configure(
+                text="Appearance saved",
+                text_color=self.SUCCESS,
+            )
+        except Exception:
+            self.config.set("ui.appearance", previous)
+            self.appearance_var.set(previous)
+            ctk.set_appearance_mode(previous)
+            self.appearance_status.configure(
+                text="Could not save preference",
+                text_color=self.MUTED,
+            )
 
     def select_page(self, name: str) -> None:
         """Keep the sidebar selection obvious and consistent with the active page."""
