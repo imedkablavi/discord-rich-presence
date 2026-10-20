@@ -11,6 +11,7 @@ from config import Config
 from gui_modern_v3 import ModernControlPanel as ResourceAwareControlPanel
 from social_sdk_transport import social_sdk_available
 from ui_icons import icon
+from ui_layout import control_panel_geometry
 
 
 class ModernControlPanel(ResourceAwareControlPanel):
@@ -27,8 +28,17 @@ class ModernControlPanel(ResourceAwareControlPanel):
         ctk.set_appearance_mode(appearance)
         self._initial_appearance = appearance
         super().__init__(config)
-        self.geometry("1320x840")
-        self.minsize(1080, 720)
+        # Respect smaller laptop displays instead of forcing a fixed 1320x840
+        # window that can put controls behind the taskbar or beyond the screen.
+        self.update_idletasks()
+        layout = control_panel_geometry(
+            self.winfo_screenwidth(),
+            self.winfo_screenheight(),
+        )
+        self.minsize(layout.min_width, layout.min_height)
+        self.geometry(
+            f"{layout.width}x{layout.height}+{layout.x}+{layout.y}"
+        )
         self.after(700, self._poll_identity_surface)
 
     # ---------------------------------------------------------------- layout
@@ -154,7 +164,16 @@ class ModernControlPanel(ResourceAwareControlPanel):
             dropdown_fg_color=self.SURFACE,
             dropdown_text_color=self.TEXT,
         )
-        self.theme_menu.pack(fill="x", pady=(0, 9))
+        self.theme_menu.pack(fill="x", pady=(0, 4))
+        self.appearance_status = ctk.CTkLabel(
+            footer,
+            text="",
+            text_color=self.MUTED,
+            font=self._font(10),
+            anchor="w",
+            height=14,
+        )
+        self.appearance_status.pack(fill="x", padx=2, pady=(0, 7))
         ctk.CTkButton(
             footer,
             text="Save changes",
@@ -417,12 +436,30 @@ class ModernControlPanel(ResourceAwareControlPanel):
             ).pack(side="left", padx=(0, 9))
 
     def _on_appearance_changed(self, value: str) -> None:
-        """Apply a preview immediately; persist it with the normal Save action."""
+        """Apply and persist the appearance preference immediately."""
+        previous = str(self.config.get("ui.appearance", "System"))
+        if previous not in {"System", "Light", "Dark"}:
+            previous = "System"
         appearance = str(value or "System")
         if appearance not in {"System", "Light", "Dark"}:
             appearance = "System"
         self.appearance_var.set(appearance)
         ctk.set_appearance_mode(appearance)
+        try:
+            self.config.set("ui.appearance", appearance)
+            self.config.save()
+            self.appearance_status.configure(
+                text="Appearance saved",
+                text_color=self.SUCCESS,
+            )
+        except Exception:
+            self.config.set("ui.appearance", previous)
+            self.appearance_var.set(previous)
+            ctk.set_appearance_mode(previous)
+            self.appearance_status.configure(
+                text="Could not save preference",
+                text_color=self.MUTED,
+            )
 
     def select_page(self, name: str) -> None:
         """Keep the sidebar selection obvious and consistent with the active page."""
