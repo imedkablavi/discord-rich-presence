@@ -48,9 +48,9 @@ def test_gamer_mode_is_idempotent(tmp_path):
     config = _config(tmp_path)
     before = dict(config.get('rules.enabled_detectors'))
     game_library.set_gamer_mode(config, True, save=False)
-    first_snapshot = dict(config.get('gaming.gamer_mode.previous_detectors'))
+    first_snapshot = dict(config.get('gamer_mode.previous_detectors'))
     game_library.set_gamer_mode(config, True, save=False)
-    assert config.get('gaming.gamer_mode.previous_detectors') == first_snapshot
+    assert config.get('gamer_mode.previous_detectors') == first_snapshot
     game_library.set_gamer_mode(config, False, save=False)
     assert config.get('rules.enabled_detectors') == before
 
@@ -70,7 +70,7 @@ def test_gamer_and_companion_settings_survive_save_reload(tmp_path):
     assert reloaded.get('fivem.show_server_name') is True
     assert reloaded.get('minecraft.port') == 32194
     assert reloaded.get('minecraft.show_server_name') is True
-    assert reloaded.get('gaming.gamer_mode.enabled') is True
+    assert reloaded.get('gamer_mode.enabled') is True
     assert reloaded.get('rules.enabled_detectors.gaming') is True
     assert reloaded.get('rules.enabled_detectors.browser') is False
 
@@ -129,3 +129,51 @@ def test_library_counts():
         game_library.GameLibraryEntry('c', 'C', 'Epic Games', True),
     ]
     assert game_library.library_counts(entries) == (3, 2)
+
+
+
+def test_legacy_nested_gamer_mode_config_migrates_without_losing_preferences(tmp_path):
+    path = tmp_path / 'legacy-gamer-mode.yaml'
+    path.write_text(
+        'gamer_mode:\\n'
+        '  enabled: false\\n'
+        '  previous_detectors: {}\\n'
+        'gaming:\\n'
+        '  gamer_mode:\\n'
+        '    enabled: true\\n'
+        '    previous_detectors:\\n'
+        '      media: false\\n'
+        '      browser: true\\n'
+        '      gaming: true\\n',
+        encoding='utf-8',
+    )
+
+    config = Config(path)
+    assert config.get('gamer_mode.enabled') is True
+    assert config.get('gamer_mode.previous_detectors') == {
+        'media': False,
+        'browser': True,
+        'gaming': True,
+    }
+    assert config.get('gaming.gamer_mode.enabled') is None
+
+    config.save()
+    reloaded = Config(path)
+    assert reloaded.get('gamer_mode.enabled') is True
+    assert reloaded.get('gamer_mode.previous_detectors')['media'] is False
+    assert reloaded.get('gaming.gamer_mode.enabled') is None
+
+
+def test_gamer_mode_rejects_invalid_saved_detector_snapshot(tmp_path):
+    path = tmp_path / 'invalid-gamer-mode.yaml'
+    path.write_text(
+        'gamer_mode:\\n'
+        '  previous_detectors:\\n'
+        '    browser: yes\\n'
+        '    arbitrary-detector: true\\n',
+        encoding='utf-8',
+    )
+    import pytest
+
+    with pytest.raises(ValueError, match='gamer_mode.previous_detectors'):
+        Config(path)
