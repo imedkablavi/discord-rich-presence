@@ -381,16 +381,13 @@ class PresenceBuilder:
             details, state = self._squad_presence_text(activity, game_name, launcher)
         else:
             details = game_name
-            platform_or_launcher = str(source or launcher).strip()
-            # Storefront names are already represented by the small icon/tooltip;
-            # repeating "Steam" as the state adds no useful information for
-            # games that do not expose live telemetry.
-            if platform_or_launcher.lower() in {
-                "steam", "epic games", "heroic", "gog galaxy", "gaming"
-            }:
+            # Brawlhalla currently has foreground-process detection but no
+            # supported live-match adapter in this project. Avoid implying that
+            # the storefront itself is the activity state for this title.
+            if game_name.strip().casefold() == "brawlhalla":
                 state = "In game"
             else:
-                state = platform_or_launcher or "In game"
+                state = source or launcher
 
         payload: Dict[str, Any] = {
             'activity_type': ActivityType.PLAYING,
