@@ -128,3 +128,25 @@ def test_clear_command_cache_removes_pid_scoped_and_legacy_files(tmp_path):
 
     assert not pid_file.exists()
     assert not detector.cmd_file.exists()
+
+
+
+def test_terminal_cache_tolerates_small_future_timestamp_skew(tmp_path):
+    detector = _detector(tmp_path)
+    command_file = detector.command_dir / '424242.txt'
+    command_file.write_text('recent-command\n', encoding='utf-8')
+    future = time.time() + 2
+    os.utime(command_file, (future, future))
+
+    assert detector._is_fresh(command_file) is True
+    assert detector._read_command(command_file) == 'recent-command'
+
+
+def test_terminal_cache_rejects_materially_future_timestamp(tmp_path):
+    detector = _detector(tmp_path)
+    command_file = detector.command_dir / '424242.txt'
+    command_file.write_text('future-command\n', encoding='utf-8')
+    future = time.time() + detector._MAX_CACHE_FUTURE_SKEW_SECS + 30
+    os.utime(command_file, (future, future))
+
+    assert detector._is_fresh(command_file) is False
