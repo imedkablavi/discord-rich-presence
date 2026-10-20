@@ -82,11 +82,11 @@ def test_https_opener_uses_pinned_certifi_bundle_as_trust_source(monkeypatch, tm
 
 
 def test_https_context_fails_closed_when_ca_bundle_cannot_be_loaded(monkeypatch):
-    class FakeContext:
-        def load_verify_locations(self, *, cafile):
-            raise OSError('CA bundle missing')
+    def fail_to_create_context(*, cafile=None):
+        assert cafile == '/missing/cacert.pem'
+        raise OSError('CA bundle missing')
 
-    monkeypatch.setattr(updater.ssl, 'create_default_context', lambda: FakeContext())
+    monkeypatch.setattr(updater.ssl, 'create_default_context', fail_to_create_context)
     monkeypatch.setattr(updater.certifi, 'where', lambda: '/missing/cacert.pem')
 
     with pytest.raises(UpdateError, match='certificate store'):
