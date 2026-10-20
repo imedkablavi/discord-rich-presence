@@ -87,16 +87,15 @@ def _validate_github_url(url: str) -> None:
 
 
 def _ssl_context() -> ssl.SSLContext:
-    """Combine the host trust store with the packaged Mozilla CA bundle.
+    """Use the pinned Mozilla CA bundle for updater HTTPS verification.
 
-    Frozen builds may not find the host distribution's CA path (notably when
-    built on Ubuntu and run on Fedora/Bazzite). Keeping system trust and adding
-    certifi's pinned bundle avoids a distribution-specific trust dependency.
+    A frozen build may run on a different Linux distribution from the one it
+    was built on. Using certifi as the explicit CA file avoids inconsistent
+    system bundle paths and avoids re-trusting roots removed from the current
+    Mozilla bundle on hosts whose local trust store has not been updated.
     """
     try:
-        context = ssl.create_default_context()
-        context.load_verify_locations(cafile=certifi.where())
-        return context
+        return ssl.create_default_context(cafile=certifi.where())
     except (OSError, ssl.SSLError) as exc:
         raise UpdateError("Could not initialize the HTTPS certificate store") from exc
 
