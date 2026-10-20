@@ -210,6 +210,24 @@ def test_saved_config_is_private_even_with_open_umask(tmp_path: Path):
 
 
 
+def test_ui_appearance_preference_is_persisted_and_validated(tmp_path: Path):
+    path = tmp_path / 'config.yaml'
+    config = Config(path)
+    assert config.get('ui.appearance') == 'System'
+
+    config.set('ui.appearance', 'Dark')
+    config.save()
+    assert Config(path).get('ui.appearance') == 'Dark'
+
+    invalid = tmp_path / 'invalid-appearance.yaml'
+    invalid.write_text('ui:\n  appearance: neon\n', encoding='utf-8')
+    import pytest
+
+    with pytest.raises(ValueError, match='ui.appearance'):
+        Config(invalid)
+
+
+
 def test_example_config_keeps_terminal_tracking_opt_in():
     example_path = Path(__file__).resolve().parents[1] / 'config.example.yaml'
     config = Config(example_path)
