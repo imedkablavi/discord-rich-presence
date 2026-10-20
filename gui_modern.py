@@ -45,6 +45,8 @@ class ModernControlPanel(ctk.CTk):
         self.runtime = RuntimeState()
         self.service_process: subprocess.Popen | None = None
         self._integration_probe_busy = False
+        self._closing = False
+        self._ui_dispatcher = UIThreadDispatcher()
 
         self.title(self.BRAND)
         self.geometry('1180x760')
@@ -57,8 +59,34 @@ class ModernControlPanel(ctk.CTk):
         self._build_sidebar()
         self._build_pages()
         self.select_page('dashboard')
+        self.after(50, self._drain_ui_callbacks)
         self.after(400, self._poll_service)
         self.after(900, self._poll_integrations)
+
+    def _post_ui(self, callback) -> None:
+        """Queue a UI callback without calling Tcl/Tk from a worker thread."""
+        if getattr(self, "_closing", False):
+            return
+        self._ui_dispatcher.post(callback)
+
+    def _drain_ui_callbacks(self) -> None:
+        """Execute queued worker results on the Tk event-loop thread only."""
+        if getattr(self, "_closing", False):
+            return
+        for callback in self._ui_dispatcher.take_pending(limit=64):
+            try:
+                callback()
+            except Exception:
+                logging.getLogger(__name__).exception("Queued control-panel callback failed")
+        if not getattr(self, "_closing", False):
+            try:
+                self.after(50, self._drain_ui_callbacks)
+            except tk.TclError:
+                return
+
+    def destroy(self):
+        self._closing = True
+        super().destroy()
 
     # ------------------------------------------------------------------ layout
     def _build_sidebar(self):
@@ -774,7 +802,7 @@ class ModernControlPanel(ctk.CTk):
                 self.cs2_status_label.configure(text=f'Status: {label.lower()}', text_color=color)
                 self._integration_probe_busy = False
 
-            self.after(0, apply)
+            self._post_ui(apply)
 
         threading.Thread(target=worker, daemon=True).start()
         self.after(4000, self._poll_integrations)
@@ -797,10 +825,10 @@ class ModernControlPanel(ctk.CTk):
                 rpc = Presence(application_id)
                 rpc.connect()
                 rpc.close()
-                self.after(0, lambda: messagebox.showinfo('Discord RPC', 'Connection succeeded.'))
+                self._post_ui(lambda: messagebox.showinfo('Discord RPC', 'Connection succeeded.'))
             except Exception as exc:
                 message = str(exc)
-                self.after(0, lambda: messagebox.showerror('Discord RPC', f'Connection failed: {message}'))
+                self._post_ui(lambda: messagebox.showerror('Discord RPC', f'Connection failed: {message}'))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -812,9 +840,9 @@ class ModernControlPanel(ctk.CTk):
             if ok:
                 records = int((data or {}).get('records', 0) or 0)
                 text = f'Browser Companion is reachable on 127.0.0.1:{port}.\nActive records: {records}'
-                self.after(0, lambda: messagebox.showinfo('Browser Companion', text))
+                self._post_ui(lambda: messagebox.showinfo('Browser Companion', text))
             else:
-                self.after(0, lambda: messagebox.showerror('Browser Companion', f'Bridge unavailable: {error or "not running"}'))
+                self._post_ui(lambda: messagebox.showerror('Browser Companion', f'Bridge unavailable: {error or "not running"}'))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -880,7 +908,7 @@ class ModernControlPanel(ctk.CTk):
                     self.diag_labels[key].configure(text=text, text_color=color)
                 self.select_page('diagnostics')
 
-            self.after(0, apply)
+            self._post_ui(apply)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -903,13 +931,13 @@ class ModernControlPanel(ctk.CTk):
                 output = (completed.stdout or completed.stderr or '').strip()
                 if completed.returncode == 0:
                     message = output or 'Counter-Strike 2 GSI installed successfully.'
-                    self.after(0, lambda: messagebox.showinfo('CS2 GSI', message))
+                    self._post_ui(lambda: messagebox.showinfo('CS2 GSI', message))
                 else:
                     message = output or f'Installer exited with code {completed.returncode}'
-                    self.after(0, lambda: messagebox.showerror('CS2 GSI', message))
+                    self._post_ui(lambda: messagebox.showerror('CS2 GSI', message))
             except Exception as exc:
                 message = str(exc)
-                self.after(0, lambda: messagebox.showerror('CS2 GSI', message))
+                self._post_ui(lambda: messagebox.showerror('CS2 GSI', message))
 
         threading.Thread(target=worker, daemon=True).start()
 
