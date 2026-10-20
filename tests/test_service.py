@@ -237,3 +237,49 @@ def test_override_presence_still_clears_cache_when_terminal_tracking_is_disabled
     assert payload["details"] == "Manual presence"
     assert service.terminal_detector.cleared == 1
     assert service.terminal_detector.cleaned == 0
+
+
+
+def test_override_presence_still_sweeps_terminal_cache_when_tracking_is_enabled():
+    service = _service()
+    service.config = type(
+        "ConfigStub",
+        (),
+        {"get": lambda self, key, default=None: {
+            "rules.clear_on_lock_screen": True,
+            "rules.enabled_detectors.terminal": True,
+            "override.enabled": True,
+            "override": {"details": "Manual presence"},
+            "images.app": "app",
+            "privacy.mode": "balanced",
+        }.get(key, default)},
+    )()
+    service._reload_config_if_changed = lambda: None
+    service.window_detector = type(
+        "WindowDetectorStub",
+        (),
+        {"get_active_window": lambda self: {
+            "app_name": "Firefox",
+            "title": "news",
+        }},
+    )()
+
+    class TerminalCacheStub:
+        def __init__(self):
+            self.cleared = 0
+            self.cleaned = 0
+
+        def clear_command_cache(self):
+            self.cleared += 1
+
+        def cleanup_command_cache(self):
+            self.cleaned += 1
+
+    service.terminal_detector = TerminalCacheStub()
+
+    payload = service.detect_activity()
+
+    assert payload is not None
+    assert payload["details"] == "Manual presence"
+    assert service.terminal_detector.cleaned == 1
+    assert service.terminal_detector.cleared == 0
