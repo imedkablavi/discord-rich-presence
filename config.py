@@ -1,6 +1,7 @@
 """Configuration management for Discord Rich Presence Service."""
 
 import copy
+import math
 import os
 import platform
 import re
@@ -429,7 +430,12 @@ class Config:
         if isinstance(port, bool) or not isinstance(port, int) or not (1024 <= port <= 65535):
             raise ValueError(f'{section}.port must be an integer between 1024 and 65535')
         ttl = values.get('ttl_secs', default_ttl)
-        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not (5 <= ttl <= 3600):
+        if (
+            isinstance(ttl, bool)
+            or not isinstance(ttl, (int, float))
+            or not math.isfinite(ttl)
+            or not (5 <= ttl <= 3600)
+        ):
             raise ValueError(f'{section}.ttl_secs must be between 5 and 3600 seconds')
 
     @staticmethod
@@ -460,8 +466,12 @@ class Config:
                 raise ValueError(f"Invalid privacy regex {regex!r}: {e}") from e
 
         interval = data.get('update_interval_secs', 2)
-        if isinstance(interval, bool) or not isinstance(interval, (int, float)):
-            raise ValueError('update_interval_secs must be a number')
+        if (
+            isinstance(interval, bool)
+            or not isinstance(interval, (int, float))
+            or not math.isfinite(interval)
+        ):
+            raise ValueError('update_interval_secs must be a finite number')
         if interval < 1 or interval > 3600:
             raise ValueError('update_interval_secs must be between 1 and 3600 seconds')
 
@@ -491,6 +501,7 @@ class Config:
         if (
             isinstance(companion_ttl, bool)
             or not isinstance(companion_ttl, (int, float))
+            or not math.isfinite(companion_ttl)
             or companion_ttl < 2
             or companion_ttl > 300
         ):
@@ -541,6 +552,7 @@ class Config:
         if (
             isinstance(cs2_ttl, bool)
             or not isinstance(cs2_ttl, (int, float))
+            or not math.isfinite(cs2_ttl)
             or cs2_ttl < 5
             or cs2_ttl > 300
         ):
@@ -659,7 +671,13 @@ class Config:
             raise ValueError('rules.activity_priority.custom_order cannot contain duplicates')
 
         ttl = rules.get('terminal_command_ttl_secs', 900)
-        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or ttl < 0 or ttl > 604800:
+        if (
+            isinstance(ttl, bool)
+            or not isinstance(ttl, (int, float))
+            or not math.isfinite(ttl)
+            or ttl < 0
+            or ttl > 604800
+        ):
             raise ValueError('rules.terminal_command_ttl_secs must be between 0 and 604800')
         if not isinstance(rules.get('clear_on_lock_screen', True), bool):
             raise ValueError('rules.clear_on_lock_screen must be true or false')
