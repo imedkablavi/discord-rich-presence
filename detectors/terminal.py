@@ -15,6 +15,7 @@ from config import Config
 class TerminalDetector:
     _MAX_COMMAND_CACHE_BYTES = 8192
     _MAX_COMMAND_CHARS = 2048
+    _MAX_CACHE_FUTURE_SKEW_SECS = 5
 
     TERMINALS = {
         'gnome-terminal': 'GNOME Terminal', 'konsole': 'Konsole', 'xterm': 'XTerm',
@@ -109,7 +110,10 @@ class TerminalDetector:
             return False
         try:
             age = time.time() - path.stat().st_mtime
-            return 0 <= age <= ttl
+            # Filesystems and wall clocks can report a just-written file a few
+            # milliseconds in the future, notably on Windows CI. Tolerate only
+            # a small skew; a genuinely future-dated cache entry remains stale.
+            return -self._MAX_CACHE_FUTURE_SKEW_SECS <= age <= ttl
         except OSError:
             return False
 
