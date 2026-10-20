@@ -16,7 +16,7 @@ Launcher metadata remains authoritative. Community Game Packs use exact normaliz
 
 Standard Presence can include canonical game name, launcher/source, Steam artwork or store link when available and elapsed activity time.
 
-CYBREX does not invent map, server or mode values for Tier 1 games.
+CYBREX does not invent map, server or mode values for Tier 1 games. Brawlhalla is currently Tier 1: its public API provides account/statistics data, not a trustworthy live local match-state feed. Presence identifies the running game but marks live match details unavailable rather than guessing a map or mode.
 
 ### Tier 2: bounded local metadata
 
@@ -32,7 +32,7 @@ War Thunder tactical map objects, chat and HUD/damage streams are not used. CYBR
 
 | Game / platform | Source | Live fields when available |
 | --- | --- | --- |
-| Counter-Strike 2 | Valve Game State Integration on authenticated loopback | map, mode, team and score context |
+| Counter-Strike 2 | Valve Game State Integration on authenticated loopback | map, mode, team, score and reported map phase; matchmaking queue status is not exposed |
 | League of Legends | Riot local Live Client Data API | local-player match context |
 | FiveM | optional CYBREX loopback companion | minimal server/session context |
 | Minecraft Java | optional CYBREX Fabric companion | mode and dimension; server label only when explicitly enabled |
