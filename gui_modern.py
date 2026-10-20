@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -21,6 +22,7 @@ import customtkinter as ctk
 
 from config import Config, DEFAULT_CONFIG, resolve_discord_application_id
 from runtime_state import RuntimeState
+from ui_dispatch import UIThreadDispatcher
 
 try:
     import winreg
