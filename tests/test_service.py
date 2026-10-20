@@ -119,3 +119,167 @@ def test_normal_application_is_not_treated_as_lock_screen():
         'app_name': 'code',
         'title': 'main.py - Visual Studio Code',
     }) is False
+
+
+
+def test_lock_screen_suppresses_override_presence_and_clears_terminal_cache():
+    service = _service()
+    service.config = type(
+        "ConfigStub",
+        (),
+        {"get": lambda self, key, default=None: {
+            "rules.clear_on_lock_screen": True,
+            "override.enabled": True,
+        }.get(key, default)},
+    )()
+    service._reload_config_if_changed = lambda: None
+    service.window_detector = type(
+        "WindowDetectorStub",
+        (),
+        {"get_active_window": lambda self: {
+            "app_name": "LockApp.exe",
+            "title": "Windows Default Lock Screen",
+        }},
+    )()
+
+    class TerminalCacheStub:
+        def __init__(self):
+            self.cleared = 0
+            self.cleaned = 0
+
+        def clear_command_cache(self):
+            self.cleared += 1
+
+        def cleanup_command_cache(self):
+            self.cleaned += 1
+
+    service.terminal_detector = TerminalCacheStub()
+
+    assert service.detect_activity() is None
+    assert service.terminal_detector.cleared == 1
+    assert service.terminal_detector.cleaned == 0
+
+
+def test_missing_foreground_window_triggers_terminal_cache_cleanup():
+    service = _service()
+    service.config = type(
+        "ConfigStub",
+        (),
+        {"get": lambda self, key, default=None: {
+            "rules.clear_on_lock_screen": True,
+            "override.enabled": False,
+        }.get(key, default)},
+    )()
+    service._reload_config_if_changed = lambda: None
+    service.window_detector = type(
+        "WindowDetectorStub",
+        (),
+        {"get_active_window": lambda self: None},
+    )()
+
+    class TerminalCacheStub:
+        def __init__(self):
+            self.cleaned = 0
+
+        def cleanup_command_cache(self):
+            self.cleaned += 1
+
+        def clear_command_cache(self):
+            raise AssertionError("a missing window is not proof of a lock screen")
+
+    service.terminal_detector = TerminalCacheStub()
+
+    assert service.detect_activity() is None
+    assert service.terminal_detector.cleaned == 1
+
+
+
+def test_override_presence_still_clears_cache_when_terminal_tracking_is_disabled():
+    service = _service()
+    service.config = type(
+        "ConfigStub",
+        (),
+        {"get": lambda self, key, default=None: {
+            "rules.clear_on_lock_screen": True,
+            "rules.enabled_detectors.terminal": False,
+            "override.enabled": True,
+            "override": {"details": "Manual presence"},
+            "images.app": "app",
+            "privacy.mode": "balanced",
+        }.get(key, default)},
+    )()
+    service._reload_config_if_changed = lambda: None
+    service.window_detector = type(
+        "WindowDetectorStub",
+        (),
+        {"get_active_window": lambda self: {
+            "app_name": "Firefox",
+            "title": "news",
+        }},
+    )()
+
+    class TerminalCacheStub:
+        def __init__(self):
+            self.cleared = 0
+            self.cleaned = 0
+
+        def clear_command_cache(self):
+            self.cleared += 1
+
+        def cleanup_command_cache(self):
+            self.cleaned += 1
+
+    service.terminal_detector = TerminalCacheStub()
+
+    payload = service.detect_activity()
+
+    assert payload is not None
+    assert payload["details"] == "Manual presence"
+    assert service.terminal_detector.cleared == 1
+    assert service.terminal_detector.cleaned == 0
+
+
+
+def test_override_presence_still_sweeps_terminal_cache_when_tracking_is_enabled():
+    service = _service()
+    service.config = type(
+        "ConfigStub",
+        (),
+        {"get": lambda self, key, default=None: {
+            "rules.clear_on_lock_screen": True,
+            "rules.enabled_detectors.terminal": True,
+            "override.enabled": True,
+            "override": {"details": "Manual presence"},
+            "images.app": "app",
+            "privacy.mode": "balanced",
+        }.get(key, default)},
+    )()
+    service._reload_config_if_changed = lambda: None
+    service.window_detector = type(
+        "WindowDetectorStub",
+        (),
+        {"get_active_window": lambda self: {
+            "app_name": "Firefox",
+            "title": "news",
+        }},
+    )()
+
+    class TerminalCacheStub:
+        def __init__(self):
+            self.cleared = 0
+            self.cleaned = 0
+
+        def clear_command_cache(self):
+            self.cleared += 1
+
+        def cleanup_command_cache(self):
+            self.cleaned += 1
+
+    service.terminal_detector = TerminalCacheStub()
+
+    payload = service.detect_activity()
+
+    assert payload is not None
+    assert payload["details"] == "Manual presence"
+    assert service.terminal_detector.cleaned == 1
+    assert service.terminal_detector.cleared == 0

@@ -364,7 +364,36 @@ class DiscordRichPresenceService:
     def detect_activity(self) -> Optional[Dict[str, Any]]:
         self._reload_config_if_changed()
 
-        if self.config.get('override.enabled', False):
+        # Resolve the foreground surface before building even a manual override.
+        # Lock-screen privacy is a hard gate and must not be bypassed by Override
+        # Presence. With no reported window, clean expired shell-command cache data.
+        window_info = self.window_detector.get_active_window()
+        override_enabled = bool(self.config.get('override.enabled', False))
+        terminal_enabled = bool(self.config.get('rules.enabled_detectors.terminal', True))
+        if (
+            window_info
+            and self.config.get('rules.clear_on_lock_screen', True)
+            and self._is_lock_screen_window(window_info)
+        ):
+            self.terminal_detector.clear_command_cache()
+            self.logger.debug('Lock screen detected; clearing terminal cache and suppressing presence')
+            return None
+
+        if not window_info:
+            if terminal_enabled:
+                self.terminal_detector.cleanup_command_cache()
+            else:
+                self.terminal_detector.clear_command_cache()
+        elif override_enabled and not terminal_enabled:
+            # Override Presence skips detector execution below, so honor the
+            # terminal-disabled setting here to prevent shell hooks retaining data.
+            self.terminal_detector.clear_command_cache()
+        elif override_enabled:
+            # Override Presence also skips normal detector polling; keep TTL
+            # cleanup active, especially when a zero TTL disables command caching.
+            self.terminal_detector.cleanup_command_cache()
+
+        if override_enabled:
             override = self.config.get('override', {}) or {}
             payload: Dict[str, Any] = {
                 'details': str(override.get('details', ''))[:128],
@@ -410,11 +439,7 @@ class DiscordRichPresenceService:
                     payload.pop(key, None)
             return payload
 
-        window_info = self.window_detector.get_active_window()
         if not window_info:
-            return None
-        if self.config.get('rules.clear_on_lock_screen', True) and self._is_lock_screen_window(window_info):
-            self.logger.debug('Lock screen detected; suppressing presence')
             return None
 
         app_name = str(window_info.get('app_name', '')).lower()

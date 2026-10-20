@@ -60,7 +60,7 @@ For terminal commands, values following common sensitive flags such as token, pa
 
 Uses generic activity descriptions, removes identifying browser URLs/buttons and suppresses deep game telemetry collection.
 
-The service also clears Rich Presence when a supported lock-screen state is detected.
+The service clears Rich Presence and removes raw terminal-command cache files when a supported lock-screen state is detected. Lock-screen suppression takes priority over manual Override Presence.
 
 ## Local files
 
@@ -102,6 +102,6 @@ Runtime state is used by the control panel and instance guard. It may include a 
 
 Terminal command tracking is optional. Bash, Zsh and PowerShell hooks write commands to local per-shell cache files. The detector attempts to match the focused terminal process tree before using a command entry.
 
-Raw command cache entries expire according to `rules.terminal_command_ttl_secs`; the hardened default is 900 seconds. Expired PID-scoped entries are deleted and the cache remains bounded.
+Raw command cache entries expire according to `rules.terminal_command_ttl_secs`; the hardened default is 900 seconds. Expired PID-scoped entries are deleted and the cache remains bounded. Set the TTL to `0` to disable command publication and have the running service remove cached command entries during its next detector poll. Disabling the terminal detector clears the cache even if shell hooks remain installed. Shell hooks run independently of the service, however: if their source lines remain in your Bash/Zsh or PowerShell profile, they can write local cache files while the service is stopped. To stop local command capture entirely, remove the hook source line from the shell profile.
 
 Do not enable terminal tracking on a machine where publishing command text to Discord is unacceptable, even with redaction enabled.
