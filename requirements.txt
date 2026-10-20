@@ -1,12 +1,11 @@
-# Runtime dependencies. This project targets Python 3.10+.
+# Runtime dependencies. Python 3.11+ is required for supported Pillow 13 security fixes.
 pypresence==4.6.2
 PyYAML>=6.0.3,<7
 customtkinter>=6.0.0,<7
 pystray>=0.19.5,<1
-# Pillow 12.3.0 includes fixes for the 2026 advisories affecting the older
-# 11.x line while retaining Python 3.10 support. Keep the next major release
-# out until its Python/runtime compatibility is part of the supported matrix.
-Pillow>=12.3,<13
+# Pillow 13.0.0 includes current security fixes. Pillow 13 dropped Python 3.10,
+# so the supported runtime baseline is Python 3.11+.
+Pillow>=13,<14
 psutil>=7.2.2,<8
 # Pin a current CA bundle for frozen updater HTTPS across Linux distributions.
 certifi==2026.10.19
