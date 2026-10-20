@@ -233,14 +233,42 @@ class GamingDetector:
     def _auto_configure_cs2_gsi(self) -> None:
         try:
             locations = discover_cs2_cfg_dirs()
-            if not locations:
-                return
-            install_gsi_config(self.config, locations[0])
-            self.logger.info('Counter-Strike 2 GSI integration is configured')
-        except (OSError, ValueError):
+        except OSError as exc:
+            self.logger.warning('Could not discover CS2 config directories: %s', exc)
+            return
+        if not locations:
+            self.logger.info(
+                'CS2 GSI config directory not found; use scripts/install-cs2-gsi.py '
+                'with --list to inspect Steam libraries'
+            )
+            return
+
+        # A machine can have more than one Steam library (or installation).
+        # Install the same authenticated endpoint config in every discovered
+        # CS2 cfg directory so the game cannot keep using a stale token from
+        # a different library.
+        installed = 0
+        for location in locations:
+            try:
+                install_gsi_config(self.config, location)
+                installed += 1
+            except (OSError, ValueError) as exc:
+                self.logger.warning(
+                    'Could not configure CS2 GSI in %s: %s',
+                    location,
+                    exc,
+                )
+
+        if installed:
+            self.logger.info(
+                'Counter-Strike 2 GSI configured in %d install location(s). '
+                'Restart CS2 if it was already running.',
+                installed,
+            )
+        else:
             self.logger.warning(
-                'Counter-Strike 2 GSI auto-setup could not write the game config; '
-                'use scripts/install-cs2-gsi.py for manual setup'
+                'CS2 GSI auto-setup could not write any game config; '
+                'use scripts/install-cs2-gsi.py --list to inspect detected locations'
             )
 
     def detect(self, window_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
