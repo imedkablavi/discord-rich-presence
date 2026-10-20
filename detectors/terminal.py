@@ -13,6 +13,9 @@ from config import Config
 
 
 class TerminalDetector:
+    _MAX_COMMAND_CACHE_BYTES = 8192
+    _MAX_COMMAND_CHARS = 2048
+
     TERMINALS = {
         'gnome-terminal': 'GNOME Terminal', 'konsole': 'Konsole', 'xterm': 'XTerm',
         'kitty': 'Kitty', 'alacritty': 'Alacritty', 'terminator': 'Terminator',
@@ -93,14 +96,19 @@ class TerminalDetector:
     @staticmethod
     def _read_command(path: Path) -> str:
         try:
-            command = path.read_text(encoding='utf-8', errors='replace').strip()
+            # Cache files are local runtime data, but they can be stale or
+            # corrupted. Bound bytes read before decoding instead of loading an
+            # arbitrarily large file into memory and truncating only afterwards.
+            with path.open('rb') as stream:
+                raw = stream.read(TerminalDetector._MAX_COMMAND_CACHE_BYTES)
+            command = raw.decode('utf-8', errors='replace').strip()
         except OSError:
             return ''
         if len(command) <= 1:
             return ''
         if 'rp_last_cmd' in command or '__drp_' in command or 'Write-DrpCommandCache' in command:
             return ''
-        return command[:2048]
+        return command[:TerminalDetector._MAX_COMMAND_CHARS]
 
     def _candidate_process_ids(self, window_pid: Any) -> set[int]:
         try:
