@@ -71,6 +71,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             scrollbar_button_hover_color=("#AAB9CB", "#475569"),
         )
         sidebar.grid(row=0, column=0, sticky="nsew")
+        sidebar.grid_columnconfigure(0, weight=1)
         sidebar.grid_rowconfigure(9, weight=1)
 
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -206,7 +207,7 @@ class ModernControlPanel(ResourceAwareControlPanel):
             variable=self.appearance_var,
             values=["System", "Light", "Dark"],
             command=self._on_appearance_changed,
-            width=max(120, sidebar_width - 36),
+            width=max(100, sidebar_width - 44),
             height=36,
             corner_radius=9,
             fg_color=self.SURFACE_ALT,
@@ -221,9 +222,10 @@ class ModernControlPanel(ResourceAwareControlPanel):
             footer,
             text="",
             text_color=self.MUTED,
-            font=self._font(10),
+            font=self._font(9 if compact_sidebar else 10),
             anchor="w",
-            height=14,
+            wraplength=max(100, sidebar_width - 44),
+            height=24 if compact_sidebar else 14,
         )
         self.appearance_status.pack(fill="x", padx=2, pady=(0, 7))
         ctk.CTkButton(
@@ -231,7 +233,8 @@ class ModernControlPanel(ResourceAwareControlPanel):
             text="Save changes",
             image=icon("settings", 16),
             compound="left",
-            font=self._font(13, "bold"),
+            width=max(110, sidebar_width - 38),
+            font=self._font(13 if compact_sidebar else 13, "bold"),
             height=40,
             corner_radius=10,
             fg_color=self.PRIMARY,
