@@ -87,3 +87,28 @@ def test_gui_single_instance_lock_blocks_duplicate_process(tmp_path):
 
     assert second.acquire() is True
     second.release()
+
+
+
+def test_runtime_service_class_resolution_prefers_direct_main_entrypoint(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    from resource_hardening import _runtime_service_classes
+
+    entrypoint = ModuleType("__main__")
+
+    class DirectService:
+        pass
+
+    class DirectBuilder:
+        pass
+
+    entrypoint.DiscordRichPresenceService = DirectService
+    entrypoint.PresenceBuilder = DirectBuilder
+    monkeypatch.setitem(sys.modules, "__main__", entrypoint)
+
+    service_cls, builder_cls = _runtime_service_classes()
+
+    assert service_cls is DirectService
+    assert builder_cls is DirectBuilder
