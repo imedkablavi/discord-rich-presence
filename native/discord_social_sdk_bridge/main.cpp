@@ -23,6 +23,10 @@ using Fields = std::unordered_map<std::string, std::string>;
 struct UpdateCallbackState {
     std::atomic<bool> finished{false};
     std::atomic<bool> successful{false};
+    std::string error;
+    std::int32_t error_type{0};
+    std::int32_t error_code{0};
+    std::int32_t http_status{0};
 };
 
 enum class ReadStatus { Line, TooLong, Eof };
@@ -137,22 +141,59 @@ bool valid_update_fields(const Fields& fields) {
     return true;
 }
 
-void print_ok() { std::cout << "OK\n" << std::flush; }
-void print_error(const char* code) {
-    std::cout << "ERR\tcode=" << code << "\n" << std::flush;
+std::string percent_encode(const std::string& value) {
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    std::string encoded;
+    encoded.reserve(value.size());
+    for (const unsigned char ch : value) {
+        const bool unreserved =
+            (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+            (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
+            ch == '.' || ch == '~';
+        if (unreserved) {
+            encoded.push_back(static_cast<char>(ch));
+        } else {
+            encoded.push_back('%');
+            encoded.push_back(kHex[(ch >> 4) & 0x0F]);
+            encoded.push_back(kHex[ch & 0x0F]);
+        }
+    }
+    return encoded;
 }
 
-ApplyResult apply_activity(const std::shared_ptr<discordpp::Client>& client, const Fields& fields) {
-    if (!valid_update_fields(fields)) return ApplyResult::Failed;
+void print_ok() { std::cout << "OK\n" << std::flush; }
+void print_error(const char* code, const std::string& message = {}) {
+    std::cout << "ERR\tcode=" << code;
+    if (!message.empty()) {
+        std::cout << "\tmessage=" << percent_encode(message.substr(0, 512));
+    }
+    std::cout << "\n" << std::flush;
+}
+
+ApplyResult apply_activity(
+    const std::shared_ptr<discordpp::Client>& client,
+    const Fields& fields,
+    std::string& error_detail
+) {
+    if (!valid_update_fields(fields)) {
+        error_detail = "invalid or unsupported activity update field";
+        return ApplyResult::Failed;
+    }
     const std::string* name = field(fields, "name");
-    if (!name || name->size() < 2 || name->size() > 128) return ApplyResult::Failed;
+    if (!name || name->size() < 2 || name->size() > 128) {
+        error_detail = "missing or invalid activity name";
+        return ApplyResult::Failed;
+    }
 
     discordpp::Activity activity{};
     activity.SetName(*name);
 
     if (const auto* raw = field(fields, "activity_type")) {
         auto parsed = parse_int(*raw);
-        if (!parsed || *parsed < 0 || *parsed > 6) return ApplyResult::Failed;
+        if (!parsed || *parsed < 0 || *parsed > 6) {
+            error_detail = "invalid activity_type value";
+            return ApplyResult::Failed;
+        }
         activity.SetType(static_cast<discordpp::ActivityTypes>(*parsed));
     }
     if (const auto* value = field(fields, "details")) activity.SetDetails(*value);
@@ -180,12 +221,18 @@ ApplyResult apply_activity(const std::shared_ptr<discordpp::Client>& client, con
         discordpp::ActivityTimestamps timestamps{};
         if (start_raw) {
             auto value = parse_u64(*start_raw);
-            if (!value) return ApplyResult::Failed;
+            if (!value) {
+                error_detail = "invalid activity start timestamp";
+                return ApplyResult::Failed;
+            }
             timestamps.SetStart(*value);
         }
         if (end_raw) {
             auto value = parse_u64(*end_raw);
-            if (!value) return ApplyResult::Failed;
+            if (!value) {
+                error_detail = "invalid activity end timestamp";
+                return ApplyResult::Failed;
+            }
             timestamps.SetEnd(*value);
         }
         activity.SetTimestamps(timestamps);
@@ -197,7 +244,10 @@ ApplyResult apply_activity(const std::shared_ptr<discordpp::Client>& client, con
         const auto* label = field(fields, label_key.c_str());
         const auto* url = field(fields, url_key.c_str());
         if (!label && !url) continue;
-        if (!label || !url) return ApplyResult::Failed;
+        if (!label || !url) {
+            error_detail = "activity button requires both label and URL";
+            return ApplyResult::Failed;
+        }
         discordpp::ActivityButton button{};
         button.SetLabel(*label);
         button.SetUrl(*url);
@@ -210,6 +260,15 @@ ApplyResult apply_activity(const std::shared_ptr<discordpp::Client>& client, con
     // memory that has already gone out of scope.
     auto callback_state = std::make_shared<UpdateCallbackState>();
     client->UpdateRichPresence(std::move(activity), [callback_state](discordpp::ClientResult result) {
+        if (!result.Successful()) {
+            callback_state->error = result.ToString();
+            if (callback_state->error.empty()) {
+                callback_state->error = result.Error();
+            }
+            callback_state->error_type = static_cast<std::int32_t>(result.Type());
+            callback_state->error_code = result.ErrorCode();
+            callback_state->http_status = static_cast<std::int32_t>(result.Status());
+        }
         callback_state->successful.store(result.Successful(), std::memory_order_relaxed);
         callback_state->finished.store(true, std::memory_order_release);
     });
@@ -221,10 +280,21 @@ ApplyResult apply_activity(const std::shared_ptr<discordpp::Client>& client, con
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     discordpp::RunCallbacks();
-    if (!callback_state->finished.load(std::memory_order_acquire)) return ApplyResult::TimedOut;
-    return callback_state->successful.load(std::memory_order_relaxed)
-        ? ApplyResult::Success
-        : ApplyResult::Failed;
+    if (!callback_state->finished.load(std::memory_order_acquire)) {
+        error_detail = "Discord Social SDK update callback timed out";
+        return ApplyResult::TimedOut;
+    }
+    if (!callback_state->successful.load(std::memory_order_relaxed)) {
+        error_detail = callback_state->error.empty()
+            ? "Discord Social SDK rejected the activity without an error message"
+            : callback_state->error;
+        error_detail += " [type=" + std::to_string(callback_state->error_type) +
+            ", error_code=" + std::to_string(callback_state->error_code) +
+            ", http_status=" + std::to_string(callback_state->http_status) + "]";
+        if (error_detail.size() > 512) error_detail.resize(512);
+        return ApplyResult::Failed;
+    }
+    return ApplyResult::Success;
 }
 
 std::shared_ptr<discordpp::Client> make_client(std::uint64_t application_id) {
@@ -288,7 +358,8 @@ int main() {
                 print_error("application_not_set");
                 continue;
             }
-            const ApplyResult result = apply_activity(client, fields);
+            std::string error_detail;
+            const ApplyResult result = apply_activity(client, fields, error_detail);
             if (result == ApplyResult::Success) {
                 print_ok();
             } else if (result == ApplyResult::TimedOut) {
@@ -298,7 +369,7 @@ int main() {
                 client = make_client(*application_id);
                 print_error("update_timeout");
             } else {
-                print_error("update_failed");
+                print_error("update_failed", error_detail);
             }
             continue;
         }
