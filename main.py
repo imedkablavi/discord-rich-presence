@@ -677,6 +677,13 @@ def _install_signal_handlers(service: DiscordRichPresenceService) -> None:
 
 
 def main():
+    # The GUI starts this module directly as a child process. Apply the same
+    # runtime hardening as launcher.py so dynamic Discord identity and bounded
+    # loopback workers are enabled on every supported entry path.
+    from resource_hardening import apply_resource_hardening
+
+    apply_resource_hardening()
+
     parser = argparse.ArgumentParser(description='Discord Rich Presence Service')
     parser.add_argument('--config', type=Path, default=None, help='Path to configuration file')
     parser.add_argument(
