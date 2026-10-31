@@ -216,8 +216,10 @@ class SocialSDKPresence:
                 return fields
             if op == "ERR":
                 code = str(fields.get("code") or "unknown_error")[:80]
+                detail = str(fields.get("message") or "").strip()[:512]
+                suffix = f": {detail}" if detail else ""
                 raise SocialSDKError(
-                    f"Discord Social SDK helper rejected command: {code}"
+                    f"Discord Social SDK helper rejected command: {code}{suffix}"
                 )
             raise SocialSDKError(
                 f"unexpected Discord Social SDK helper response: {op[:32]}"
