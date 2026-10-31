@@ -80,13 +80,34 @@ def _patch_pypresence_cleanup() -> None:
     pypresence.Presence = ResourceSafePresence
 
 
-def _patch_dynamic_discord_identity() -> None:
-    """Enable Social SDK dynamic activity names while preserving legacy fallback."""
-    from dynamic_identity import apply_dynamic_identity
+def _runtime_service_classes():
+    """Resolve service classes for imported and direct main.py runs."""
+    import sys
+
+    # The control panel starts main.py as a child script. In that process the
+    # service classes live in __main__, not in an imported module named main.
+    # Prefer that live module so the patch affects the class instantiated by
+    # the current process.
+    for module_name in ("__main__", "main"):
+        module = sys.modules.get(module_name)
+        service_cls = getattr(module, "DiscordRichPresenceService", None)
+        builder_cls = getattr(module, "PresenceBuilder", None)
+        if isinstance(service_cls, type) and isinstance(builder_cls, type):
+            return service_cls, builder_cls
+
+    # Fallback for callers that apply hardening before importing main.
     from main import DiscordRichPresenceService
     from presence import PresenceBuilder
 
-    apply_dynamic_identity(DiscordRichPresenceService, PresenceBuilder)
+    return DiscordRichPresenceService, PresenceBuilder
+
+
+def _patch_dynamic_discord_identity() -> None:
+    """Enable Social SDK dynamic activity names while preserving legacy fallback."""
+    from dynamic_identity import apply_dynamic_identity
+
+    service_cls, builder_cls = _runtime_service_classes()
+    apply_dynamic_identity(service_cls, builder_cls)
 
 
 def apply_resource_hardening() -> None:
