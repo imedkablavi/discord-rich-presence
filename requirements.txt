@@ -8,12 +8,12 @@ pystray>=0.19.5,<1
 Pillow>=13,<14
 psutil>=7.2.2,<8
 # Pin a current CA bundle for frozen updater HTTPS across Linux distributions.
-certifi==2026.10.19
+certifi==2026.10.23
 
 # Cross-platform Arabic shaping/BiDi for Tk-based UI text. Tk rendering on
 # several Linux desktop stacks does not shape or order Arabic consistently.
 arabic-reshaper>=3.0.1,<4
-python-bidi>=0.6.11,<1
+python-bidi>=0.6.12,<1
 
 # Linux native media discovery intentionally uses the external `playerctl`
 # command when available. We do not bundle pydbus/GLib proxies into the long-
