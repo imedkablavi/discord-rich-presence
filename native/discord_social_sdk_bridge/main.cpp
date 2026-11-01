@@ -5,6 +5,8 @@
 #include <chrono>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -299,6 +301,29 @@ ApplyResult apply_activity(
 
 std::shared_ptr<discordpp::Client> make_client(std::uint64_t application_id) {
     auto client = std::make_shared<discordpp::Client>();
+
+    // Discord Social SDK logging is disabled by default. Enable verbose local
+    // diagnostics only when explicitly requested, so normal installations do
+    // not create persistent logs or collect extra runtime data.
+    const char* log_dir = std::getenv("CYBREX_SOCIAL_SDK_LOG_DIR");
+    if (log_dir && *log_dir) {
+        std::error_code filesystem_error;
+        std::filesystem::create_directories(log_dir, filesystem_error);
+        if (!filesystem_error) {
+            const bool logging_enabled = client->SetLogDir(
+                log_dir,
+                discordpp::LoggingSeverity::Verbose
+            );
+            if (!logging_enabled) {
+                std::cerr << "[social-sdk] Could not open SDK log directory"
+                          << std::endl;
+            }
+        } else {
+            std::cerr << "[social-sdk] Could not create SDK log directory: "
+                      << filesystem_error.message() << std::endl;
+        }
+    }
+
     client->SetApplicationId(application_id);
     return client;
 }
