@@ -302,11 +302,20 @@ ApplyResult apply_activity(
 std::shared_ptr<discordpp::Client> make_client(std::uint64_t application_id) {
     auto client = std::make_shared<discordpp::Client>();
 
-    // Discord Social SDK logging is disabled by default. Enable verbose local
-    // diagnostics only when explicitly requested, so normal installations do
-    // not create persistent logs or collect extra runtime data.
+    // Discord Social SDK diagnostics are opt-in. The callback writes only to
+    // stderr because stdout is reserved for the helper's line-based protocol.
+    // CYBREX_SOCIAL_SDK_LOG_DIR enables both callback and file diagnostics.
     const char* log_dir = std::getenv("CYBREX_SOCIAL_SDK_LOG_DIR");
     if (log_dir && *log_dir) {
+        client->AddLogCallback(
+            [](std::string message, discordpp::LoggingSeverity severity) {
+                std::cerr << "[discord-social-sdk][severity="
+                          << static_cast<int>(severity) << "] "
+                          << message << std::endl;
+            },
+            discordpp::LoggingSeverity::Verbose
+        );
+
         std::error_code filesystem_error;
         std::filesystem::create_directories(log_dir, filesystem_error);
         if (!filesystem_error) {
@@ -315,11 +324,11 @@ std::shared_ptr<discordpp::Client> make_client(std::uint64_t application_id) {
                 discordpp::LoggingSeverity::Verbose
             );
             if (!logging_enabled) {
-                std::cerr << "[social-sdk] Could not open SDK log directory"
-                          << std::endl;
+                std::cerr << "[discord-social-sdk] SetLogDir failed for '"
+                          << log_dir << "'" << std::endl;
             }
         } else {
-            std::cerr << "[social-sdk] Could not create SDK log directory: "
+            std::cerr << "[discord-social-sdk] Could not create SDK log directory: "
                       << filesystem_error.message() << std::endl;
         }
     }
