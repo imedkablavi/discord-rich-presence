@@ -73,3 +73,15 @@ def test_auto_social_sdk_failure_has_retry_cooldown_and_legacy_failover():
     # existing sanitized legacy path rather than spawning a helper every loop.
     assert "if not result and isinstance(active_rpc, SocialSDKPresence):" in source
     assert source.count("result = original_update_presence(self, payload)") >= 2
+
+
+def test_native_bridge_preserves_sdk_update_error_details():
+    native = (
+        ROOT / "native" / "discord_social_sdk_bridge" / "main.cpp"
+    ).read_text(encoding="utf-8")
+    transport = (ROOT / "social_sdk_transport.py").read_text(encoding="utf-8")
+
+    assert "result.ToString()" in native
+    assert "result.ErrorCode()" in native
+    assert "result.Status()" in native
+    assert 'fields.get("message")' in transport
