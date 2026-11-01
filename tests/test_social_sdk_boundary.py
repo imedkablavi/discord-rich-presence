@@ -87,9 +87,6 @@ def test_native_bridge_preserves_sdk_update_error_details():
     assert 'fields.get("message")' in transport
 
 
-
-
-
 def test_native_bridge_supports_opt_in_sdk_log_callback_and_file_logging():
     source = (
         ROOT / "native" / "discord_social_sdk_bridge" / "main.cpp"
@@ -103,7 +100,10 @@ def test_native_bridge_supports_opt_in_sdk_log_callback_and_file_logging():
 
 def test_helper_stderr_is_visible_only_when_sdk_diagnostics_are_enabled(monkeypatch):
     monkeypatch.delenv("CYBREX_SOCIAL_SDK_LOG_DIR", raising=False)
-    assert social_sdk_transport._helper_stderr_target() is social_sdk_transport.subprocess.DEVNULL
+    assert (
+        social_sdk_transport._helper_stderr_target()
+        is social_sdk_transport.subprocess.DEVNULL
+    )
 
     monkeypatch.setenv("CYBREX_SOCIAL_SDK_LOG_DIR", "/tmp/cybrex-sdk-logs")
     assert social_sdk_transport._helper_stderr_target() is None
