@@ -85,3 +85,12 @@ def test_native_bridge_preserves_sdk_update_error_details():
     assert "result.ErrorCode()" in native
     assert "result.Status()" in native
     assert 'fields.get("message")' in transport
+
+
+def test_native_bridge_supports_opt_in_sdk_file_logging():
+    source = (
+        ROOT / "native" / "discord_social_sdk_bridge" / "main.cpp"
+    ).read_text(encoding="utf-8")
+    assert 'std::getenv("CYBREX_SOCIAL_SDK_LOG_DIR")' in source
+    assert "client->SetLogDir(" in source
+    assert "discordpp::LoggingSeverity::Verbose" in source
