@@ -58,6 +58,8 @@ A developer can also explicitly point CYBREX to a locally built helper with:
 export CYBREX_DISCORD_SOCIAL_SDK_HELPER=/absolute/path/to/cybrex-discord-social-sdk
 ```
 
+For opt-in diagnostics, set `CYBREX_SOCIAL_SDK_LOG_DIR` to a writable directory. The helper registers `Client::AddLogCallback`, writes callback messages to stderr, and asks the SDK to write `discord.log` in that directory. The Python transport inherits helper stderr only while this variable is set; otherwise helper stderr remains suppressed. Stdout is reserved for the private helper protocol.
+
 On Linux, keep `libdiscord_partner_sdk.so` next to the helper. On Windows, keep `discord_partner_sdk.dll` next to the helper executable.
 
 ## Release requirement
