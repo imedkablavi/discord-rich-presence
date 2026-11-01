@@ -89,6 +89,13 @@ def social_sdk_available() -> bool:
     return discover_social_sdk_helper() is not None
 
 
+def _helper_stderr_target():
+    """Expose native diagnostics only when local SDK logging is explicitly enabled."""
+    if os.environ.get("CYBREX_SOCIAL_SDK_LOG_DIR", "").strip():
+        return None
+    return subprocess.DEVNULL
+
+
 class SocialSDKPresence:
     """Small pypresence-like adapter backed by the optional native helper."""
 
@@ -133,7 +140,7 @@ class SocialSDKPresence:
         kwargs: dict[str, Any] = {
             "stdin": subprocess.PIPE,
             "stdout": subprocess.PIPE,
-            "stderr": subprocess.DEVNULL,
+            "stderr": _helper_stderr_target(),
             "text": True,
             "encoding": "utf-8",
             "errors": "strict",
