@@ -43,6 +43,29 @@ def _setup_message(message: str, *, error: bool = False) -> None:
             pass
 
 
+def _tk_support_hint() -> str:
+    """Explain how to add Tk to a Linux Python interpreter."""
+    return (
+        "CYBREX's source GUI requires Tk support in the selected Python interpreter.\n\n"
+        "Install the operating-system Tk package (it is not a pip dependency):\n"
+        "  Fedora / Nobara: sudo dnf install python3-tkinter\n"
+        "  Bazzite / Fedora Atomic: rpm-ostree install python3-tkinter, then reboot\n"
+        "  Debian / Ubuntu: sudo apt install python3-tk\n\n"
+        "Verify Tk with: python -m tkinter\n"
+        "Linuxbrew/Homebrew Python may be built without _tkinter. Create the "
+        "virtual environment with your distribution's Python (for example "
+        "/usr/bin/python3), then reinstall requirements.txt."
+    )
+
+
+def _handle_missing_tk(exc: ModuleNotFoundError) -> bool:
+    """Show actionable setup guidance only for a missing Tk runtime."""
+    if exc.name not in {"tkinter", "_tkinter"}:
+        return False
+    _setup_message(_tk_support_hint(), error=True)
+    return True
+
+
 def _handle_cs2_setup_command() -> Optional[int]:
     if '--install-cs2-gsi' not in sys.argv:
         return None
@@ -182,6 +205,11 @@ def _handle_game_library_command() -> Optional[int]:
         app = GameLibraryWindow(Config())
         app.mainloop()
         return 0
+    except ModuleNotFoundError as exc:
+        if _handle_missing_tk(exc):
+            return 1
+        _setup_message(f'Could not open Game Library: {exc}', error=True)
+        return 1
     except Exception as exc:
         _setup_message(f'Could not open Game Library: {exc}', error=True)
         return 1
@@ -210,7 +238,12 @@ def main() -> int:
         sys.argv.remove('--gui')
         from config import Config
         from gui_instance import GUIInstanceLock
-        from gui_modern_v4 import ModernControlPanel
+        try:
+            from gui_modern_v4 import ModernControlPanel
+        except ModuleNotFoundError as exc:
+            if _handle_missing_tk(exc):
+                return 1
+            raise
 
         gui_lock = GUIInstanceLock()
         if not gui_lock.acquire():

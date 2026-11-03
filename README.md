@@ -222,6 +222,26 @@ python -m pip install -r requirements.txt
 python launcher.py --gui
 ```
 
+Linux GUI prerequisite:
+
+The source GUI uses CustomTkinter, which requires the operating-system Tk runtime.
+Installing Python packages from `requirements.txt` does not install Tk itself.
+
+- Fedora / Nobara: `sudo dnf install python3-tkinter`
+- Bazzite / Fedora Atomic: `rpm-ostree install python3-tkinter`, then reboot
+- Debian / Ubuntu: `sudo apt install python3-tk`
+
+Check that the selected interpreter has Tk before creating the virtual environment:
+
+```bash
+python3 -m tkinter
+```
+
+If this fails with `No module named tkinter` or `No module named _tkinter`,
+use a distribution-provided Python interpreter (for example `/usr/bin/python3`).
+Linuxbrew/Homebrew Python builds may not include Tk support. Create the virtual
+environment with the same Tk-enabled interpreter you verified above.
+
 Linux:
 
 ```bash
