@@ -19,6 +19,7 @@ from game_library import (
     set_gamer_mode,
     scan_library_safely,
 )
+from ui_layout import control_panel_geometry
 
 
 class GameLibraryWindow(ctk.CTk):
@@ -42,8 +43,20 @@ class GameLibraryWindow(ctk.CTk):
         self.protocol('WM_DELETE_WINDOW', self._on_close)
 
         self.title('CYBREX Game Library')
-        self.geometry('940x680')
-        self.minsize(760, 540)
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        geometry = control_panel_geometry(screen_width, screen_height)
+        window_width = min(940, geometry.width)
+        window_height = min(680, geometry.height)
+        window_x = max(0, (screen_width - window_width) // 2)
+        window_y = max(0, (screen_height - window_height) // 2)
+        self._compact_layout = window_width < 900
+        self._window_width = window_width
+        self.minsize(min(560, window_width), min(360, window_height))
+        self.geometry(
+            f'{window_width}x{window_height}+{window_x}+{window_y}'
+        )
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
@@ -54,14 +67,27 @@ class GameLibraryWindow(ctk.CTk):
         ctk.CTkLabel(
             header,
             text='Game Library',
-            font=ctk.CTkFont(size=26, weight='bold'),
+            font=ctk.CTkFont(size=22 if self._compact_layout else 26, weight='bold'),
             anchor='w',
-        ).grid(row=0, column=0, padx=24, pady=(18, 2), sticky='ew')
+        ).grid(
+            row=0, column=0,
+            padx=16 if self._compact_layout else 24,
+            pady=(14, 2) if self._compact_layout else (18, 2),
+            sticky='ew',
+        )
         ctk.CTkLabel(
             header,
             text='Local Steam, Epic and Heroic games. Disabled games are never published to Discord.',
             anchor='w',
-        ).grid(row=1, column=0, padx=24, pady=(0, 18), sticky='ew')
+            justify='left',
+            wraplength=max(180, window_width - 48),
+            font=ctk.CTkFont(size=12 if self._compact_layout else 13),
+        ).grid(
+            row=1, column=0,
+            padx=16 if self._compact_layout else 24,
+            pady=(0, 10) if self._compact_layout else (0, 18),
+            sticky='ew',
+        )
 
         self.gamer_mode_var = ctk.BooleanVar(value=gamer_mode_enabled(self.config))
         self.gamer_mode = ctk.CTkSwitch(
@@ -70,7 +96,15 @@ class GameLibraryWindow(ctk.CTk):
             variable=self.gamer_mode_var,
             command=self._toggle_gamer_mode,
         )
-        self.gamer_mode.grid(row=0, column=1, rowspan=2, padx=24, pady=18, sticky='e')
+        if self._compact_layout:
+            self.gamer_mode.grid(
+                row=2, column=0, columnspan=2,
+                padx=16, pady=(0, 12), sticky='w',
+            )
+        else:
+            self.gamer_mode.grid(
+                row=0, column=1, rowspan=2, padx=24, pady=18, sticky='e'
+            )
 
         toolbar = ctk.CTkFrame(self, corner_radius=0)
         toolbar.grid(row=1, column=0, sticky='ew')
@@ -84,7 +118,12 @@ class GameLibraryWindow(ctk.CTk):
             placeholder_text='Search games or launcher…',
             height=38,
         )
-        self.search.grid(row=0, column=0, padx=(24, 12), pady=12, sticky='ew')
+        self.search.grid(
+            row=0, column=0,
+            padx=(16, 8) if self._compact_layout else (24, 12),
+            pady=10 if self._compact_layout else 12,
+            sticky='ew',
+        )
 
         self.refresh_button = ctk.CTkButton(
             toolbar,
@@ -92,7 +131,11 @@ class GameLibraryWindow(ctk.CTk):
             width=100,
             command=self.refresh_library,
         )
-        self.refresh_button.grid(row=0, column=1, padx=(0, 24), pady=12)
+        self.refresh_button.grid(
+            row=0, column=1,
+            padx=(0, 16) if self._compact_layout else (0, 24),
+            pady=10 if self._compact_layout else 12,
+        )
 
         self.list_frame = ctk.CTkScrollableFrame(self, corner_radius=0)
         self.list_frame.grid(row=2, column=0, sticky='nsew')
@@ -101,8 +144,19 @@ class GameLibraryWindow(ctk.CTk):
         footer = ctk.CTkFrame(self, corner_radius=0)
         footer.grid(row=3, column=0, sticky='ew')
         footer.grid_columnconfigure(0, weight=1)
-        self.status = ctk.CTkLabel(footer, text='Scanning local game libraries…', anchor='w')
-        self.status.grid(row=0, column=0, padx=24, pady=12, sticky='ew')
+        self.status = ctk.CTkLabel(
+            footer,
+            text='Scanning local game libraries…',
+            anchor='w',
+            justify='left',
+            wraplength=max(180, window_width - 48),
+        )
+        self.status.grid(
+            row=0, column=0,
+            padx=16 if self._compact_layout else 24,
+            pady=10 if self._compact_layout else 12,
+            sticky='ew',
+        )
 
         self.after(80, self.refresh_library)
         self.after(100, self._poll_refresh_results)
@@ -191,31 +245,51 @@ class GameLibraryWindow(ctk.CTk):
 
         for row_index, entry in enumerate(entries):
             row = ctk.CTkFrame(self.list_frame)
-            row.grid(row=row_index, column=0, padx=12, pady=5, sticky='ew')
+            row.grid(
+                row=row_index, column=0,
+                padx=8 if self._compact_layout else 12,
+                pady=4 if self._compact_layout else 5,
+                sticky='ew',
+            )
             row.grid_columnconfigure(0, weight=1)
 
             ctk.CTkLabel(
                 row,
                 text=entry.name,
-                font=ctk.CTkFont(size=15, weight='bold'),
+                font=ctk.CTkFont(size=14 if self._compact_layout else 15, weight='bold'),
                 anchor='w',
-            ).grid(row=0, column=0, padx=(16, 8), pady=(11, 1), sticky='ew')
+            ).grid(
+                row=0, column=0,
+                padx=(12, 6) if self._compact_layout else (16, 8),
+                pady=(9, 1) if self._compact_layout else (11, 1),
+                sticky='ew',
+            )
 
             badge = 'Enhanced' if entry.enhanced else 'Standard'
             ctk.CTkLabel(
                 row,
                 text=f'{entry.source} · {badge}',
                 anchor='w',
-            ).grid(row=1, column=0, padx=(16, 8), pady=(0, 11), sticky='ew')
+            ).grid(
+                row=1, column=0,
+                padx=(12, 6) if self._compact_layout else (16, 8),
+                pady=(0, 9) if self._compact_layout else (0, 11),
+                sticky='ew',
+            )
 
             enabled_var = ctk.BooleanVar(value=is_game_enabled(self.config, entry.name))
             toggle = ctk.CTkSwitch(
                 row,
-                text='Discord Presence',
+                text='Presence' if self._compact_layout else 'Discord Presence',
                 variable=enabled_var,
                 command=lambda e=entry, v=enabled_var: self._toggle_game(e, v),
             )
-            toggle.grid(row=0, column=1, rowspan=2, padx=16, pady=11, sticky='e')
+            toggle.grid(
+                row=0, column=1, rowspan=2,
+                padx=8 if self._compact_layout else 16,
+                pady=9 if self._compact_layout else 11,
+                sticky='e',
+            )
 
     def _toggle_game(self, entry: GameLibraryEntry, variable: ctk.BooleanVar) -> None:
         desired = bool(variable.get())
