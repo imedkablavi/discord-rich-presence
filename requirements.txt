@@ -12,7 +12,7 @@ certifi==2026.10.23
 
 # Cross-platform Arabic shaping/BiDi for Tk-based UI text. Tk rendering on
 # several Linux desktop stacks does not shape or order Arabic consistently.
-arabic-reshaper>=3.0.1,<4
+arabic-reshaper>=3.1.0,<4
 python-bidi>=0.6.12,<1
 
 # Linux native media discovery intentionally uses the external `playerctl`
