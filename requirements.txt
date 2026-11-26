@@ -1,6 +1,6 @@
 # Runtime dependencies. Python 3.11+ is required for supported Pillow 13 security fixes.
 pypresence==4.6.2
-PyYAML>=6.0.3,<7
+PyYAML>=6.0.4,<7
 customtkinter>=6.0.0,<7
 pystray>=0.19.5,<1
 # Pillow 13.0.0 includes current security fixes. Pillow 13 dropped Python 3.10,
@@ -8,7 +8,7 @@ pystray>=0.19.5,<1
 Pillow>=13,<14
 psutil>=7.2.2,<8
 # Pin a current CA bundle for frozen updater HTTPS across Linux distributions.
-certifi==2026.10.23
+certifi==2026.11.20
 
 # Cross-platform Arabic shaping/BiDi for Tk-based UI text. Tk rendering on
 # several Linux desktop stacks does not shape or order Arabic consistently.
